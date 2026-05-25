@@ -77,14 +77,15 @@ cd_sbi/                          # repo root (existing)
 │   ├── methods/                 # CDSBIRunner + NPE/NLE/NRE/LF2I wrappers; each returns
 │   │                            #   a ConfidenceProcedure
 │   ├── confidence_set/          # 1D root-finder + HPD extractor; ConfidenceSet datatype
-│   ├── diagnostics/             # 5 diagnostics; (1–4) consume a pivot, (5) consumes
-│   │                            #   any ConfidenceProcedure
+│   ├── diagnostics/             # 4 diagnostics in v0 (1, 2, 3 consume a pivot;
+│   │                            #   5 consumes any ConfidenceProcedure);
+│   │                            #   JointMahalanobis (diagnostic 4) lands v1
 │   ├── reproducibility/         # seeding, env capture, atomic run-dir writes
 │   ├── device.py                # GPU-with-CPU-fallback resolution
 │   ├── experiments/             # Hydra-driven CLI entrypoint + run logic
 │   └── analysis/                # run-dir loaders, paper-table & figure generators
 ├── configs/                     # Hydra config groups (yaml)
-├── tests/                       # unit / integration / diagnostics / ablation / intensive
+├── tests/                       # unit / integration / diagnostics / intensive (ablation lands v3)
 ├── notebooks/                   # exploratory + paper-table notebooks (consumers, not orchestrators)
 ├── outputs/                     # run dirs (created by Hydra at runtime; gitignored)
 └── docs/                        # specs, design notes, plans
@@ -154,7 +155,7 @@ flows.
 | Layer | Interface | v0 implementation(s) |
 |---|---|---|
 | `Simulator` | `sample(n, rng) → (θ, X)`; optional `r_star(θ, X)`, `log_prob(X\|θ)`, `entropy_lower_bound()` | `LocationNormal1D` (with closed-form entropy `½ log(2πe)`) |
-| `Flow` | `forward(θ, context) → (r, log_det_jac_input)`; `n_params()`; `monotonicity_guarantees: frozenset[{R1, R2}]` | `AdditiveFlow1D` (advertises `{R1, R2}`), `JointUMNN1DFlow` (advertises `{R1}` only — the v0-1D ablation form), `MAFAdapter` (advertises `frozenset()`, used by NPE/NLE/LF2I baselines) |
+| `Flow` | `forward(θ, context) → (r, log_det_jac_input)`; `n_params()`; `monotonicity_guarantees: frozenset[{R1, R2}]` | `AdditiveFlow1D` (advertises `{R1, R2}`), `MAFAdapter` (advertises `frozenset()`, used by NPE/NLE/LF2I baselines) |
 | `Conditioner` | `encode(X) → (context_vec, log_det_jac_input_contribution)` | `Identity` (returns `(X, 0)`) |
 | `Loss` | `__call__(flow_out, θ, X) → scalar`; `required_guarantees: frozenset[{R1, R2}]`; `population_lower_bound(simulator) → Optional[float]` | `NFMLELoss` (requires `{R1, R2}`) |
 | `Method.Runner` | `__init__(..., allow_ablation: bool = False)`; `fit(simulator, config, seed) → TrainedModel`; `n_params() → dict` | `CDSBIRunner`, `NPERunner`, `NLERunner`, `NRERunner`, `LF2IRunner` |
@@ -165,24 +166,31 @@ Three load-bearing properties of these interfaces:
 1. **`Flow.monotonicity_guarantees` is a first-class typed attribute.**
    The training loop checks `loss.required_guarantees ⊆
    flow.monotonicity_guarantees` before fitting. `NFMLELoss` requires
-   `{R1, R2}`. The `JointUMNN1DFlow` ablation flow advertises `{R1}`
-   only and is refused unless `allow_ablation=True` is set on the
-   runner constructor (also exposed in `method/cd_sbi.yaml`'s
-   `allow_ablation` field, defaults `false`). `MAFAdapter` advertises
-   `frozenset()`; NPE/NLE/LF2I runners do not use `NFMLELoss` and the
-   check passes vacuously.
+   `{R1, R2}`. Any flow that doesn't advertise `R2` (e.g., the
+   v3-landing `JointUMNNFlow`) is refused unless `allow_ablation=True`
+   is set on the runner constructor (also exposed in
+   `method/cd_sbi.yaml`'s `allow_ablation` field, defaults `false`).
+   `MAFAdapter` advertises `frozenset()`; NPE/NLE/LF2I runners do not
+   use `NFMLELoss` and the check passes vacuously. In v0 no flow
+   triggers the refusal path (the only `NFMLELoss`-using flow,
+   `AdditiveFlow1D`, advertises both guarantees) — the code path is
+   in place but unexercised by tests until v3.
 2. **`Simulator.r_star` and `Simulator.entropy_lower_bound` are
    optional.** When absent, Diagnostic 1 (pivot RMSE) and the ablation
    regression test no-op gracefully; this is the correct behavior for
    real-data simulators.
 3. **`Method.Runner.n_params()` returns a structured dict**, not an
    int: `{"backbone": ..., "head": ..., "calibration_stage": ...,
-   "total": ..., "kind": "flow"|"classifier"|"two_stage"}`. Convention:
-   for `kind='classifier'` (NRE), `head` carries the classifier and
-   `backbone=0`; for `kind='flow'`, `backbone` carries the density
-   estimator and `head` carries embedding/scale parameters; for
-   `kind='two_stage'` (LF2I), `backbone` is the test-statistic flow,
-   `calibration_stage` is the quantile-regression head.
+   "total": ..., "kind": "flow"|"classifier"|"two_stage"}`. Convention,
+   for every `kind`, **every field is always populated** (zero when not
+   applicable):
+   - `kind='flow'` (CDSBI, NPE, NLE): `backbone` = the trained flow
+     weights; `head` = scalar scale/embedding parameters (e.g.,
+     CDSBI's two learnable `α` scalars); `calibration_stage = 0`.
+   - `kind='classifier'` (NRE): `head` = the classifier MLP;
+     `backbone = 0`; `calibration_stage = 0`.
+   - `kind='two_stage'` (LF2I): `backbone` = test-statistic flow;
+     `calibration_stage` = quantile-regression head; `head = 0`.
 
 ### 4.3 Return-type schemas
 
@@ -217,24 +225,33 @@ class ConfidenceSet:
 The budget sweep is the central confounder control. The rule is:
 
 A `budget/*.yaml` config sets a single integer `target_params`. Each
-runner exposes `build_from_budget(target_params)` which does a tiny
-deterministic bisection on hidden width to land within ±10% of the
-target. Bisection terminates in <10 iterations (no NN training
-involved — just `n_params()` counting on width candidates), takes
-<1 ms.
+runner exposes `build_from_budget(target_params)` which enumerates a
+discrete set of width candidates (e.g., `widths = [4, 8, 12, 16, …,
+256]`), counts `n_params()` for each (no NN training involved), and
+picks the candidate whose backbone params are closest to
+`target_params`. Soft criterion: within ±10% is "matched";
+between ±10% and ±15% is accepted with a warning logged into the
+run dir; outside ±15% raises `BudgetUnreachableError`. Enumeration
+is more robust than bisection on an integer-domain step function,
+deterministic, and runs in <1 ms.
 
 | Method | What `target_params` matches | What gets reported separately |
 |---|---|---|
-| CDSBI | `n_params['backbone'] + n_params['head']` (the flow) | — |
-| NPE / NLE | `n_params['backbone']` (the flow) | — |
+| CDSBI | `n_params['backbone']` (the flow weights only) | `n_params['head']` (the two `α` scalars) — reported as its own column for symmetry with LF2I |
+| NPE / NLE | `n_params['backbone']` (the flow weights only) | `n_params['head']` (MAF scale/embedding params, typically a few dozen) |
 | NRE | `n_params['head']` (the classifier) — same target so NRE has "equal total params, spent in classifier shape" | — |
 | LF2I | `n_params['backbone']` (the first-stage flow, matched to NLE) | `n_params['calibration_stage']` (quantile-regression head) reported separately as its own column |
+
+The rule is: **all flow-kind methods match on `backbone` only**, with
+their non-backbone parameters (CDSBI `α` scalars; MAF scale/embed)
+reported separately so they're never hidden in the matched-budget
+total. This is symmetric with LF2I's calibration head.
 
 Paper-table footnote convention:
 
 > Budget matched on flow-backbone (CDSBI, NPE, NLE, LF2I-stage-1) or
-> classifier (NRE); LF2I additionally spends X params on its
-> quantile-regression head, reported separately.
+> classifier (NRE); non-backbone parameters reported separately per
+> method.
 
 ## 5. Component design per layer (v0 contents vs forward hooks)
 
@@ -253,24 +270,21 @@ Paper-table footnote convention:
     per §7.1
   - `AdditiveFlow1D` — `α_a · UMNN(θ) − α_b · UMNN(X)`; advertises
     `{R1, R2}`
-  - `JointUMNN1DFlow` — `r(θ, X) = ∫_{θ_ref}^θ softplus(MLP(t, X)) dt`;
-    monotone in θ (R1) by construction, X-dependence unconstrained
-    (advertises `{R1}` only). The v0-1D analog of the §8.4
-    `JointUMNNFlow`. Powers the ablation regression test: NF-MLE +
-    autograd-Jacobian + this flow reproduces the §3.5 mechanism
-    (`Z(θ) > 1` ⇒ loss < entropy floor) in 1D.
   - `MAFAdapter` — wraps `nflows.flows.MaskedAutoregressiveFlow`
     behind the `Flow` protocol; advertises `frozenset()`; used as the
     natural backbone for NPE, NLE, and LF2I stage 1
 - **Forward hooks:** `TriangularAdditiveFlow` (v1, §6.1 form 1),
   `DoublyMonotoneUMNN` (v3, §6.1 form 2), `JointUMNNFlow` (v3 — the
-  §8.4 sufficient-statistic ablation form), `NSFAdapter` (v1+ if NSF
-  becomes desirable as a baseline backbone), `MaskedAttentionFlow`
-  (v8, for §11.5 attention-based autoregressive ordering).
+  §8.4 sufficient-statistic ablation form; powers the v3 trained
+  (R2)-ablation experiment), `JointUMNN1DFlow` (v3 — a 1D analog
+  used in a direct-construction mechanism test alongside the §8.4
+  trained test), `NSFAdapter` (v1+ if NSF becomes desirable as a
+  baseline backbone), `MaskedAttentionFlow` (v8, for §11.5
+  attention-based autoregressive ordering).
 
 ### `conditioners/`
 
-- **v0:** `Identity` (returns `(X, log_det_contribution=0)`).
+- **v0:** `Identity` (returns `(X, log_det_jac_input_contribution=0)`).
 - **Forward hooks:** `MLPConditioner`, `CNNConditioner` (image X),
   `AttentionConditioner` (sequence X and §11.5 masked-attention).
 - **v3 specifically:** when the doubly-monotone form lands, its
@@ -323,30 +337,29 @@ Notes:
 
 ### `diagnostics/`
 
-- **v0 (all five from §7.3):**
-  - **Diagnostics 1–4** (`PivotRMSE`, `MarginalPIT`, `ConditionalPIT`,
-    `JointMahalanobis`) — consume a *pivot*; apply only to
-    `PivotBasedProcedure` (CDSBI). Skip gracefully on other procedures.
-    The manuscript labels these "interpretability checks" — they
-    diagnose *where* a calibration failure lives inside CDSBI.
+- **v0 (four of five from §7.3):**
+  - **Diagnostics 1–3** (`PivotRMSE`, `MarginalPIT`, `ConditionalPIT`)
+    — consume a *pivot*; apply only to `PivotBasedProcedure` (CDSBI).
+    Skip gracefully on other procedures. The manuscript labels these
+    "interpretability checks" — they diagnose *where* a calibration
+    failure lives inside CDSBI.
   - **Diagnostic 5** (`Coverage`) — consumes any `ConfidenceProcedure`;
     the cross-method comparison axis.
   - `ks_noise_floor(N, n_bins)` helper. `ConditionalPIT(n_bins=k)`
     takes `k` explicitly and computes its per-bin floor as
     `1.628/√(N/k)`.
-- All five in v0 even though four apply only to CDSBI: zero marginal
-  cost once written, and §8.2+ inherits the diagnostic infrastructure
-  for free.
-- **Multivariate diagnostic tests** (e.g.,
-  `test_joint_mahalanobis_catches_correlation`) are tagged
-  `@pytest.mark.requires_multivariate` and gated to v1+.
+- **Forward hook (lands v1):** `JointMahalanobis` (Diagnostic 4).
+  Degenerate in 1D (reduces to `r²` ~ χ²_1, same as the squared
+  marginal-PIT residual); only meaningful when v1 introduces
+  multivariate flows. Shipped together with its regression test
+  (`test_joint_mahalanobis_catches_correlation`) at v1.
 
 ### `experiments/` + `configs/`
 
 - **v0 config groups:** `target/loc_normal_1d`, `flow/{additive_umnn,
-  joint_umnn_1d, maf}`, `conditioner/identity`, `method/{cd_sbi, npe,
-  nle, nre, lf2i}`, `training/adam_3e-3_4k_steps`, `budget/{small,
-  medium, large, xlarge}` (~1k / 5k / 25k / 100k `target_params`), plus
+  maf}`, `conditioner/identity`, `method/{cd_sbi, npe, nle, nre,
+  lf2i}`, `training/adam_3e-3_4k_steps`, `budget/{small, medium,
+  large, xlarge}` (~1k / 5k / 25k / 100k `target_params`), plus
   composites `experiment/8_1_replication` and
   `experiment/8_1_baseline_sweep`.
 - **CLI:** `python -m cdsbi.experiments.run experiment=...
@@ -389,7 +402,7 @@ $ python -m cdsbi.experiments.run experiment=8_1_replication method=cd_sbi seed=
                        │       → ${run_dir}/model.pt, metrics.parquet (per-step),
                        │         env.json (git sha, dirty flag, library versions, device)
                        ▼
-  Run diagnostics: pivot-based (1–4) only on PivotBasedProcedure;
+  Run diagnostics: pivot-based (1, 2, 3 in v0; 4 lands v1) only on PivotBasedProcedure;
   Coverage (5) on the procedure regardless of kind. Held-out
   evaluation simulation, separate RNG stream derived deterministically
   from run seed.
@@ -417,7 +430,7 @@ Hydra config groups composed declaratively in `configs/`:
 configs/
 ├── config.yaml                          # base; defaults list; run_dir template; device: auto
 ├── target/                              # {loc_normal_1d, …}
-├── flow/                                # {additive_umnn, joint_umnn_1d, maf, …}
+├── flow/                                # {additive_umnn, maf, …}
 ├── conditioner/                         # {identity, …}
 ├── method/                              # {cd_sbi, npe, nle, nre, lf2i, …}
 ├── training/                            # {adam_3e-3_4k_steps, …}; batch_size lives here
@@ -473,7 +486,7 @@ Validated at write time by a tiny `schema_check(df, schema)` helper.
 
 | column | dtype |
 |---|---|
-| `theta_0` | float64 (or List[float64] for d > 1) |
+| `theta_0_0` | float64 |
 | `alpha` | float64 |
 | `nominal` | float64 |
 | `empirical` | float64 |
@@ -481,19 +494,25 @@ Validated at write time by a tiny `schema_check(df, schema)` helper.
 | `passed` | bool |
 | `tolerance` | float64 |
 
+In v1+, additional coordinate columns are added as `theta_0_1`,
+`theta_0_2`, … — one column per parameter dimension. This keeps the
+schema readable across milestones (no dtype switching on a single
+column).
+
 `diagnostics/conditional_pit.parquet`:
 
 | column | dtype |
 |---|---|
 | `theta_0_bin` | int64 |
-| `theta_0_center` | float64 (or List for d > 1) |
+| `theta_0_center_0` | float64 (v1+ adds `theta_0_center_1`, …) |
 | `ks` | float64 |
 | `per_bin_noise_floor` | float64 |
 | `n_per_bin` | int64 |
 | `passed` | bool |
 
-Similar minimal schemas for `marginal_pit.parquet`, `pivot_rmse.parquet`,
-`joint_mahalanobis.parquet`.
+Similar minimal schemas for `marginal_pit.parquet` and
+`pivot_rmse.parquet`. (`joint_mahalanobis.parquet` lands at v1 with
+its diagnostic.)
 
 `index_row.parquet` — one-row summary; aggregated to a DataFrame by
 `analysis.load_runs()`:
@@ -534,16 +553,26 @@ Similar minimal schemas for `marginal_pit.parquet`, `pivot_rmse.parquet`,
 
 ## 9. Testing strategy
 
-Five test categories. The first four run on every push (≤ 30 s total);
-the fifth is opt-in via `pytest -m intensive`.
+Four test categories in v0. The first three run on every push
+(≤ 30 s total); the fourth is opt-in via `pytest -m intensive`.
 
 | Category | Purpose | v0 examples |
 |---|---|---|
-| **Unit** | Per-module correctness with mocked deps | UMNN strictly monotone on a grid; `Identity` conditioner shape-preserving; `n_params` matches `torch` count; `build_from_budget` lands within ±10% via bisection |
+| **Unit** | Per-module correctness with mocked deps | UMNN strictly monotone on a grid; `Identity` conditioner shape-preserving; `n_params` matches `torch` count; `build_from_budget` enumeration lands within ±10%, raises within ±15%–outside |
 | **Integration** | Composed components, tiny budgets, finish in seconds | 200-step CDSBI on N=50 `LocationNormal1D`; runner produces parseable run-dir; `STATUS=OK` written |
 | **Diagnostics** | Diagnostics give *known* answers on analytical-pivot problems | See §9.1 |
-| **Ablation** | The §3.5 (R2)-violation smoking gun, **in 1D from v0** | See §9.2 |
 | **Intensive** | Full-budget replication; opt-in via `pytest -m intensive` | §8.1 replication, ~3 min; later: §8.2, §8.3, §8.4 |
+
+A fifth **Ablation** category activates at **v3**, when the §8.4
+exponential-rate setup (`ExponentialRate` + `JointUMNNFlow`) provides
+a target on which the §3.5 mechanism actually fires under training.
+The category covers both (i) the runner's safety-check test
+(`MonotonicityMismatchError` fires on a non-R2 flow unless
+`allow_ablation=True`) and (ii) the trained-folding empirical test
+(`final_loss < entropy_lower_bound − margin`) with the empirical
+noise-floor margin. The safety-check *code path* exists in v0 (the
+runner does perform the check); only its regression test waits for v3
+when there's a non-R2 flow in the codebase to point it at.
 
 ### 9.1 Diagnostic-regression tests
 
@@ -559,42 +588,32 @@ miscalibrated case:
 | `test_coverage_oracle_exact` | `Coverage` on `PivotBasedProcedure(r*)` at α ∈ {0.5, 0.68, 0.9, 0.95} | Empirical coverage within MC error of nominal at every α |
 | `test_coverage_catches_mismatch` | Same on under-dispersed pivot | Empirical coverage < nominal by detectable margin |
 | `test_per_bin_floor_calculation` | `ks_noise_floor(N=5000, n_bins=5)` and similar | Matches analytic `1.628/√(N/k)` to 4 decimals |
-| `test_joint_mahalanobis_catches_correlation` | 2D pivot, components individually N(0,1), correlation 0.5 | Joint Mahalanobis KS > floor; component-wise KS does not. **Gated `@pytest.mark.requires_multivariate`; activates v1+** |
 
-### 9.2 The (R2) ablation regression test (v0-1D)
+`test_joint_mahalanobis_catches_correlation` ships at v1 alongside
+the `JointMahalanobis` diagnostic itself.
 
-The unique test that pins §3.5's mechanism down as a structural
-property of the framework — runs from v0, using the 1D ablation flow:
+### 9.2 (R2) ablation tests — deferred to v3
 
-```python
-def test_r2_ablation_loss_below_entropy_floor():
-    sim = LocationNormal1D(theta_range=[-7, 7])
-    flow = JointUMNN1DFlow(...)       # advertises monotonicity_guarantees = {R1}
-    loss = NFMLELoss()                 # required_guarantees = {R1, R2}
+The §3.5 mechanism (NF-MLE + autograd Jacobian + non-monotone-in-X
+flow ⇒ `Z(θ) > 1` ⇒ loss < entropy floor) requires a target where
+the truth is not easily approximated by the monotone-in-X class —
+otherwise training simply finds the monotone truth and folding never
+happens (the §3.5 mechanism *permits* folding to lower the loss but
+does not *force* it). `LocationNormal1D` (truth `r* = θ − X`, linear
+in X) is in the realizable monotone class, so a trained 1D ablation
+test on this target is not reliable.
 
-    # 1. The safety check must fire by default
-    with pytest.raises(MonotonicityMismatchError):
-        CDSBIRunner(flow, loss).fit(sim, ...)
+The full ablation category — both the safety-check test and the
+trained-folding empirical test (with empirical noise-floor margin) —
+lands at **v3** alongside `ExponentialRate` + `JointUMNNFlow`, where
+the §8.4 setup provides a target on which the mechanism actually
+fires.
 
-    # 2. With explicit opt-in, training proceeds
-    runner = CDSBIRunner(flow, loss, allow_ablation=True)
-    trained = runner.fit(sim, cfg_short)
-
-    # 3. Empirical noise-floor margin
-    margin = 3 * stderr_loss_over_last_steps(trained, n=100)
-
-    # 4. The smoking gun: final loss < conditional-entropy lower bound
-    assert trained.final_loss < sim.entropy_lower_bound() - margin
-```
-
-The empirical noise-floor margin `3·SE(loss over final 100 steps)`
-adapts to actual training noise and generalizes cleanly when v3 runs
-the same test on `ExponentialRate` — no magic constants.
-
-If a future refactor accidentally makes `NFMLELoss` tolerant of a
-non-monotone flow, this test fails. If a refactor breaks Theorem 3.2's
-`loss ≥ H(X|θ)` bound anywhere, the inequality becomes violable
-elsewhere and we catch it here.
+The runner's safety check (`MonotonicityMismatchError` raised when
+`loss.required_guarantees` is not a subset of
+`flow.monotonicity_guarantees` and `allow_ablation=False`) is
+implemented in v0 code — only its regression test waits for v3 when a
+non-R2 flow exists in the codebase to point it at.
 
 ### 9.3 Determinism contract
 
@@ -668,19 +687,24 @@ DataFrame.
 1. The CLI above completes deterministically (same seeds → identical
    outputs to `float32`).
 2. **CD-SBI's seed-averaged results land within these falsifiable
-   tolerance bands on `LocationNormal1D`:**
+   tolerance bands on `LocationNormal1D`**, with "interior" defined
+   operationally as **`|θ_0| ≤ 5`** (excludes the outer ~2 units of
+   the [−7, 7] proposal where edge effects live, per manuscript §8.1
+   "interior is uniformly clean"):
 
    | Diagnostic | Manuscript value | v0 tolerance band | Justification |
    |---|---|---|---|
-   | Pivot RMSE (interior θ_0) | 0.030 | ≤ 0.05 | ~1.5× manuscript; well above optimization noise, well below 1σ of pivot's marginal scale |
+   | Pivot RMSE (interior) | 0.030 | ≤ 0.05 | ~1.5× manuscript; well above optimization noise, well below 1σ of pivot's marginal scale |
    | Marginal PIT KS | 0.008 | ≤ 0.023 | Equal to marginal noise floor at N=5000 (`1.628/√5000`) — "passes the test" |
-   | Conditional PIT KS (interior θ_0) | ~0.01 (bulk; manuscript §8.1) | ≤ 0.052 | Per-bin noise floor at N=5000 with k=5 bins of N/k=1000 each (`1.628/√1000`) — "passes the test". Edge θ_0 (boundary of training proposal) excluded from criterion per manuscript §8.1 "interior is uniformly clean" |
-   | Coverage error (interior θ_0) | < 0.01 | ≤ 0.02 | ~2× manuscript; tight enough to catch real regressions, loose enough to absorb seed-to-seed variance |
+   | Conditional PIT KS (interior) | ~0.01 (bulk; manuscript §8.1) | ≤ 0.052 | Per-bin noise floor at N=5000 with k=5 bins of N/k=1000 each (`1.628/√1000`) — "passes the test" |
+   | Coverage error (interior) | < 0.01 | ≤ 0.02 | ~2× manuscript; tight enough to catch real regressions, loose enough to absorb seed-to-seed variance |
 
-3. All five methods report `n_params()['total']` within ±10% of each
-   budget target via the §4.4 matched-budget rule.
-4. Full default `pytest` suite (unit + integration + diagnostics +
-   ablation including the 1D smoking-gun test) passes in under 30 s.
+3. All five methods land their backbone parameter count within ±10%
+   of each budget target via the §4.4 closest-candidate enumeration
+   (±15% accepted with logged warning; outside ±15% raises
+   `BudgetUnreachableError`).
+4. Full default `pytest` suite (unit + integration + diagnostics)
+   passes in under 30 s. (Ablation category lands v3.)
 5. `pytest -m intensive` runs the §8.1 replication and matches the
    tolerance bands above.
 
@@ -690,10 +714,10 @@ Illustrative — not part of v0 commitment.
 
 | Milestone | New code | New configs | Adds |
 |---|---|---|---|
-| **v0** §8.1 sweep | UMNN, AdditiveFlow1D, JointUMNN1DFlow, MAFAdapter, Identity conditioner, 5 runners (each returning a `ConfidenceProcedure`), 1D root-finder / HPD extractor, 5 diagnostics, Hydra/run-dir/seeding/device plumbing, all test categories | `target/loc_normal_1d`, `flow/{additive_umnn, joint_umnn_1d, maf}`, `method/{cd_sbi, npe, nle, nre, lf2i}`, `budget/{small, medium, large, xlarge}`, `experiment/8_1_*` | First comparison; (R2) smoking gun verified in 1D |
-| **v1** §8.2 | `TriangularAdditiveFlow`; multivariate `confidence_set`; activate `@pytest.mark.requires_multivariate` tests | `target/loc_gauss_2d_iid`, `flow/triangular_additive`, `experiment/8_2_*` | Multivariate triangular flow; joint Mahalanobis becomes load-bearing |
+| **v0** §8.1 sweep | UMNN, AdditiveFlow1D, MAFAdapter, Identity conditioner, 5 runners (each returning a `ConfidenceProcedure`), 1D root-finder / HPD extractor, 4 diagnostics (1, 2, 3, 5), Hydra/run-dir/seeding/device plumbing, unit + integration + diagnostics + intensive test categories | `target/loc_normal_1d`, `flow/{additive_umnn, maf}`, `method/{cd_sbi, npe, nle, nre, lf2i}`, `budget/{small, medium, large, xlarge}`, `experiment/8_1_*` | First cross-method comparison at matched budget |
+| **v1** §8.2 | `TriangularAdditiveFlow`; multivariate `confidence_set`; `JointMahalanobis` diagnostic + its regression test | `target/loc_gauss_2d_iid`, `flow/triangular_additive`, `experiment/8_2_*` | Multivariate triangular flow; joint Mahalanobis becomes load-bearing |
 | **v2** §8.3 | (no new flow) | `target/loc_gauss_2d_corr`, `experiment/8_3_*` | KR-uniqueness empirical evidence |
-| **v3** §8.4 + §8.4-style ablation | `DoublyMonotoneUMNN`, `JointUMNNFlow` (§8.4 form with sufficient-statistic reduction); `MLPConditioner` doing the X→T reduction with non-zero `log_det_jac_input_contribution` | `target/exp_rate`, `flow/{doubly_monotone, joint_umnn}`, `experiment/8_4_*` | The §8.4 (R2)-failure as a published result (the v0-1D analog already exists in the test suite) |
+| **v3** §8.4 + (R2) ablation | `DoublyMonotoneUMNN`, `JointUMNNFlow` (§8.4 form with sufficient-statistic reduction), `JointUMNN1DFlow` (1D analog for the direct-construction mechanism test), `MLPConditioner` doing the X→T reduction with non-zero `log_det_jac_input_contribution`; new **Ablation** test category (safety-check + trained-folding empirical test with empirical noise-floor margin + 1D direct-construction mechanism test) | `target/exp_rate`, `flow/{doubly_monotone, joint_umnn, joint_umnn_1d}`, `experiment/8_4_*` | The §8.4 (R2)-failure as a published result; (R2) safety property regression-tested |
 | **v4** SBI benchmark | `SBIBenchmarkAdapter` | `target/sbibm_*` | Community leaderboards |
 | **v5** §3.7 alt-loss | `MarginalPushforwardLoss`, `MarginalPlusHSICLoss`, `StratifiedLoss` | `loss/*`, `experiment/3_7_*` | Empirical Class 1–4 vs Class 5 demonstration |
 | **v6** synthetic high-d | (mostly config; possibly `MLPConditioner` for parameter encoding) | `target/loc_gauss_kd`, `experiment/scaling_*` | §11.5 scaling claim |
@@ -708,17 +732,20 @@ These are *not built* in v0 but must be designed-for-in-v0:
    `context` rather than `X`. v8's CNN drops in with zero changes to
    the flow signature.
 2. **`monotonicity_guarantees` as a first-class flow attribute.** v0
-   already has three flows that exercise this field (`AdditiveFlow1D`
-   = `{R1, R2}`, `JointUMNN1DFlow` = `{R1}`, `MAFAdapter` =
-   `frozenset()`). v3's §8.4 ablation flow drops in with no
-   loss-layer changes.
+   has two flows that exercise this field (`AdditiveFlow1D` =
+   `{R1, R2}`, `MAFAdapter` = `frozenset()`); the runner's safety
+   check (`MonotonicityMismatchError`) is implemented in v0 and waits
+   for v3's `JointUMNNFlow` (= `{R1}` only) to be exercised by tests.
+   The protocol is stable across the activation gap.
 3. **`log_det_jac_input` naming + conditioner's
    `log_det_jac_input_contribution`.** v0's identity conditioner
    contributes 0; v3's sufficient-statistic conditioner contributes
    `log|∂T/∂X|`. No flow-signature change between v0 and v3.
-4. **`Simulator.entropy_lower_bound()` as optional protocol.** Powers
-   the ablation regression test from v0 onward; returns `None` when
-   unknown.
+4. **`Simulator.entropy_lower_bound()` as optional protocol.** Defined
+   on `LocationNormal1D` in v0 (= `½ log(2πe)`) but unused until v3,
+   when the ablation regression test consumes it via
+   `loss.population_lower_bound(sim)`. Returns `None` when unknown
+   (real-data simulators).
 5. **`ConfidenceProcedure` as the cross-method interface.** v0
    instantiates all five subtypes; v1+ adds WALDO and Box CD as
    additional `CriticalValueProcedure` instances without touching the
@@ -727,8 +754,14 @@ These are *not built* in v0 but must be designed-for-in-v0:
 ## 14. Non-goals (explicit, to prevent scope creep)
 
 - No multivariate flow code in v0 (lands v1)
-- No doubly-monotone or §8.4-form ablation flow in v0 (lands v3) — but
-  the *1D analog* of the ablation **is** in v0 (`JointUMNN1DFlow`)
+- No `JointMahalanobis` diagnostic in v0 (degenerate in 1D; lands v1
+  with multivariate flows)
+- No (R2) ablation tests in v0 (the §3.5 mechanism doesn't reliably
+  fire on `LocationNormal1D` because the truth is in the realizable
+  monotone-in-X class; full Ablation test category — safety-check,
+  1D direct-construction mechanism test, §8.4 trained-folding test —
+  lands at v3 alongside `ExponentialRate` + `JointUMNNFlow`). The
+  runner's safety check **code path** is implemented in v0.
 - No multivariate confidence-set computation in v0 (1D root-find is in
   v0; multivariate is v1+)
 - No image / sequence support in v0 (lands v8)
