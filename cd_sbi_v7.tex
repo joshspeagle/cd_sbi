@@ -735,30 +735,44 @@ decreasing \(\psi\),
 \(\mathcal{N}(\theta_0, 1)\) to \(\mathcal{N}(0,1)\). Then \(\psi'\) has
 constant sign on \(\mathbb{R}\); i.e., \(\psi\) is strictly monotone.}
 
-\emph{Proof.} Suppose for contradiction \(\psi'\) changes sign. By
-continuity of \(\psi'\), there is some \(X_* \in \mathbb{R}\) with
-\(\psi'(X_*) = 0\) and (WLOG, taking a local maximum) values
-\(X_1, X_2\) arbitrarily close to \(X_*\) with \(X_1 < X_* < X_2\) such
-that \(\psi(X_1) = \psi(X_2) = v < v_* := \psi(X_*)\), with \(\psi\)
-strictly monotone on each of the intervals \((X_1, X_*)\) and
-\((X_*, X_2)\) for \(v\) close enough to \(v_*\).
+\emph{Proof.} Suppose for contradiction \(\psi'\) changes sign on
+\(\mathbb{R}\). By continuity, there is some \(X_*\) at which \(\psi'\)
+crosses zero, and \(\psi\) attains a strict local extremum at \(X_*\)
+(WLOG a local maximum with \(v_* := \psi(X_*)\); the local-minimum case
+is symmetric). For \(v\) just below \(v_*\), the level set
+\(\{X : \psi(X) = v\}\) contains at least two points \(X_1(v) \to X_*^-\)
+and \(X_2(v) \to X_*^+\), with \(\psi\) strictly monotone on each of
+\((X_1, X_*)\) and \((X_*, X_2)\).
 
 The pushforward density of \(\mathcal{N}(\theta_0, 1)\) under \(\psi\)
-at value \(v\) in the range of \(\psi\) where the preimage is finite is
+at any value \(v\) with finite preimage is
 \[
-g_\psi(v) \;=\; \sum_{i\,:\,\psi(X_i)=v} \frac{\varphi(X_i - \theta_0)}{|\psi'(X_i)|}.
-\] For \(v\) just below \(v_*\), summing over the two preimages
-\(X_1(v) \to X_*^-\) and \(X_2(v) \to X_*^+\), \[
+g_\psi(v) \;=\; \sum_{i\,:\,\psi(X_i)=v} \frac{\varphi(X_i - \theta_0)}{|\psi'(X_i)|},
+\]
+so summing over the two preimages above,
+\[
 g_\psi(v) \;\geq\; \frac{\varphi(X_1(v) - \theta_0)}{|\psi'(X_1(v))|} + \frac{\varphi(X_2(v) - \theta_0)}{|\psi'(X_2(v))|}.
-\] By Taylor expansion at \(X_*\) (using \(\psi'(X_*) = 0\) and
-\(\psi''(X_*) < 0\) at a local max, or more generally the leading
-nonzero derivative), \(|\psi'(X_i(v))| = O(|v - v_*|^{1/2})\) for a
-quadratic critical point, while
-\(\varphi(X_i(v) - \theta_0) \to \varphi(X_* - \theta_0) > 0\). So
-\(g_\psi(v) \to \infty\) as \(v \to v_*^-\). But the target density
-\(\varphi(v_*)\) is finite. Contradiction. (For higher-order critical
-points the divergence is faster; the conclusion is unchanged.)
-\(\blacksquare\)
+\]
+Let \(2m \ge 2\) be the order of the leading nonzero derivative of
+\(\psi\) at \(X_*\), so \(\psi(X) - v_* \sim -c\,(X - X_*)^{2m}\) near
+\(X_*\) with \(c > 0\). Then
+\(|\psi'(X_i(v))| \sim |v - v_*|^{(2m-1)/(2m)}\), while
+\(\varphi(X_i(v) - \theta_0) \to \varphi(X_* - \theta_0) > 0\). Hence
+\(g_\psi(v)\) diverges at least as fast as \(|v - v_*|^{-1/2}\) (and
+faster for higher-order critical points). But the target density
+\(\varphi(v_*)\) is finite, a contradiction. \(\blacksquare\)
+
+\emph{Remark (general source).} The proof uses only two facts about
+\(\mathcal{N}(\theta_0, 1)\) and \(\mathcal{N}(0,1)\): the source has
+positive density at any critical point of \(\psi\), and the target has
+finite density at all attained values. The lemma therefore applies
+verbatim when \(\mathcal{N}(\theta_0, 1)\) is replaced by any continuous
+distribution on \(\mathbb{R}\) with positive density on its support and
+\(\mathcal{N}(0,1)\) by any continuous distribution with finite density.
+This generalization is invoked silently in Theorem~C (\S\ref{subsec:5.2}, with the
+pushforward of \(T(X) \mid \theta_0\) as source) and in the inductive
+step of Theorem~A-d (\S\ref{subsec:6.3}, with the conditional law
+\(F_k^{(\theta)}(\cdot \mid X_{<k})\) as source).
 
 \textbf{Lemma 4.3 (NF-MLE is strictly proper, conditional).} \emph{Under
 the NF-MLE objective \(L(r)\), any minimizer \(r \in \mathcal{F}_{C^1}\)
@@ -772,6 +786,13 @@ constant. KL is zero iff
 \(\mathrm{supp}\,\rho\). Under (R2), \(\hat p_r(\cdot \mid \theta)\)
 pushes \(X \mid \theta\) to \(\mathcal{N}(0,1)\) iff
 \(r(\theta_0; X) \mid \theta_0 \sim \mathcal{N}(0,1)\). \(\blacksquare\)
+
+\emph{Remark (Lipschitz / autoregressive variants).} The proof depends
+only on (R2) and the KL identity of \S\ref{subsec:3.2}; it therefore
+extends without change to any pivot class for which the change-of-variables
+formula yields a valid normalized density --- in particular to the
+Lipschitz form of (R2) used in Theorem A* (\S\ref{subsec:4.4}) and to the
+autoregressive variant (R2\(^{\mathrm{auto}}\)) used in \S\ref{sec:6}.
 
 \subsection{Proof of Theorem A}\label{subsec:4.3}
 
@@ -789,13 +810,20 @@ each \(\theta_0 \in \mathbb{R}\), define
 hypothesis), \(\psi_{\theta_0}\) is strictly monotone. By Lemma 4.1,
 \(\psi_{\theta_0}(X) \in \{X - \theta_0,\, \theta_0 - X\}\).
 
-\emph{Selecting the direction.} The case
-\(\psi_{\theta_0}(X) = X - \theta_0\) for \(\rho\)-a.e. \(\theta_0\)
-gives \(r(\theta, X) = X - \theta\), which has
-\(\partial_\theta r = -1\) --- contradicting (R1). Hence the other
-branch: \(\psi_{\theta_0}(X) = \theta_0 - X\), giving
-\(r(\theta, X) = \theta - X\), with \(\partial_\theta r = +1 > 0\)
-satisfying (R1). \(\blacksquare\)
+\emph{Selecting the direction.} A priori, (R1) does not rule out a
+measurable mixture in which \(\psi_{\theta_0}(X) = X - \theta_0\) on
+some set \(A \subseteq \Theta\) and \(\psi_{\theta_0}(X) = \theta_0 - X\)
+on \(A^c\). But for any fixed \(X\), such a mixture would make
+\(\theta \mapsto r(\theta, X) = \pm(\theta - X) + (\mathrm{const})\)
+decreasing on \(A\) and increasing on \(A^c\), violating the global
+strict monotonicity required by (R1). Hence one branch holds
+\(\rho\)-a.e. The increasing-branch case \(\psi_{\theta_0}(X) = X - \theta_0\)
+gives \(r(\theta, X) = X - \theta\) with \(\partial_\theta r = -1\),
+contradicting (R1). The other branch
+\(\psi_{\theta_0}(X) = \theta_0 - X\) gives \(r(\theta, X) = \theta - X\)
+with \(\partial_\theta r = +1\), satisfying (R1). The full-support
+assumption on \(\rho\) (\S\ref{subsec:2.1}) lifts this from \(\rho\)-a.e.
+\(\theta_0\) to all of \(\mathbb{R}\). \(\blacksquare\)
 
 \subsection{Strengthening to Lipschitz: Theorem A*}\label{subsec:4.4}
 
@@ -963,7 +991,11 @@ r^*_\mathrm{rand}(\theta; X, U) \;:=\; \Phi^{-1}(1 - V_\theta(X, U)).
 
 Uniqueness in the randomized class requires four regularity conditions:
 (R1) monotone in \(\theta\), (R2) invertible in \((X, U)\), (R3\(_U\))
-strict monotone in \(U\), plus a new condition:
+strict monotone in \(U\) (distinct from (R3) of \S\ref{subsec:4.4}: that
+condition was a uniform lower bound \(|\partial_X r| \ge c > 0\) used in
+the Lipschitz case; (R3\(_U\)) here is the strict-monotone-in-\(U\)
+condition needed inside each \(T\)-atom in the discrete setting), plus a
+new condition:
 
 \begin{itemize}
 \tightlist
@@ -1004,10 +1036,17 @@ lex-ordering of \(T\)-values relative to \(U\): \(V_\theta^*\) places
 all of \(X=0\) below all of \(X=1\), while \(V'_\theta\) interleaves
 them. (R4) selects \(V_\theta^*\).
 
-\textbf{Why (R4) is automatic in the continuous case.} Lemma 4.2 (or
-(R3)) implies \(\psi_{\theta_0}\) is monotone in \(X\), and by
-sufficiency monotone in \(T(X)\). Only the discrete case has the extra
-freedom that requires (R4) as a separate condition.
+\textbf{Why (R4) is automatic in the continuous case.} In the
+continuous case, Theorem C (\S\ref{subsec:5.2}) --- which lifts Theorem A
+to \(t = T(X)\) coordinates via the general-source form of Lemma~4.2
+(remark, \S\ref{subsec:4.2}) --- already concludes that the canonical
+pivot \(\tilde r(\theta; t)\) is monotone-increasing in \(t\) under
+increasing MLR. This is exactly (R4) at the \(t\)-level. (R4) becomes
+a non-redundant assumption only in the discrete setting, where monotone
+rearrangement of an atomic source onto a continuous target leaves a
+permutation freedom across the \(T\)-atoms that the continuous-case
+rigidity (Lemma~4.2 in \(C^1\), or strict-monotonicity-in-\(X\) under
+(R3) in the Lipschitz case) eliminates automatically.
 
 \subsubsection{Mid-p alternative}\label{subsubsec:5.7.3}
 
@@ -1059,6 +1098,15 @@ with \(d\)-dim \(r\)). We work in the class of pivots of the form
   \(r_k\) depends on \(X\) only through \(X_{\le k}\), and
   \(X_k \mapsto r_k\) is strictly monotone at fixed \(\theta, X_{<k}\).
 \end{itemize}
+
+(R1\(^\mathrm{auto}\)) and (R2\(^\mathrm{auto}\)) are the autoregressive
+specializations of (R1) and (R2). (R1\(^\mathrm{auto}\)) implies the
+coordinate-wise version of (R1) by inspection; (R2\(^\mathrm{auto}\))
+implies (R2) (a lower-triangular Jacobian with strictly monotone
+diagonal entries has full rank, so \(r\) is a local diffeomorphism in
+\(X\) at each \(\theta\)). The strict-propriety argument of
+\S\ref{subsec:3.2} therefore applies verbatim in the autoregressive
+class, with no separate derivation needed.
 
 This class admits at least two practical parameterizations:
 
@@ -1835,11 +1883,17 @@ give better-behaved finite-sample training; this is unexplored in the
 CD-SBI context.
 
 \subsection{The \(C^0\) residual in 1D}\label{subsec:11.3}
-Theorem A* requires (R3) as an
-extra assumption. Whether (R3) follows from (R1) + Lipschitz +
-calibration alone is open. Lemma 4.3 gives first-order rigidity, so any
-failure mode is isolated; in practice, architectural enforcement makes
-the question moot.
+In the \(C^1\) case, Lemma~4.2 derives strict monotonicity in \(X\) from
+(R1) + calibration + regularity, so (R3) is automatic. Theorem~A*
+requires (R3) as an extra assumption only in the \emph{Lipschitz} case,
+where Lemma~4.2's blow-up argument fails (a Lipschitz V-shape gives only
+a bounded jump in the pushforward density, not a divergence). Whether
+(R3) follows from (R1) + Lipschitz + calibration alone --- without the
+uniform lower-bound assumption \(|\partial_X r| \ge c > 0\) --- is open.
+Lemma~4.2's generalization (\S\ref{subsec:4.2} remark) covers the
+\(C^1\) case for arbitrary continuous positive source; in practice,
+architectural enforcement of strict \(X\)-monotonicity (UMNN /
+triangular flows) makes the question moot.
 
 \subsection{Misspecification}\label{subsec:11.4}
 When the simulator does not exactly
