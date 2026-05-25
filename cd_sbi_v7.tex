@@ -2161,16 +2161,19 @@ ratio (Schweder \& Hjort 2016, ch.~5).
 \subsection{Uniqueness beyond the autoregressive triangular class}\label{subsec:11.1}
 Theorem A-d (\S\ref{subsec:6.3}) establishes uniqueness within autoregressive
 triangular flows: the calibration manifold is the singleton
-Knothe--Rosenblatt rearrangement. But the \emph{full} calibration
-manifold over more flexible architectures (e.g., dense flows,
-non-autoregressive coupling layers) is generically not a singleton ---
-orthogonal rotations of \(r\) preserve calibration since
-\(\mathcal{N}(0, I_d)\) is rotation-invariant. Whether NF-MLE with
-looser architectural constraints still converges to a canonical pivot,
-or whether the practitioner must commit to a specific autoregressive
-structure to guarantee uniqueness, is open. The practical implication,
-supported by the 2D correlated experiment, is that \emph{some}
-triangular ordering must be chosen architecturally.
+Knothe--Rosenblatt rearrangement. Outside that class the picture is
+murkier. Orthogonal rotations of \(r\) preserve the calibration
+constraint \(r \sim \mathcal{N}(0, I_d)\) since the standard Gaussian
+is \(O(d)\)-invariant; under the autoregressive (R1\(^{\mathrm{auto}}\)),
+only the coordinate-wise sign-flip subgroup \(\mathbb{Z}_2^d\) of \(O(d)\)
+preserves the monotonicity structure (rows of a generic rotation mix
+coordinates and destroy strict monotonicity in \(\theta_k\) at fixed
+\(\theta_{<k}\)). Under weaker non-autoregressive monotonicity constraints
+the residual symmetry group of \(\mathcal{M}\) within the architectural
+class --- and whether NF-MLE converges to a canonical pivot inside that
+larger orbit --- is open. The practical implication, supported by the
+2D correlated experiment, is that \emph{some} triangular ordering must
+be chosen architecturally.
 
 \subsection{Ordering selection in KR}\label{subsec:11.2}
 When there is no natural
@@ -2180,10 +2183,13 @@ autoregressive ordering give different valid pivots, all in
 have better finite-sample optimization behavior --- easier-to-learn
 conditionals, lower variance gradients --- is an empirical question
 worth investigating. The optimal-transport literature
-(Carlier--Galichon--Santambrogio 2010) connects KR maps with \(t \to 1\)
-to Brenier maps, suggesting that a more isotropic transport target might
-give better-behaved finite-sample training; this is unexplored in the
-CD-SBI context.
+(Carlier--Galichon--Santambrogio 2010) connects KR maps to Brenier maps
+through an entropic/diagonal-scaling continuation, raising the
+\emph{conjecture} that a more isotropic transport target might give
+better-behaved finite-sample training; this is unexplored in the CD-SBI
+context. We are not aware of any published study comparing KR orderings
+on finite-sample training stability in either SBI or general
+normalizing-flow contexts.
 
 \subsection{The \(C^0\) residual in 1D}\label{subsec:11.3}
 In the \(C^1\) case, Lemma~4.2 derives strict monotonicity in \(X\) from
@@ -2201,47 +2207,77 @@ triangular flows) makes the question moot.
 \subsection{Misspecification}\label{subsec:11.4}
 When the simulator does not exactly
 generate the data, the calibration target \(\mathcal{N}(0, I_d)\)
-becomes wrong. Robust-SBI ideas (Schmon et al.~2020; Dellaporta et
-al.~2022; Wehenkel et al.~2025) should integrate with CD-SBI but the
-right framework is unclear. Specifically: under misspecification, the
-population minimizer of NF-MLE is no longer the true CD pivot but rather
-the moment-projection of the model density onto the architectural class.
-What this object's coverage properties are --- and whether CD-SBI
-inherits a degraded but still useful guarantee --- is an open question.
+becomes wrong. Under misspecification, the population minimizer of
+NF-MLE is the \emph{forward-KL projection} (the
+\(\mathrm{argmin}_{r \in \mathcal{F}} \mathbb{E}_\rho[\mathrm{KL}(p(\cdot \mid \theta) \,\|\, \hat p_r(\cdot \mid \theta))]\)
+direction, called the \(M\)-projection in the modern Bregman-geometry
+sense) of the true conditional \(p(\cdot \mid \theta)\) onto the
+architectural class. What this object's coverage properties are ---
+and whether CD-SBI inherits a degraded but still useful guarantee ---
+is open. Wehenkel et al.~(2025) study a related question via a
+reweighted / generalized-Bayes robust SBI objective; a direct
+coverage-degradation analysis of the forward-KL projection of \(p\)
+onto \(\mathcal{F}\) is, to our knowledge, still missing.
+Robust-SBI ideas (Schmon et al.~2020; Dellaporta et al.~2022) should
+also integrate with CD-SBI but the right framework is unclear.
 
 \subsection{Higher-dimensional scaling}\label{subsec:11.5}
-The triangular flow scales
-linearly in \(d\) for the Jacobian, but conditioning networks for
-high-\(k\) components carry growing context dimension. For
-\(d \gtrsim 10\), careful architecture design (sparse autoregressive
-structure, attention-based conditioning) likely becomes important.
-Empirical validation up to \(d = 10\) is a natural next milestone.
+The triangular flow scales linearly in \(d\) for the Jacobian, but
+conditioning networks for high-\(k\) components carry growing context
+dimension. Autoregressive flows scale routinely to \(d \sim 30\) in the
+SBI literature (Lueckmann et al.~2021) and to \(d \sim 100\)+ in
+general normalizing-flow contexts (Papamakarios et al.~2017;
+Durkan et al.~2019). What is specific to CD-SBI is the requirement
+that the calibration--monotonicity--Jacobian triple be maintained
+jointly at scale; whether that triple remains tractable past the 2D
+experiments here, and in particular whether sparse autoregressive or
+attention-based conditioning is needed at high \(d\), is open.
+Empirical validation past \(d = 2\) is a natural next milestone.
 
 \subsection{Sequential / amortized variants}\label{subsec:11.6}
-SBI has both amortized
-(single network for all \(X_\mathrm{obs}\)) and sequential (refine
-around a specific \(X_\mathrm{obs}\)) variants. CD-SBI as developed here
-is amortized; a sequential variant would train \(\rho\) to concentrate
-around \(\theta\) values consistent with \(X_\mathrm{obs}\). Whether the
-calibration guarantee survives sequential refinement is non-trivial: the
-implicit conditioning on the iterative procedure changes the
-population-level distribution that the loss converges to.
+SBI has both amortized (single network for all \(X_\mathrm{obs}\)) and
+sequential (refine around a specific \(X_\mathrm{obs}\)) variants.
+CD-SBI as developed here is amortized. The status of a sequential
+variant splits in two:
+\begin{itemize}
+\tightlist
+\item \emph{Naive sequential CD-SBI (adapting \(\rho\) to concentrate
+  near \(X_\mathrm{obs}\)) almost certainly loses pointwise calibration:}
+  the adaptive \(\rho\) violates the \(\rho\)-independence-in-the-population-limit
+  argument of \S\ref{subsec:1.3}, and the broader sequential-SBI literature
+  (Hermans et al.~2022; Lueckmann et al.~2021) has documented empirical
+  miscalibration of all naive sequential variants.
+\item \emph{Whether an importance-reweighted or APT-style corrected
+  sequential procedure preserves the calibration guarantee is genuinely
+  open.} The closest existing work is Falkiewicz et al.~(2023)
+  (Calibrated NPE), which adds a differentiable coverage regularizer to
+  a sequential loop but does not prove a coverage guarantee.
+\end{itemize}
 
 \subsection{Discrete data with no scalar sufficient statistic}\label{subsec:11.7}
-For
-models where no scalar sufficient statistic exists (e.g., images,
-sequences), the discrete extension of \S\ref{subsec:5.7} must be combined with feature
-extraction. Whether the Lancaster randomization argument extends to
-learned-feature settings is open.
+For models where no scalar sufficient statistic exists (e.g., images,
+sequences), the discrete extension of \S\ref{subsec:5.7} must be
+combined with feature extraction. Whether the Lancaster randomization
+argument extends to learned-feature settings is open. The specific
+obstruction: under a learned \(T(X) = g_\phi(X)\), \(g_\phi\) is not
+sufficient in general, the atom probabilities \(p_\theta(t)\) become
+feature-extractor-dependent, and the (R4) order-preservation condition
+loses its architectural cleanness because the ordering of \(T\)-values
+is itself learned.
 
 \subsection{Efficient computation of \(\mathcal{C}_\alpha\) for
-multivariate}\label{subsec:11.8}
-Inversion via
-\(\|r(\theta, X_\mathrm{obs})\|^2 \le \chi^2_{d, \alpha}\) requires
-evaluating \(r\) on a grid or via root-finding. For visualization and
-reporting, efficient confidence-set computation in \(d \geq 3\) ---
-perhaps via direct sampling from the implicit set, or via a learned
-set-boundary parameterization --- is worth developing.
+multivariate (implementation challenge, not a research problem)}\label{subsec:11.8}
+\(\mathcal{C}_\alpha\) is computationally well-defined via autoregressive
+1D root-finding (\S\ref{subsec:6.4}). Three standard approaches are
+available: (i) invert \(r(\cdot; X_\mathrm{obs})\) autoregressively to
+produce boundary samples; (ii) HMC / SMC / rejection sampling on the
+implicit set; (iii) pushforward sampling --- draw \(z\) from
+\(\mathcal{N}(0, I_d)\) constrained to the \(\chi^2_d\) ball, then
+invert \(r(\cdot; X_\mathrm{obs})(\theta) = z\). Efficient visualization
+and reporting in \(d \ge 3\) (especially when only boundary samples or
+projections are needed) is an engineering question worth developing in
+practice; we list it here for completeness rather than as an unresolved
+research question.
 
 \medskip\hrule\medskip
 
