@@ -1,0 +1,2118 @@
+\documentclass[11pt]{article}
+
+% --- Encoding / fonts ---
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+
+% --- Math ---
+\usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage{bm}
+
+% --- Page layout ---
+\usepackage[margin=1in]{geometry}
+\usepackage{parskip}
+\setlength{\parskip}{0.5\baselineskip plus 2pt minus 1pt}
+\setlength{\parindent}{0pt}
+
+% --- Tables ---
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+
+% --- Lists ---
+\providecommand{\tightlist}{\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+
+% --- Hyperref (must be loaded near the end) ---
+\usepackage{xcolor}
+\usepackage[hidelinks,unicode,linktoc=all]{hyperref}
+
+% --- Numbering depth: section / subsection / subsubsection ---
+\setcounter{secnumdepth}{3}
+\setcounter{tocdepth}{2}
+
+% --- Better widow/orphan control ---
+\widowpenalty=10000
+\clubpenalty=10000
+
+% --- Title metadata ---
+\title{\Large\bfseries CD-SBI: Calibrated Confidence Distributions \\ via Simulation-Based Inference}
+\author{}
+\date{\normalsize\itshape A working technical document. Comments, counter-examples, and pushback welcome.}
+
+\begin{document}
+
+\maketitle
+
+\thispagestyle{empty}
+\vspace{1em}
+
+\section*{Abstract}
+
+Simulation-based inference (SBI) is now the standard tool for
+likelihood-free inference in scientific simulators, but its commonly
+used objectives --- neural posterior, likelihood, and ratio estimation
+--- do not enforce frequentist coverage. Hermans et al.~(2022)
+documented that off-the-shelf SBI methods are often substantially
+overconfident at realistic simulation budgets, with no internal
+diagnostic to detect this.
+
+This document develops an alternative framework whose training target
+is, by construction, a calibrated \emph{confidence distribution} (CD) in
+the Schweder--Hjort / Fraser tradition. The method learns a pivotal
+quantity \(r: \Theta \times \mathcal{X} \to \mathbb{R}^d\) such that,
+under the data-generating distribution,
+\(r(\theta_0; X) \mid \theta_0 \sim \mathcal{N}(0, I_d)\) for every true
+\(\theta_0\). The induced CD then has exact frequentist coverage at
+every confidence level --- \emph{pointwise in \(\theta_0\), not merely
+on average over the proposal.}
+
+The method has three ingredients:
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\tightlist
+\item
+  \textbf{A standard NF-MLE objective}: per-sample maximum likelihood
+  for \(r\) viewed as a conditional normalizing flow,
+  \[L(r) \;=\; \mathbb{E}_{(\theta, X) \sim \rho \otimes P_\theta}\!\left[\tfrac{1}{2}\|r(\theta, X)\|^2 \;-\; \log\bigl|\det \partial r/\partial X\bigr|\right].\]
+  This is the same objective used by Sequential Neural Likelihood (SNL;
+  Papamakarios et al.~2019).
+\item
+  \textbf{Architectural monotonicity in \(\theta\)}: \(r\) is
+  parameterized so that \(\theta \mapsto r_k(\theta; X)\) is strictly
+  increasing in each coordinate (autoregressively, in higher
+  dimensions). This is what converts a trained flow into a valid CD
+  pivot.
+\item
+  \textbf{Architectural monotonicity in \(X\)}: \(r\) is parameterized
+  so that \(\partial r/\partial X\) is (lower-)triangular with positive
+  diagonal. This is what makes the change-of-variables Jacobian both
+  correct and computationally cheap, and avoids the spurious sub-optima
+  that arise when monotonicity-in-\(X\) is left to autograd.
+\end{enumerate}
+
+We establish that:
+
+\begin{itemize}
+\tightlist
+\item
+  In the regular continuous one-parameter case under \(C^1\) regularity,
+  the NF-MLE objective combined with monotonicity-in-\(\theta\) uniquely
+  recovers the Schweder--Hjort UMP-unbiased CD (Theorem A). A Lipschitz
+  version handles ReLU networks under one mild side condition (Theorem
+  A*).
+\item
+  The result lifts to any one-parameter regular exponential family with
+  continuous sufficient statistic (Theorem C), and to discrete families
+  via Lancaster's randomized PIT (Theorem C*).
+\item
+  In multivariate \(\theta\), a triangular-autoregressive construction
+  gives a tractable architecture whose Jacobian factors into a product
+  of \(d\) positive scalars, scaling linearly in \(d\). Within that
+  architectural class, the calibration manifold reduces to the unique
+  Knothe--Rosenblatt rearrangement (Theorem A-d).
+\item
+  Empirically, the method recovers the true pivot to within
+  \textasciitilde1--3\% relative error on 1D and 2D location-Gaussian
+  problems and on the exponential-rate model, with empirical coverage
+  matching nominal levels to within 0.01--0.02 across all tested
+  parameter values and confidence levels.
+\end{itemize}
+
+The framework reduces to the classical optimal CD in regular cases and
+admits a tractable amortized neural implementation in cases where no
+closed-form pivot is available. We document one architectural failure
+mode (the autograd-Jacobian shortcut without monotone-in-\(X\)
+enforcement) and its fix.
+
+\medskip\hrule\medskip
+
+\tableofcontents
+
+\medskip\hrule\medskip
+
+\section*{Part I — Framework}
+\addcontentsline{toc}{section}{Part I — Framework}
+
+\section{Motivation: SBI and confidence distributions}\label{sec:1}
+
+\subsection{The state of SBI}\label{subsec:1.1}
+
+Many scientific models are \emph{implicit}: defined by a stochastic
+simulator \(X \sim P_\theta\) from which one can sample data, but for
+which the likelihood \(p(X \mid \theta)\) is intractable or unavailable
+in closed form. Modern \emph{simulation-based inference} (SBI) trains a
+deep-network surrogate for the quantity of interest --- the Bayesian
+posterior \(p(\theta \mid X)\), the likelihood \(p(X \mid \theta)\), or
+the likelihood ratio --- from simulated pairs \((\theta, X)\).
+
+The three dominant families are:
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Neural posterior estimation} (NPE; Papamakarios \& Murray
+  2016; Greenberg et al.~2019): train a density estimator directly on
+  the posterior \(\theta \mid X\).
+\item
+  \textbf{Neural likelihood estimation / Sequential Neural Likelihood}
+  (NLE/SNL; Papamakarios et al.~2019): train a density estimator on
+  \(X \mid \theta\), then run MCMC over the learned surrogate.
+\item
+  \textbf{Neural ratio estimation} (NRE; Hermans et al.~2020; Miller et
+  al.~2022): train a binary classifier to distinguish
+  \((\theta, X) \sim p(\theta, X)\) from
+  \((\theta, X) \sim p(\theta)p(X)\), recovering the likelihood ratio
+  via Bayes's rule.
+\end{itemize}
+
+On benchmarks with adequate simulation budgets, these methods are
+accurate.
+
+The problem is \emph{miscalibration}. Hermans et al.~(2022) (``A Trust
+Crisis in Simulation-Based Inference?'') documented that all four major
+SBI families systematically produce \emph{overconfident} posteriors at
+realistic budgets --- credible intervals have empirical coverage well
+below nominal. Subsequent work has tried to retrofit calibration via
+conservative regularization (Delaunoy et al.~2022), differentiable
+coverage probabilities (Falkiewicz et al.~2023), Neyman-construction
+wrappers (LF2I: Dalmasso et al.~2024; WALDO: Masserano et al.~2023),
+depth-based hyper-rectangles (Bortolato \& Ventura 2025), and
+variational coverage corrections (Patel et al.~2023). These methods all
+treat calibration as a correction to a non-calibrated primary objective.
+
+\subsection{A different starting point: confidence distributions}\label{subsec:1.2}
+
+We instead change the primary target of inference. Rather than
+estimating a posterior and correcting it, we aim to produce --- from the
+simulator alone --- a \emph{confidence distribution}.
+
+\textbf{What a confidence distribution is.} A confidence distribution
+(CD) is the frequentist analogue of the Bayesian posterior: a
+data-dependent distribution function \(H(\cdot; X)\) on \(\Theta\) whose
+\(\alpha\)-quantile is the upper endpoint of an exact one-sided
+\(\alpha\)-confidence interval. The modern theory traces back through
+Fisher's fiducial inference (1930), Cox (1958), and Efron (1993, 1998),
+to the synthesis in Schweder \& Hjort (2016). The defining property is
+\textbf{exact coverage}: \[
+H(\theta_0; X) \;\sim\; U(0,1) \quad \text{when } X \sim P_{\theta_0}, \text{ for every } \theta_0 \in \Theta.
+\] Equivalently: \(H(\theta_0; X)\) is the \emph{probability integral
+transform} (PIT) --- the mapping that converts any continuous random
+variable into a uniform \((0,1)\) variable via its own CDF --- applied
+to a correctly chosen \emph{pivot}.
+
+\textbf{Astronomer-friendly comparison.} A CD plays the same role as a
+posterior: a distribution-valued summary of the evidence for \(\theta\).
+The difference is what calibration means.
+
+\begin{itemize}
+\tightlist
+\item
+  A Bayesian posterior \(\pi(\theta \mid X)\) depends on a prior. Its
+  credible intervals contain the true \(\theta_0\) with probability
+  \(\alpha\) \emph{averaged over the prior} --- coverage holds when one
+  integrates over the same prior used to define the posterior. There is
+  generally no guarantee of frequentist coverage \emph{pointwise at a
+  given \(\theta_0\)}.
+\item
+  A CD \(H(\theta; X)\) depends only on the model \(\{P_\theta\}\) and
+  the data. Its quantile-based intervals contain \(\theta_0\) with
+  probability \emph{exactly} \(\alpha\) \emph{for every fixed
+  \(\theta_0\)}, the data being random.
+\end{itemize}
+
+In regular one-parameter models the optimal (uniformly most powerful
+unbiased, ``UMPU'') CD is explicit and unique. For
+\(X \sim \mathcal{N}(\theta, 1)\) it is \[
+H^*(\theta; X) = \Phi(\theta - X),
+\] where \(\Phi\) is the standard normal CDF. Check: under
+\(X \sim \mathcal{N}(\theta_0, 1)\) one has \(\theta_0 - X = -Z\) with
+\(Z \sim \mathcal{N}(0,1)\), so
+\(\Phi(\theta_0 - X) = \Phi(-Z) \sim U(0,1)\) exactly. Inverting at
+level \(1-\alpha/2\) and \(\alpha/2\) recovers the textbook
+\(z\)-interval \([X - z_{1-\alpha/2}, X + z_{1-\alpha/2}]\).
+
+Our aim is to compute such a CD from a simulator alone, when no closed
+form is available.
+
+\subsection{The top-line goal and what supports it}\label{subsec:1.3}
+
+\textbf{Top-line goal.} Produce, from a simulator alone, a function
+\(r(\theta; X)\) whose induced CD \[
+H_r(\theta; X) \;:=\; \Phi_d(r(\theta; X))
+\] (\(\Phi_d\) = product standard normal CDF) has \emph{pointwise exact
+frequentist coverage} --- every confidence level, every true
+\(\theta_0\).
+
+The object \(r\) is called a \emph{pivot}: in classical statistics, a
+function of data and parameter whose distribution does not depend on the
+parameter (the canonical example being \(X - \theta\) in the
+location-normal model). Here we require the slightly stronger property
+that its distribution under the truth is exactly
+\(\mathcal{N}(0, I_d)\).
+
+\textbf{Two characterizing properties.}
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{(C1) Calibration.} Under \(X \sim P_{\theta_0}\),
+  \(r(\theta_0; X) \sim \mathcal{N}(0, I_d)\) for every
+  \(\theta_0 \in \Theta\). Equivalently,
+  \(H_r(\theta_0; X) \sim U(0,1)^d\). This is a \emph{frequentist}
+  property --- no prior, no expectation over \(\theta\).
+\item
+  \textbf{(C2) Monotonicity in \(\theta\).} For each fixed \(X\) and
+  each coordinate \(k\), \(\theta_k \mapsto r_k(\theta; X)\) is strictly
+  increasing (with autoregressive conditioning in \(d > 1\); see \S\ref{sec:6}).
+  This ensures connected level sets, so confidence regions are
+  well-defined geometric objects.
+\end{itemize}
+
+\textbf{Subordinate objectives the rest of the document develops in
+service of this goal.}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Objective
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Where addressed
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+Characterize the space of \(r\)'s satisfying (C1): the \emph{calibration
+manifold} \(\mathcal{M}\) & \S\ref{sec:2} \\
+Identify a loss whose minimizers on the relevant function class are
+\(\mathcal{M}\): NF-MLE & \S\ref{sec:3}, \S\ref{subsec:3.7} \\
+Identify architectural constraints picking out a unique element of
+\(\mathcal{M}\) & \S\ref{subsec:3.3}, \S\ref{subsec:3.5}, \S\ref{sec:6} \\
+Prove uniqueness in 1D regular models & \S\ref{sec:4}--\S\ref{sec:5} (Theorems A, A\emph{, C,
+C}) \\
+Extend to multivariate \(\theta\) & \S\ref{sec:6} (Theorem A-d via
+Knothe--Rosenblatt) \\
+Validate at finite sample size & \S\ref{sec:7}--\S\ref{sec:8} \\
+Place the framework in the SBI literature & \S\ref{subsec:3.7}, \S\ref{sec:10} \\
+Demarcate open problems & \S\ref{sec:11} \\
+\end{longtable}
+
+Note carefully: (C1) is a \emph{frequentist} property --- it makes no
+reference to a prior. The training proposal \(\rho\) on \(\Theta\) used
+to draw simulations is purely a sampling distribution; in the population
+limit the CD pivot does not depend on \(\rho\), provided \(\rho\) has
+full support on the region of inferential interest.
+
+\subsection{Scope of this document}\label{subsec:1.4}
+
+Theory is developed in detail for the regular one-parameter case, with
+explicit extensions to (i) discrete one-parameter families via auxiliary
+randomization, and (ii) multivariate \(\theta\) via autoregressive
+triangular flows. Misspecification is acknowledged but not addressed.
+
+\medskip\hrule\medskip
+
+\section{The pivot and the calibration manifold}\label{sec:2}
+
+\subsection{Notation and standing assumptions}\label{subsec:2.1}
+
+\begin{itemize}
+\tightlist
+\item
+  \(\Theta \subseteq \mathbb{R}^d\) is the parameter space.
+\item
+  \(\mathcal{X}\) is the data space;
+  \(\{P_\theta : \theta \in \Theta\}\) is the parametric statistical
+  model.
+\item
+  \(\rho\) is the \textbf{proposal distribution} on \(\Theta\), with
+  full support on the region of inferential interest and finite first
+  moment. It is a sampling device for generating training data,
+  \emph{not} a Bayesian prior --- it has no role at inference time.
+\item
+  The training distribution is
+  \((\theta, X) \sim \rho \otimes P_\theta\): sample
+  \(\theta \sim \rho\), then \(X \mid \theta \sim P_\theta\).
+\item
+  \(\varphi, \Phi\) denote the scalar standard normal density / CDF;
+  \(\phi_d, \Phi_d\) their \(d\)-variate analogues (product of standard
+  normals).
+\item
+  \(\mathrm{KL}(p \,\|\, q) := \int p \log(p/q)\,d\mu\) is the
+  Kullback--Leibler divergence; \(\mathrm{KL} \ge 0\) with equality iff
+  \(p = q\) a.e.
+\end{itemize}
+
+\subsection{The pivot, the implied CD, the calibration manifold}\label{subsec:2.2}
+
+A \textbf{pivot} in the sense used here is a measurable function
+\(r: \Theta \times \mathcal{X} \to \mathbb{R}^d\) satisfying:
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{(R1) Monotonicity in \(\theta\).} For
+  \(\rho \otimes P_\theta\)-a.e. \(X\) and each coordinate \(k\), the
+  map \(\theta_k \mapsto r_k(\theta; X)\) is strictly increasing when
+  other components are held fixed (autoregressively in \(d > 1\); see
+  \S\ref{sec:6}). In 1D this is just: \(\theta \mapsto r(\theta; X)\) is strictly
+  increasing.
+\item
+  \textbf{(R2) Invertibility in \(X\).} For each fixed \(\theta\), the
+  map \(X \mapsto r(\theta; X)\) is a \(C^1\) (or Lipschitz, a.e.
+  differentiable) diffeomorphism onto its image. Equivalently,
+  \(\partial r / \partial X\) has full rank a.e.
+\end{itemize}
+
+The \textbf{induced CD} is \[
+H_r(\theta; X) \;:=\; \Phi_d(r(\theta; X)) \;\in\; (0,1)^d,
+\] and the \textbf{calibration manifold} (within a function class
+\(\mathcal{F}\)) is \[
+\mathcal{M}_\mathcal{F} \;:=\; \bigl\{r \in \mathcal{F} \,:\, \mathrm{Law}(r(\theta_0; X) \mid \theta_0) = \mathcal{N}(0, I_d) \text{ for every } \theta_0 \in \mathrm{supp}(\rho)\bigr\}.
+\] Any element of \(\mathcal{M}_\mathcal{F}\) satisfying (R1) is a valid
+CD pivot.
+
+\textbf{Concrete example.} In the location-normal model
+\(X \sim \mathcal{N}(\theta, 1)\), the function
+\(r^*(\theta, X) = \theta - X\) is a pivot in this sense:
+\(r^*(\theta_0, X) = \theta_0 - X = -Z \sim \mathcal{N}(0,1)\),
+satisfying (R1) (\(\partial_\theta r^* = +1\)) and (R2)
+(\(\partial_X r^* = -1\)). The induced CD
+\(H_{r^*}(\theta; X) = \Phi(\theta - X)\) recovers the textbook one. The
+framework we develop is: find the analogue of \(r^*\) when no closed
+form is available, by training a neural surrogate.
+
+\subsection{The role of (R1): why monotonicity in \(\theta\) is needed}\label{subsec:2.3}
+
+Calibration alone gives an object with the right marginal frequentist
+behavior under each \(\theta_0\), but doesn't guarantee that confidence
+sets are connected or interpretable. Monotonicity in \(\theta\) ensures:
+
+\begin{itemize}
+\tightlist
+\item
+  \(H_r(\cdot; X)\) is a proper CDF on \(\Theta\), so the
+  level-\(\alpha\) confidence interval
+  \(H_r(\cdot; X)^{-1}([\alpha/2, 1-\alpha/2])\) is a connected interval
+  (1D) or rectangle (multivariate via the autoregressive structure).
+\item
+  The ``direction'' of the CD is fixed: larger \(H_r\) corresponds to
+  larger \(\theta\), matching the convention that the CD's quantile
+  function is the upper endpoint of a one-sided confidence interval.
+\end{itemize}
+
+Without (R1), the calibration manifold has a \(\mathbb{Z}_2^d\)
+ambiguity (sign flips in each coordinate of \(r\)), and the induced
+``confidence sets'' can be disconnected. (R1) eliminates this.
+
+\subsection{The role of (R2): why monotonicity in \(X\) is needed}\label{subsec:2.4}
+
+Invertibility in \(X\) at fixed \(\theta\) is what makes the
+change-of-variables formula valid: \[
+\hat p_r(X \mid \theta) \;=\; \phi_d(r(\theta, X)) \cdot \bigl|\det \partial r / \partial X\bigr|.
+\] Without this, the right-hand side is not a valid density (it misses
+the sum over preimages when \(X \mapsto r\) is not bijective), and any
+loss built on it is mis-specified.
+
+In \S\ref{sec:3} we will see that NF-MLE applied to a non-bijective \(r\) has
+\emph{spurious} sub-optima below the entropy of the true model --- the
+model gains apparent likelihood by folding \(X\)-space, inflating
+\(|\det \partial r / \partial X|\) in regions where preimages collide.
+Note that under folding, \(\hat p_r\) does \emph{not} integrate to one
+in \(X\) at fixed \(\theta\), so there is no lower bound on
+\(-\log \hat p_r\) from the true conditional entropy; the loss can dip
+arbitrarily far below the true model's NF-MLE value. The empirical
+demonstration is in \S\ref{subsec:8.4}. Enforcing (R2) architecturally fixes this.
+
+\medskip\hrule\medskip
+
+\section*{Part II — Loss design}
+\addcontentsline{toc}{section}{Part II — Loss design}
+
+\section{The NF-MLE objective}\label{sec:3}
+
+\subsection{What a normalizing flow is, and the statement of the loss}\label{subsec:3.1}
+
+A \emph{normalizing flow} is a parametric family of diffeomorphisms
+\(r: \mathcal{X} \to \mathbb{R}^d\) that transforms a complicated source
+density \(p(X)\) into a simple base density \(\phi_d\) (we use a
+standard Gaussian throughout). Conditional on \(\theta\), the implied
+density on \(\mathcal{X}\) is the standard change-of-variables
+expression
+\(\hat p_r(X \mid \theta) = \phi_d(r(\theta, X)) \cdot |\det \partial r / \partial X|\).
+\emph{NF-MLE} simply means: train \(r\) by maximum likelihood under this
+implied density.
+
+For a pivot \(r\) satisfying (R1) and (R2), define \[
+\boxed{\;L(r) \;:=\; \mathbb{E}_{(\theta, X) \sim \rho \otimes P_\theta}\!\left[ \tfrac{1}{2}\|r(\theta, X)\|^2 \;-\; \log\bigl|\det \tfrac{\partial r}{\partial X}\bigr| \right].\;}
+\] This is the negative log-likelihood under \(\hat p_r\) with the
+irrelevant constant \(\tfrac{d}{2}\log(2\pi)\) dropped.
+
+\subsection{Why it works: strict propriety via KL non-negativity}\label{subsec:3.2}
+
+Write the model density implied by \(r\) as
+\(\hat p_r(X \mid \theta) := \phi_d(r(\theta, X)) \cdot |\det \partial r / \partial X|\).
+Direct algebra gives \[
+L(r) \;=\; \mathbb{E}_\rho\bigl[\mathbb{E}_{X \mid \theta}[-\log \hat p_r(X \mid \theta)]\bigr] \;=\; \mathbb{E}_\rho\bigl[\mathrm{KL}\bigl(p(\cdot \mid \theta) \,\|\, \hat p_r(\cdot \mid \theta)\bigr)\bigr] + \mathrm{const},
+\] where the constant is the conditional entropy of \(X \mid \theta\)
+averaged over \(\rho\) (independent of \(r\)). Since
+\(\mathrm{KL} \ge 0\) with equality iff the two densities agree a.e.,
+\(L(r)\) is minimized iff
+\(\hat p_r(\cdot \mid \theta) = p(\cdot \mid \theta)\) for \(\rho\)-a.e.
+\(\theta\). Equivalently,
+\(r(\theta_0; X) \mid \theta_0 \sim \mathcal{N}(0, I_d)\) for
+\(\rho\)-a.e. \(\theta_0\). So: \[
+\arg\min_{r \in \mathcal{F}} L(r) \;=\; \mathcal{M}_\mathcal{F},
+\] where \(\mathcal{F}\) is the architectural class over which the
+optimization ranges (assumed to satisfy (R2) so \(\hat p_r\) is a valid
+density).
+
+This is what is meant by \textbf{strict propriety}: a loss is
+\emph{strictly proper} for a target \(\mathcal{M}\) if its
+population-level minimum, over the class of admissible \(r\), is
+attained exactly on \(\mathcal{M}\) and nowhere else. (The term comes
+from the scoring-rule literature; Gneiting \& Raftery 2007 is the
+standard reference.) NF-MLE is strictly proper for the calibration
+manifold within the architectural class. No auxiliary independence or
+sharpness penalties are needed --- the per-sample log-density already
+encodes both calibration \emph{and} the implied sharpness of
+\(\hat p_r\).
+
+\subsection{The role of architectural constraints in selecting from \(\mathcal{M}\)}\label{subsec:3.3}
+
+The calibration manifold over the \emph{unconstrained} class of pivots
+is enormous. In 1D, any composition of a monotone transport
+\(X \mid \theta \to \mathcal{N}(0,1)\) with a measure-preserving
+bijection of \(\mathcal{N}(0,1)\) to itself remains in the manifold; the
+manifold is infinite-dimensional. In multivariate, rotations of a
+calibrated pivot stay calibrated since \(\mathcal{N}(0, I_d)\) is
+rotation-invariant.
+
+NF-MLE selects an element of \(\mathcal{M}\) but does not by itself
+identify which one; the architectural class \(\mathcal{F}\) does. We
+will see:
+
+\begin{itemize}
+\tightlist
+\item
+  In 1D, \emph{within the class \(\mathcal{F}_{C^1}\) of \(C^1\) pivots
+  satisfying (R1) and (R2)}, \(\mathcal{M}_\mathcal{F}\) is a singleton
+  (Theorem A, \S\ref{sec:4}).
+\item
+  In multivariate, \emph{within the autoregressive triangular class}
+  satisfying the corresponding multivariate (R1), (R2),
+  \(\mathcal{M}_\mathcal{F}\) reduces to a singleton: the
+  Knothe--Rosenblatt rearrangement (Theorem A-d, \S\ref{subsec:6.3}).
+\end{itemize}
+
+So the slogan ``architecture picks out a unique element'' is precise:
+the function-class restriction makes the population optimum unique.
+
+\subsection{The Bayesian connection: NF-MLE is the SNL loss}\label{subsec:3.4}
+
+The objective \(L(r)\) is \emph{identical} to the loss used by
+Sequential Neural Likelihood (SNL; Papamakarios et al.~2019). The full
+picture is:
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Component
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+SNL
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+CD-SBI
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+Loss & NF-MLE on \(X \mid \theta\) & Same \\
+Architecture & Generic normalizing flow & Flow with
+monotone-in-\(\theta\) + monotone-in-\(X\) structure \\
+Output & Approximate likelihood \(\hat p(X \mid \theta)\) & CD pivot
+\(r(\theta; X)\) \\
+Inference & MCMC on \(\hat p(X_\text{obs} \mid \theta)\,\pi(\theta)\) &
+Direct inversion:
+\(\{\theta : \|r(\theta; X_\text{obs})\|^2 \le \chi^2_{d,\alpha}\}\) \\
+Coverage guarantee & None (Bayesian) & Pointwise frequentist \\
+\end{longtable}
+
+In the population limit on a sufficiently expressive class, both SNL and
+CD-SBI recover the same conditional density \(p(X \mid \theta)\) at the
+NF-MLE optimum. CD-SBI's contribution is the architectural prescription
+that \emph{(a)} exposes a monotone-in-\(\theta\) pivot directly, and
+\emph{(b)} makes pivot inversion well-defined. The architectural
+constraints do not change what is learned in regular cases (where the
+true pivot already satisfies monotonicity); they restrict the
+parameterization to make the CD output well-typed.
+
+This is good news: NF-MLE inherits all of SNL's optimization stability,
+scalability, and tooling.
+
+\subsection{Why architectural monotonicity in \(X\) is essential}\label{subsec:3.5}
+
+If \(r\) is not bijective in \(X\) at fixed \(\theta\), the
+change-of-variables formula does not apply, and \(\hat p_r\) is not a
+valid density. NF-MLE then becomes ill-posed. In practice --- using
+autograd to compute the Jacobian during training --- the model can find
+regions of \(X\)-space where \(r\) folds and the local
+\(|\partial r / \partial X|\) becomes very large; this gives an
+artificially low loss while \(\hat p_r\) is not actually matching \(p\).
+Because the folded \(\hat p_r\) is not normalized in \(X\) at fixed
+\(\theta\), the loss \(-\mathbb{E}_X[\log \hat p_r]\) has no lower bound
+at the conditional entropy, so it can fall \emph{below} the loss
+attained by the true \(r^*\). The empirical demonstration is in \S\ref{subsec:8.4}.
+
+The clean fix is to enforce strict monotonicity in \(X\) architecturally
+--- either via \emph{Unconstrained Monotonic Neural Networks} (UMNNs;
+Wehenkel \& Louppe 2019), which represent a scalar monotone function as
+the integral of a positive function from a free neural net, or via
+autoregressive triangular structure. In both cases the Jacobian is
+closed-form and positive by construction.
+
+\medskip\hrule\medskip
+
+\setcounter{subsection}{6}
+\subsection{The design space of strictly proper objectives}\label{subsec:3.7}
+
+The structure of the problem --- find a function \(r\) whose minimizers,
+over a suitable class, are exactly the calibration manifold
+\(\mathcal{M}\) --- admits multiple families of candidate losses. This
+subsection situates NF-MLE within that design space and contrasts with
+the choices made by other SBI methods.
+
+\emph{Brief glossary for what follows.} The \textbf{Cramér--von Mises
+(CvM)} distance is \(\int (F_n(z) - F_0(z))^2\, dF_0(z)\), a strictly
+proper two-sample distance between an empirical CDF \(F_n\) and a
+reference CDF \(F_0\). The \textbf{energy distance} is a related
+\(L^2\)-distance between CDFs in higher dimensions. \textbf{HSIC}
+(Hilbert--Schmidt Independence Criterion; Gretton et al.~2005) is a
+kernel-based test statistic that is zero iff two random variables are
+independent. The \textbf{continuous ranked probability score (CRPS)} is
+\(\int(F(z) - \mathbf{1}\{y \le z\})^2\,dz\), a strictly proper scoring
+rule for predictive distributions; the \textbf{pinball loss} is its
+quantile analogue.
+
+\textbf{Class 1: Two-sample distance on the marginal pushforward.} Apply
+any strictly proper distance --- CvM, energy distance, KL --- between
+\(\mathrm{Law}(\Phi(r(\theta, X)))\) and \(U(0,1)^d\) on the joint
+training distribution. Strictly proper for \emph{marginal} calibration.
+\textbf{Insufficient on its own}: marginal \(\Phi(r) \sim U(0,1)\) does
+not imply conditional \(\Phi(r) \mid \theta \sim U(0,1)\) --- the
+Hermans trust-crisis pattern lives precisely here, with marginal PIT
+passing while conditional fails.
+
+\textbf{Class 2: Marginal + independence.} Augment Class 1 with an
+independence term \(\mathrm{HSIC}(\theta, \Phi(r))\) or similar.
+Marginal calibration plus \(\theta \perp \Phi(r)\) implies conditional
+calibration. Strictly proper for \(\mathcal{M}\), but empirically
+fragile in three ways: (i) the HSIC term has a weak gradient signal far
+from the optimum compared to a per-sample density target; (ii) the
+marginal-calibration term and the independence term must be balanced via
+hyperparameters, with no principled choice; (iii) the marginal and
+conditional terms can decouple in finite samples, reproducing the
+Class-1 pathology.
+
+\textbf{Class 3: Stratified / conditional matching.} Discretize
+\(\Theta\) into bins; within each bin, apply a two-sample distance
+between \(\Phi(r(\theta, X)) \mid \theta \in \mathrm{bin}\) and
+\(U(0,1)^d\). Strictly proper for each conditional. \textbf{Doesn't
+scale}: requires \(K^d\) bins in \(d\)-dimensional \(\Theta\), defeating
+the entire motivation for amortized inference.
+
+\textbf{Class 4: Scoring rules on standardized residuals.} Apply a
+strictly proper scoring rule --- CRPS, pinball --- to \(r(\theta, X)\)
+against the reference \(\mathcal{N}(0, I_d)\). \textbf{Directional
+propriety error.} Recall the standard form: a scoring rule \(S(F, y)\)
+is strictly proper if for any \(G^*\), the expectation
+\(\mathbb{E}_{Y \sim G^*}[S(F, Y)]\) over the \emph{sample} is minimized
+over the \emph{forecast} \(F\) at \(F = G^*\). Here the situation is
+reversed: the reference \(F = \mathcal{N}(0, I_d)\) is fixed and
+\(Y = r(\theta, X)\) is the learned quantity, so we are minimizing over
+the \emph{sample distribution} \(G\) with \(F\) fixed, which is not the
+proper direction. Concretely, for univariate CRPS with fixed \(F\) and
+\(Y \sim G\), \[
+\mathbb{E}_{Y \sim G}[\mathrm{CRPS}(F, Y)] \;=\; \int F(z)^2\,dz \;+\; \int G(z)\bigl(1 - 2F(z)\bigr)\,dz,
+\] since \(\mathbb{E}[\mathbf{1}\{Y \le z\}] = G(z)\) and the cross-term
+yields the displayed form. The first integral does not depend on \(G\).
+For \(F = \Phi\), the coefficient \(1 - 2\Phi(z)\) is positive on
+\(z < 0\) and negative on \(z > 0\), so the pointwise-optimal \(G\)
+satisfies \(G(z) = 0\) for \(z < 0\) and \(G(z) = 1\) for \(z > 0\) ---
+i.e., \(G = \delta_0\). The CRPS-against-\(\mathcal{N}(0,1)\) loss is
+\emph{minimized by collapsing \(r(\theta, X)\) to a constant at the
+median}, the opposite of calibration. (This is why LF2I uses
+pinball-style losses in the \emph{opposite} direction --- fixing the
+test statistic and learning critical values --- and is not a
+counterexample.)
+
+\textbf{Class 5: Per-sample conditional log-density (NF-MLE).} Apply KL
+on the conditional density:
+\(L(r) = \mathbb{E}_{(\theta, X)}\bigl[-\log \hat p_r(X \mid \theta)\bigr]\)
+where \(\hat p_r\) is the change-of-variables density implied by \(r\).
+Strictly proper for \(\mathcal{M}_\mathcal{F}\) by \S\ref{subsec:3.2}. Scales
+pointwise to any dimension. Identical to the SNL loss. \textbf{The only
+subtlety is the architectural monotonicity-in-\(X\) requirement} (\S\ref{subsec:3.5})
+--- without it, \(\hat p_r\) is not a valid density and the propriety
+argument breaks.
+
+\subsubsection*{Position in the SBI literature}
+
+The five classes intersect existing SBI methods as follows. NPE/SNPE
+(Papamakarios \& Murray 2016; Greenberg et al.~2019) minimize per-sample
+log-density of \(\theta \mid X\) --- a Class-5 loss on the
+\emph{posterior}, with no built-in coverage. NLE/SNL (Papamakarios et
+al.~2019) minimize per-sample log-density of \(X \mid \theta\) ---
+Class-5 on the \emph{likelihood}, which is the same loss CD-SBI uses;
+the difference is the architectural prescription (monotone in \(\theta\)
++ monotone in \(X\)). NRE (Hermans et al.~2020) targets the ratio via
+binary classification --- a Class-5-flavored loss on a different object.
+Balanced NRE (Delaunoy et al.~2022) and Calibrated NPE (Falkiewicz et
+al.~2023) add regularization terms to address conservativeness post hoc;
+CD-SBI achieves calibration by construction instead. LF2I (Dalmasso et
+al.~2024), WALDO (Masserano et al.~2023), and Box CD (Bortolato \&
+Ventura 2025) operate in a structurally different mode --- they learn
+test statistics (or hyper-rectangular acceptance regions) and invert via
+Neyman construction; the calibration target is the CDF of the test
+statistic under each \(\theta\), not the CDF of the parameter under
+data. CD-SBI's contribution within this taxonomy is the architectural
+recipe that converts Class-5/SNL into a procedure whose output is a
+frequentist CD by construction.
+
+\medskip\hrule\medskip
+
+\section*{Part III — Theory in one parameter}
+\addcontentsline{toc}{section}{Part III — Theory in one parameter}
+
+\section{Uniqueness in the location-normal model}\label{sec:4}
+
+We work in 1D (\(d = 1\)) and develop the theory for
+\(X \sim \mathcal{N}(\theta, 1)\), then lift to general regular
+exponential families in \S\ref{sec:5}.
+
+\subsection{Statement}\label{subsec:4.1}
+
+\textbf{Theorem A (Uniqueness, \(C^1\)).} \emph{Let
+\(X \sim \mathcal{N}(\theta, 1)\) on \(\Theta = \mathbb{R}\). Within the
+class} \[
+\mathcal{F}_{C^1} \;:=\; \bigl\{ r : \mathbb{R}^2 \to \mathbb{R} \text{ satisfying (R1), (R2), with } X \mapsto r(\theta_0; X) \in C^1(\mathbb{R}) \text{ for each } \theta_0 \bigr\},
+\] \emph{the calibration manifold is a singleton:} \[
+\mathcal{M} \cap \mathcal{F}_{C^1} \;=\; \{r^*\}, \qquad r^*(\theta; X) = \theta - X.
+\] \emph{Equivalently, \(L(r)\) over \(\mathcal{F}_{C^1}\) has a unique
+minimizer, \(r = r^*\), with \(H_{r^*}(\theta; X) = \Phi(\theta - X)\)
+--- the Schweder--Hjort UMP-unbiased CD.}
+
+The proof rests on three lemmas.
+
+\subsection{The three lemmas}\label{subsec:4.2}
+
+\textbf{Lemma 4.1 (Monotone transport).} \emph{Let
+\(\theta_0 \in \mathbb{R}\) and \(\psi: \mathbb{R} \to \mathbb{R}\)
+strictly monotone such that \(\psi\) pushes \(\mathcal{N}(\theta_0, 1)\)
+forward to \(\mathcal{N}(0,1)\). Then \(\psi(X) = X - \theta_0\) (if
+strictly increasing) or \(\psi(X) = \theta_0 - X\) (if strictly
+decreasing).}
+
+\emph{Proof.} Standard 1D monotone rearrangement: between two atomless
+probability measures on \(\mathbb{R}\), the unique monotone-increasing
+measure-preserving map is the composition of CDF and inverse CDF. For
+strictly increasing \(\psi\): \(\Phi(\psi(X)) = \Phi(X - \theta_0)\)
+a.s. by uniqueness, so \(\psi(X) = X - \theta_0\). For strictly
+decreasing \(\psi\),
+\(\Phi(\psi(X)) = 1 - \Phi(X - \theta_0) = \Phi(\theta_0 - X)\), so
+\(\psi(X) = \theta_0 - X\). \(\blacksquare\)
+
+\textbf{Lemma 4.2 (Level-set rigidity, \(C^1\)).} \emph{Let
+\(\theta_0 \in \mathbb{R}\) and \(\psi \in C^1(\mathbb{R})\) pushing
+\(\mathcal{N}(\theta_0, 1)\) to \(\mathcal{N}(0,1)\). Then \(\psi'\) has
+constant sign on \(\mathbb{R}\); i.e., \(\psi\) is strictly monotone.}
+
+\emph{Proof.} Suppose for contradiction \(\psi'\) changes sign. By
+continuity of \(\psi'\), there is some \(X_* \in \mathbb{R}\) with
+\(\psi'(X_*) = 0\) and (WLOG, taking a local maximum) values
+\(X_1, X_2\) arbitrarily close to \(X_*\) with \(X_1 < X_* < X_2\) such
+that \(\psi(X_1) = \psi(X_2) = v < v_* := \psi(X_*)\), with \(\psi\)
+strictly monotone on each of the intervals \((X_1, X_*)\) and
+\((X_*, X_2)\) for \(v\) close enough to \(v_*\).
+
+The pushforward density of \(\mathcal{N}(\theta_0, 1)\) under \(\psi\)
+at value \(v\) in the range of \(\psi\) where the preimage is finite is
+\[
+g_\psi(v) \;=\; \sum_{i\,:\,\psi(X_i)=v} \frac{\varphi(X_i - \theta_0)}{|\psi'(X_i)|}.
+\] For \(v\) just below \(v_*\), summing over the two preimages
+\(X_1(v) \to X_*^-\) and \(X_2(v) \to X_*^+\), \[
+g_\psi(v) \;\geq\; \frac{\varphi(X_1(v) - \theta_0)}{|\psi'(X_1(v))|} + \frac{\varphi(X_2(v) - \theta_0)}{|\psi'(X_2(v))|}.
+\] By Taylor expansion at \(X_*\) (using \(\psi'(X_*) = 0\) and
+\(\psi''(X_*) < 0\) at a local max, or more generally the leading
+nonzero derivative), \(|\psi'(X_i(v))| = O(|v - v_*|^{1/2})\) for a
+quadratic critical point, while
+\(\varphi(X_i(v) - \theta_0) \to \varphi(X_* - \theta_0) > 0\). So
+\(g_\psi(v) \to \infty\) as \(v \to v_*^-\). But the target density
+\(\varphi(v_*)\) is finite. Contradiction. (For higher-order critical
+points the divergence is faster; the conclusion is unchanged.)
+\(\blacksquare\)
+
+\textbf{Lemma 4.3 (NF-MLE is strictly proper, conditional).} \emph{Under
+the NF-MLE objective \(L(r)\), any minimizer \(r \in \mathcal{F}_{C^1}\)
+satisfies \(r(\theta_0; X) \mid \theta_0 \sim \mathcal{N}(0,1)\) for
+\(\rho\)-a.e. \(\theta_0\).}
+
+\emph{Proof.} From \S\ref{subsec:3.2}, \(L(r)\) is the expected KL between
+\(p(\cdot \mid \theta)\) and \(\hat p_r(\cdot \mid \theta)\), up to a
+constant. KL is zero iff
+\(\hat p_r(\cdot \mid \theta) = p(\cdot \mid \theta)\) a.e. on
+\(\mathrm{supp}\,\rho\). Under (R2), \(\hat p_r(\cdot \mid \theta)\)
+pushes \(X \mid \theta\) to \(\mathcal{N}(0,1)\) iff
+\(r(\theta_0; X) \mid \theta_0 \sim \mathcal{N}(0,1)\). \(\blacksquare\)
+
+\subsection{Proof of Theorem A}\label{subsec:4.3}
+
+\emph{Existence.} \(r^*(\theta; X) = \theta - X\) is \(C^\infty\). Under
+\(X = \theta_0 + Z\) with \(Z \sim \mathcal{N}(0,1)\),
+\(r^*(\theta_0; X) = -Z \sim \mathcal{N}(0,1)\), so
+\(r^* \in \mathcal{M}\). And \(\partial_\theta r^* = 1 > 0\) (R1),
+\(\partial_X r^* = -1 \neq 0\) (R2).
+
+\emph{Uniqueness.} Let \(r \in \mathcal{M} \cap \mathcal{F}_{C^1}\). For
+each \(\theta_0 \in \mathbb{R}\), define
+\(\psi_{\theta_0}: X \mapsto r(\theta_0; X)\). By Lemma 4.3,
+\(\psi_{\theta_0}\) pushes \(\mathcal{N}(\theta_0, 1)\) to
+\(\mathcal{N}(0,1)\). By Lemma 4.2 (\(\psi_{\theta_0}\) is \(C^1\) by
+hypothesis), \(\psi_{\theta_0}\) is strictly monotone. By Lemma 4.1,
+\(\psi_{\theta_0}(X) \in \{X - \theta_0,\, \theta_0 - X\}\).
+
+\emph{Selecting the direction.} The case
+\(\psi_{\theta_0}(X) = X - \theta_0\) for \(\rho\)-a.e. \(\theta_0\)
+gives \(r(\theta, X) = X - \theta\), which has
+\(\partial_\theta r = -1\) --- contradicting (R1). Hence the other
+branch: \(\psi_{\theta_0}(X) = \theta_0 - X\), giving
+\(r(\theta, X) = \theta - X\), with \(\partial_\theta r = +1 > 0\)
+satisfying (R1). \(\blacksquare\)
+
+\subsection{Strengthening to Lipschitz: Theorem A*}\label{subsec:4.4}
+
+Lemma 4.2 uses \(C^1\) regularity essentially: the contradiction comes
+from a \(|v - v_*|^{-1/2}\) (or faster) divergence of the pushforward
+density near a critical value, which fails for Lipschitz V-shapes. For
+ReLU networks (Lipschitz, piecewise affine), we need an alternative.
+
+The clean approach is to require strict \(X\)-monotonicity as an extra
+condition:
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{(R3) {[}strict \(X\)-monotonicity, a.e.{]}:} \(\partial_X r\)
+  has constant sign and is bounded away from zero on the
+  differentiability set: \(|\partial_X r(\theta; X)| \geq c > 0\) a.e.
+\end{itemize}
+
+\textbf{Theorem A* (Uniqueness, Lipschitz).} \emph{Suppose
+\(r: \mathbb{R}^2 \to \mathbb{R}\) is Lipschitz and satisfies (R1),
+(R2), (R3). If \(r \in \mathcal{M}\) then \(r(\theta; X) = \theta - X\)
+a.e.}
+
+\emph{Proof.} By Rademacher's theorem (a Lipschitz function on
+\(\mathbb{R}^n\) is differentiable Lebesgue-a.e.), \(r\) is
+differentiable a.e. By (R3), \(\psi_{\theta_0}(X) := r(\theta_0; X)\) is
+strictly monotone in \(X\). By Lemma 4.3, \(\psi_{\theta_0}\) pushes
+\(\mathcal{N}(\theta_0, 1)\) to \(\mathcal{N}(0,1)\). By Lemma 4.1 (1D
+monotone rearrangement, valid for any pair of atomless probability
+measures on \(\mathbb{R}\)),
+\(\psi_{\theta_0}(X) \in \{X - \theta_0,\, \theta_0 - X\}\) a.e. Sign
+determination as in Theorem A. \(\blacksquare\)
+
+When is (R3) automatic? Whenever the architecture enforces it. For
+\(C^1\) networks (tanh, GELU, softplus activations), Lemma 4.2 derives
+it from \(C^1\) + calibration. For UMNN architectures with \(X\) as a
+monotone input, by construction. For triangular flows of the kind
+described in \S\ref{sec:6}, by construction. For vanilla ReLU networks with no
+architectural enforcement, (R3) may fail, and architectural enforcement
+is the recommended fix.
+
+\subsection{The Schweder--Hjort bridge}\label{subsec:4.5}
+
+A \textbf{UMP-unbiased CD} is, in the classical sense, the CD whose
+associated one-sided test family at each level is uniformly most
+powerful within the class of unbiased tests; this is the analogue of the
+UMPU confidence interval in classical testing theory. For
+\(X \sim \mathcal{N}(\theta, 1)\), Schweder \& Hjort (2016, ch.~5) give
+the UMP-unbiased CD as
+\(C^*_\mathrm{SH}(\theta; X) = \Phi(\theta - X)\). Our optimal pivot
+\(r^*(\theta; X) = \theta - X\) induces
+\(H_{r^*}(\theta; X) = \Phi(\theta - X) = C^*_\mathrm{SH}\). So:
+
+\textbf{Proposition 4.5.} \emph{In the location-normal model, the unique
+element of \(\mathcal{M} \cap \mathcal{F}_{C^1}\) produced by CD-SBI is
+identically the Schweder--Hjort UMP-unbiased CD.}
+
+This is what we mean by ``the framework reduces to the classical theory
+in regular cases.''
+
+\medskip\hrule\medskip
+
+\section{Lift to regular one-parameter exponential families}\label{sec:5}
+
+\subsection{Setup and canonical pivot}\label{subsec:5.1}
+
+\emph{Background, brief.} A \emph{one-parameter exponential family} is a
+parametric model whose density takes the canonical form
+\(p(X \mid \theta) = h(X) \exp(\theta \cdot T(X) - A(\theta))\), with
+\(T(X)\) a real-valued \textbf{sufficient statistic} for \(\theta\) ---
+meaning \(X\) enters the likelihood only through \(T(X)\). The family
+has \textbf{monotone likelihood ratio} (MLR) in \(T\) if for any
+\(\theta_1 < \theta_2\), \(p(X \mid \theta_2)/p(X \mid \theta_1)\) is a
+monotone function of \(T(X)\). This is automatic in the canonical form
+when \(T\) is real-valued. MLR is the hypothesis that powers most
+classical optimal-testing results.
+
+Now let \(\{P_\theta : \theta \in \mathbb{R}\}\) be a regular
+one-parameter exponential family with sufficient statistic
+\(T : \mathcal{X} \to \mathbb{R}\). Assume \(T(X)\) has a continuous
+positive density under each \(P_\theta\), and assume increasing MLR.
+(The decreasing-MLR case differs only in sign convention.)
+
+The \textbf{canonical CD pivot} is \[
+r^*(\theta; X) \;:=\; \Phi^{-1}\bigl(1 - F_\theta(T(X))\bigr),
+\] where \(F_\theta\) is the CDF of \(T(X)\) under \(P_\theta\). (For
+decreasing MLR, drop the \(1 -\).)
+
+\emph{Verification.} Under \(X \sim P_{\theta_0}\),
+\(F_{\theta_0}(T(X)) \sim U(0,1)\) by the probability integral
+transform, so \(r^*(\theta_0; X) \sim \mathcal{N}(0,1)\). (R1) holds by
+MLR (the CDF \(F_\theta\) is monotone-decreasing in \(\theta\) at any
+fixed \(t\) under increasing MLR). (R2) holds since \(r^*\) is strictly
+monotone in \(T(X)\) and we assume the density of \(T(X)\) is positive
+on its support.
+
+\subsection{Theorem C: uniqueness}\label{subsec:5.2}
+
+\textbf{Theorem C (Lift to exponential families).} \emph{Under the setup
+of \S\ref{subsec:5.1}, within the class
+\(\mathcal{F}^T_{C^1} := \{r : t \mapsto r(\theta_0; T^{-1}(t)) \in C^1 \text{ for each } \theta_0\}\),
+we have \(\mathcal{M} \cap \mathcal{F}^T_{C^1} = \{r^*\}\).}
+
+\emph{Proof sketch.} Apply Theorem A in \(t = T(X)\) coordinates. The
+pushforward density of \(T(X) \mid \theta_0\) is continuous and positive
+on its support. The same three-lemma argument applies, with the source
+density playing the role of the Gaussian. Direction is fixed by MLR.
+\(\blacksquare\)
+
+\subsection{Worked examples}\label{subsec:5.3}
+
+\emph{An \textbf{ancillary statistic} is one whose distribution does not
+depend on the parameter; conditioning on an ancillary loses no
+information and is the standard tool for reducing nuisance dimensions in
+classical inference (Cox 1958).}
+
+\textbf{Location-normal with unknown variance.}
+\(X_i \sim \mathcal{N}(\theta, \sigma^2)\) iid, both unknown.
+Conditioning on the ancillary \(S^2 := \sum_i (X_i - \bar X)^2\), the
+conditional model is a one-parameter location problem with pivot \[
+r^*(\theta; \bar X, S) \;=\; \Phi^{-1}\bigl( F_{t_{n-1}}\bigl(\sqrt{n}\,(\theta - \bar X)/S\bigr) \bigr).
+\] This is the Student-\(t\) CD.
+
+\textbf{Exponential rate.} \(X_i \sim \mathrm{Exp}(\theta)\) iid,
+\(\theta > 0\) rate. Sufficient statistic
+\(T = \sum_i X_i \sim \mathrm{Gamma}(n, \theta)\), with
+\(2\theta T \sim \chi^2_{2n}\). MLR is decreasing in \(\theta\) (larger
+\(\theta\) $\Rightarrow$ smaller mean of \(T\)), so \[
+r^*(\theta; T) \;:=\; \Phi^{-1}\bigl( F_{\chi^2_{2n}}(2\theta T)\bigr).
+\] This is the test case for whether the framework handles non-additive
+pivots (it does, with the right architecture; see \S\ref{subsec:8.4}).
+
+\medskip\hrule\medskip
+
+\setcounter{subsection}{6}
+\subsection{Discrete extension via randomization}\label{subsec:5.7}
+
+For discrete sufficient statistics (T(X) countable), no function of
+\(T(X)\) alone can have a continuous distribution, so the strict
+calibration target \(\mathcal{N}(0,1)\) is unattainable. The standard
+fix (Lancaster 1961) is auxiliary randomization: smear each atom across
+an interval of an auxiliary uniform variable, so that the combined
+object is continuous.
+
+\subsubsection{Randomized PIT}\label{subsubsec:5.7.1}
+
+Let \(X \sim P_\theta\) discrete with sufficient statistic \(T(X)\) and
+MLR in \(\theta\). Define \(F_\theta(t) = P_\theta(T \leq t)\),
+\(F_\theta(t^-) = P_\theta(T < t)\), \(p_\theta(t) = P_\theta(T = t)\).
+Introduce \(U \sim U(0,1)\) independent of \(X\). The \textbf{randomized
+PIT} is \[
+V_\theta(X, U) \;:=\; F_\theta(T(X)^-) + U \cdot p_\theta(T(X)).
+\] \emph{Fact.} Under \(X \sim P_{\theta_0}\), \(U \sim U(0,1)\)
+independent: \(V_{\theta_0}(X, U) \sim U(0,1)\) exactly.
+
+The CD-SBI framework lifts to this setting by enlarging the input space:
+the pivot becomes
+\(r: \Theta \times \mathcal{X} \times [0,1] \to \mathbb{R}\), training
+data are triples \((\theta_i, X_i, U_i)\), and the canonical pivot is \[
+r^*_\mathrm{rand}(\theta; X, U) \;:=\; \Phi^{-1}(1 - V_\theta(X, U)).
+\]
+
+\subsubsection{Theorem C* (Discrete uniqueness)}\label{subsubsec:5.7.2}
+
+Uniqueness in the randomized class requires four regularity conditions:
+(R1) monotone in \(\theta\), (R2) invertible in \((X, U)\), (R3\(_U\))
+strict monotone in \(U\), plus a new condition:
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{(R4) Order-preservation in \(T(X)\):} for fixed
+  \((\theta, U)\), \(r(\theta; X_1, U) \le r(\theta; X_2, U)\) whenever
+  \(T(X_1) < T(X_2)\), with strict inequality somewhere.
+\end{itemize}
+
+\textbf{Theorem C* (Discrete).} \emph{Under (R1)--(R4), the unique pivot
+in the randomized calibration manifold is \(r^*_\mathrm{rand}\).}
+
+The proof is a ``lex-order monotone rearrangement'': the source measure
+\(P_\theta \otimes U(0,1)\) on \(\mathrm{supp}(T) \times [0,1]\) has, in
+lexicographic order \((T, U)\), a unique monotone measure-preserving map
+to \(U(0,1)\), namely \(V^*_\theta\). (R4) is what fixes the lex order
+across \(T\)-values; without it, ``interleaving'' counterexamples exist.
+
+\textbf{Explicit counterexample.} Take
+\(X \sim \mathrm{Bin}(1, \theta)\), so \(T(X) = X \in \{0,1\}\),
+\(p_\theta(0) = 1-\theta\), \(p_\theta(1) = \theta\). The canonical
+\(V_\theta\) assigns \(X = 0\) to the sub-interval \([0, 1-\theta]\) of
+\((0,1)\) and \(X = 1\) to \([1-\theta, 1]\): \[
+V_\theta^*(0, U) = U(1-\theta), \qquad V_\theta^*(1, U) = (1-\theta) + U\theta.
+\] Both are monotone in \(U\), both have output in \((0,1)\), and the
+mixture \((1-\theta)\,V_\theta^*(0, U) + \theta\,V_\theta^*(1, U)\)
+(sampling \(X\) then \(U\)) is uniform.
+
+Now define an alternative \(V'_\theta\) that swaps the lex order ---
+assigning \(X = 0\) to \emph{two} disjoint sub-intervals (one in the
+lower half, one in the upper half) and \(X = 1\) to their complement: \[
+V'_\theta(0, U) = \begin{cases} \tfrac{1-\theta}{2} \cdot 2U & \text{if } U \in [0, \tfrac{1}{2}), \\ \tfrac{1}{2} + \tfrac{1-\theta}{2} \cdot 2(U - \tfrac{1}{2}) & \text{if } U \in [\tfrac{1}{2}, 1], \end{cases}
+\] with \(V'_\theta(1, U)\) defined so that the joint mixture remains
+uniform on \((0,1)\) (by filling the complementary sub-intervals). Both
+\(V_\theta^*\) and \(V'_\theta\) satisfy (R1)--(R3\(_U\)) and both yield
+calibrated pivots via \(r = \Phi^{-1}(1 - V)\). They differ in the
+lex-ordering of \(T\)-values relative to \(U\): \(V_\theta^*\) places
+all of \(X=0\) below all of \(X=1\), while \(V'_\theta\) interleaves
+them. (R4) selects \(V_\theta^*\).
+
+\textbf{Why (R4) is automatic in the continuous case.} Lemma 4.2 (or
+(R3)) implies \(\psi_{\theta_0}\) is monotone in \(X\), and by
+sufficiency monotone in \(T(X)\). Only the discrete case has the extra
+freedom that requires (R4) as a separate condition.
+
+\subsubsection{Mid-p alternative}\label{subsubsec:5.7.3}
+
+A deterministic alternative is the ``mid-p'' CD, fixing \(U = 1/2\): \[
+H^\mathrm{mid}_\theta(X) \;:=\; 1 - V_\theta(X, 1/2).
+\] This is approximately calibrated, with total-variation error from
+exact \(U(0,1)\) bounded by
+\(\tfrac{1}{2}\sup_{\theta,t} p_\theta(t) = O(1/\sqrt{n})\) for
+\(\mathrm{Bin}(n,\theta)\) at moderate \(\theta\). For applications
+where ease of implementation outweighs the small calibration error, the
+mid-p variant trains \(r(\theta; X)\) directly with \(U\) fixed at
+\(1/2\), dropping the auxiliary input. See Hwang \& Yang (2001) for the
+optimality theory of mid-p in the closely related contingency-table
+setting.
+
+\medskip\hrule\medskip
+
+\section*{Part IV — Multivariate generalization}
+\addcontentsline{toc}{section}{Part IV — Multivariate generalization}
+
+\section{The triangular-autoregressive flow construction}\label{sec:6}
+
+For \(d > 1\), the architectural recipe is \emph{autoregressive
+triangular flows}. An autoregressive flow is one in which the \(k\)-th
+output depends only on inputs with index \(\le k\), so the Jacobian
+matrix is lower-triangular and its determinant is the product of
+diagonal entries. This is the multivariate generalization of (R1) + (R2)
+into a structure that scales linearly in \(d\) and admits closed-form
+Jacobians. Standard references on this architectural pattern include
+Papamakarios et al.~(2021) and Durkan et al.~(2019).
+
+\subsection{The architectural class}\label{subsec:6.1}
+
+Let
+\(\theta = (\theta_1, \ldots, \theta_d) \in \Theta \subseteq \mathbb{R}^d\)
+and \(X \in \mathcal{X} \subseteq \mathbb{R}^d\) (or higher-dim \(X\)
+with \(d\)-dim \(r\)). We work in the class of pivots of the form
+\(r = (r_1, \ldots, r_d)\) where each component obeys:
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{(R1\(^\mathrm{auto}\)) Autoregressive monotonicity in
+  \(\theta\):} \(r_k\) depends on \(\theta\) only through
+  \(\theta_{\le k}\), and \(\theta_k \mapsto r_k\) is strictly
+  increasing at fixed \(\theta_{<k}, X\).
+\item
+  \textbf{(R2\(^\mathrm{auto}\)) Autoregressive monotonicity in \(X\):}
+  \(r_k\) depends on \(X\) only through \(X_{\le k}\), and
+  \(X_k \mapsto r_k\) is strictly monotone at fixed \(\theta, X_{<k}\).
+\end{itemize}
+
+This class admits at least two practical parameterizations:
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\tightlist
+\item
+  \textbf{Additive form (Gaussian-like models, \S\ref{subsec:8.1}--8.3):}
+  \[r_k(\theta, X) = a_k(\theta_k;\, \theta_{<k}, X_{<k}) \;-\; b_k(X_k;\, \theta_{<k}, X_{<k}),\]
+  with \(a_k\) a UMNN monotone in \(\theta_k\) and \(b_k\) a UMNN
+  monotone in \(X_k\), both conditioned on the autoregressive context.
+\item
+  \textbf{Doubly-monotone UMNN form (non-additive interactions, \S\ref{subsec:8.4}):}
+  \[r_k(\theta, X) = b_k(X_k;\, X_{<k}) \;+\; \int_{\theta_{k,\mathrm{ref}}}^{\theta_k} \mathrm{softplus}\bigl(\alpha_k(t;\, \theta_{<k}, X_{<k}) + \beta_k(X_k;\, X_{<k})\bigr)\, dt,\]
+  which is monotone in both \(\theta_k\) (by positivity of the
+  integrand) and \(X_k\) (by appropriate UMNN sub-structure on \(b_k\)
+  and \(\beta_k\)).
+\end{enumerate}
+
+Both forms satisfy (R1\(^\mathrm{auto}\)) and (R2\(^\mathrm{auto}\));
+the Knothe--Rosenblatt uniqueness theorem below applies to both.
+
+\subsection{Jacobian structure and computational properties}\label{subsec:6.2}
+
+In either parameterization, both Jacobians are lower-triangular by
+construction: \[
+\bigl[\partial_\theta r\bigr]_{k\ell} = \begin{cases} \partial_{\theta_k} r_k > 0 & k = \ell \\ \text{(free)} & \ell < k \\ 0 & \ell > k \end{cases}
+\qquad
+\bigl[\partial_X r\bigr]_{k\ell} = \begin{cases} \mathrm{sgn} \cdot \partial_{X_k} r_k & k = \ell \\ \text{(free)} & \ell < k \\ 0 & \ell > k \end{cases}
+\] (with a consistent sign convention on \(\partial_X r\) across
+coordinates). The determinant is the product of diagonals, and \[
+\log\bigl|\det \partial_X r\bigr| \;=\; \sum_{k=1}^{d} \log \bigl|\partial_{X_k} r_k\bigr|,
+\] all closed-form from the UMNN positive integrand. No
+autograd-on-autograd is needed; this is essential for stable training in
+\(d > 1\).
+
+\textbf{Connected CD level sets.} \(r\) is monotone-increasing in
+\(\theta_k\) at fixed \(\theta_{<k}\), so \(H_r(\cdot; X)\) has
+connected level sets in the natural autoregressive sense. Confidence
+sets via the chi-square inversion are well-defined.
+
+\textbf{Linear scaling in \(d\).} All operations cost \(O(d)\) per
+sample, vs.~\(O(d^3)\) for a general dense Jacobian.
+
+\subsection{Multivariate uniqueness: Knothe--Rosenblatt}\label{subsec:6.3}
+
+\emph{Optimal-transport context, briefly.} Between two probability
+measures on \(\mathbb{R}^d\), the \textbf{Knothe--Rosenblatt
+rearrangement} (Rosenblatt 1952) is the unique transport map of
+triangular form: each coordinate transformation conditions on
+previously-transformed coordinates. It differs from the \textbf{Brenier
+map} (Brenier 1991), which is the unique transport map that is the
+gradient of a convex function (the \(L^2\)-optimal transport plan). KR
+depends on coordinate ordering; Brenier does not. Both are bijections
+between the two measures; KR is the natural fit for autoregressive
+architectures because its triangular structure aligns with the network's
+autoregressive masking.
+
+\textbf{Theorem A-d (Multivariate uniqueness within the autoregressive
+triangular class).} \emph{Let
+\(X \mid \theta \sim p(\cdot \mid \theta)\) be a continuous model with
+the property that, for each \(k\), the conditional CDF
+\(F_k^{(\theta)}(\cdot \mid X_{<k}) := P(X_k \leq \cdot \mid \theta, X_{<k})\)
+is \(C^1\) and strictly increasing on the support of
+\(X_k \mid \theta, X_{<k}\). Within the class of autoregressive
+triangular pivots satisfying (R1\(^\mathrm{auto}\)) and
+(R2\(^\mathrm{auto}\)) with each \(r_k \in C^1\) in its
+\(X_k\)-argument, the calibration manifold \(\mathcal{M}\) consists of a
+unique function --- the \textbf{Knothe--Rosenblatt rearrangement}:} \[
+r_k^\mathrm{KR}(\theta, X) = \Phi^{-1}\bigl(1 - F_k^{(\theta)}(X_k \mid X_{<k})\bigr).
+\]
+
+\emph{Proof.} Induct on \(k\).
+
+\emph{Base case (\(k = 1\)).} Under (R2\(^\mathrm{auto}\)),
+\(r_1: \Theta \times \mathcal{X}_1 \to \mathbb{R}\) depends on \(X\)
+only through \(X_1\). It may depend on \(\theta\) generally, but by
+(R1\(^\mathrm{auto}\)) only through \(\theta_1\). The full calibration
+constraint requires
+\(r_1(\theta, X_1) \mid \theta \sim \mathcal{N}(0,1)\). Apply Theorem A
+in \(X_1\)-coordinates at each fixed \(\theta_1\) (with other
+\(\theta\)-components irrelevant by (R1\(^\mathrm{auto}\))): the unique
+monotone-in-\(X_1\) pushforward of the marginal \(X_1 \mid \theta_1\) to
+\(\mathcal{N}(0,1)\) is \(\Phi^{-1}(1 - F_1^{(\theta_1)}(X_1))\).
+(R1\(^\mathrm{auto}\)) fixes the sign.
+
+\emph{Inductive step (\(k > 1\)).} Assume \(r_1, \ldots, r_{k-1}\) are
+uniquely identified. Consider \(r_k(\theta, X_{\le k})\) at fixed
+\((\theta, X_{<k})\). The calibration constraint
+\(r(\theta; X) \mid \theta \sim \mathcal{N}(0, I_d)\) implies that the
+components are jointly standard normal; since \(r_1, \ldots, r_{k-1}\)
+are deterministic functions of \((\theta, X_{<k})\), conditioning on
+them (given \(\theta\)) is equivalent to conditioning on \(X_{<k}\).
+Hence
+\(r_k(\theta, X_{\le k}) \mid \theta, X_{<k} \sim \mathcal{N}(0,1)\). By
+(R2\(^\mathrm{auto}\)), as a function of \(X_k\) this map is monotone;
+by Theorem A applied in \(X_k\)-coordinates with conditional law
+\(F_k^{(\theta)}(\cdot \mid X_{<k})\) playing the role of the Gaussian
+source, it is uniquely
+\(\Phi^{-1}(1 - F_k^{(\theta)}(X_k \mid X_{<k}))\).
+(R1\(^\mathrm{auto}\)) fixes the sign of the dependence on \(\theta_k\).
+\(\blacksquare\)
+
+\textbf{Corollary (multivariate location-Gaussian).} \emph{For
+\(X \mid \theta \sim \mathcal{N}(\theta, \Sigma)\) with \(\Sigma\)
+positive definite, let \(LL^T = \Sigma\) be the \textbf{Cholesky
+factorization} (\(L\) lower-triangular with positive diagonal). Then the
+KR pivot is} \[
+r^\mathrm{KR}(\theta, X) = L^{-1}(\theta - X).
+\]
+
+\emph{Proof.} The conditional \(X_k \mid \theta, X_{<k}\) is Gaussian
+with mean
+\(\mu_k = \theta_k + \sum_{j < k} \alpha_{kj}(X_j - \theta_j)\) and
+variance \(\sigma_k^2 = L_{kk}^2\), where the
+\(\alpha_{kj}, \sigma_k^2\) are the Cholesky regression coefficients.
+Direct computation:
+\(F_k^{(\theta)}(X_k \mid X_{<k}) = \Phi((X_k - \mu_k)/\sigma_k)\), so
+\[
+r_k^\mathrm{KR} = \Phi^{-1}(1 - F_k) = \frac{\mu_k - X_k}{\sigma_k} = \frac{\theta_k - X_k + \sum_{j < k} \alpha_{kj}(X_j - \theta_j)}{L_{kk}} = [L^{-1}(\theta - X)]_k.
+\] The verification on the 2D correlated experiment
+(\(\Sigma = \bigl(\!\begin{smallmatrix} 1 & 0.5 \\ 0.5 & 1\end{smallmatrix}\!\bigr)\),
+giving
+\(L^{-1} = \bigl(\!\begin{smallmatrix} 1 & 0 \\ -0.577 & 1.155\end{smallmatrix}\!\bigr)\),
+hence
+\(r_2^\mathrm{KR} = 1.155(\theta_2 - X_2) - 0.577(\theta_1 - X_1)\)) is
+reported in \S\ref{subsec:8.3}. \(\blacksquare\)
+
+\textbf{Remarks.}
+
+\emph{1. KR depends on coordinate ordering.} Different orderings of the
+coordinates of \(X\) (and correspondingly of \(\theta\) at each
+autoregressive level) yield different KR pivots, all valid CD pivots,
+all in their respective calibration manifolds. The architectural choice
+of autoregressive order in the network implicitly selects one. For
+models with a natural ordering (time series; spatial data with a fixed
+sweep), use the data-defined order; for unordered data, any ordering is
+correct, with different choices giving different but inferentially
+equivalent pivots.
+
+\emph{2. ``Calibration manifold is a singleton'' vs.~empirical pointwise
+residuals.} The theorem says the function \(r\) is uniquely determined
+within the class. The architectural decomposition \(r_k = a_k - b_k\)
+(additive form) is \emph{not} uniquely determined --- one can shift mass
+between \(a_k\) and \(b_k\) via any context-dependent function
+\(h(\theta_{<k}, X_{<k})\), since \(a_k\) and \(b_k\) share that
+context. Only the difference \(r_k = a_k - b_k\) is identified. The
+pointwise residuals seen in the 2D correlated experiment (\S\ref{subsec:8.3}) reflect
+finite-network approximation error around a unique target
+\(r^\mathrm{KR}\), not non-uniqueness of the population-level solution.
+
+\emph{3. The role of (R2\(^\mathrm{auto}\)) in multivariate.} Without
+monotonicity in \(X_k\) at fixed \((\theta, X_{<k})\), the 1D inductive
+step fails: \(X_k \mapsto r_k\) could be non-bijective, and the
+conditional pushforward density would no longer be a monotone
+rearrangement. This is the multivariate analogue of the
+autograd-Jacobian failure mode described in \S\ref{subsec:8.4} --- the same
+architectural prescription that fixes the 1D non-additive case is what
+makes the inductive proof go through in \(d > 1\).
+
+\subsection{Inference: direct pivot inversion}\label{subsec:6.4}
+
+At an observed \(X_\mathrm{obs}\), the level-\(\alpha\) confidence set
+is \[
+\mathcal{C}_\alpha(X_\mathrm{obs}) := \bigl\{\theta : \|r(\theta; X_\mathrm{obs})\|^2 \leq \chi^2_{d, \alpha}\bigr\}.
+\] Under (C1), \(\|r(\theta_0; X)\|^2 \mid \theta_0 \sim \chi^2_d\), so
+\(\mathcal{C}_\alpha\) has exact frequentist coverage: \[
+\mathbb{P}_{X \sim P_{\theta_0}}\bigl(\theta_0 \in \mathcal{C}_\alpha(X)\bigr) = \alpha.
+\] The set \(\mathcal{C}_\alpha\) is found by numerical root-finding in
+\(\theta\): since \(r\) is monotone in \(\theta\) (autoregressively),
+each ``slice'' \(\theta_k \mid \theta_{<k}\) is a 1D root-finding
+problem.
+
+\textbf{Worked example (1D location-normal).} With
+\(r^*(\theta; X) = \theta - X\),
+\(\|r^*(\theta; X_\mathrm{obs})\|^2 = (\theta - X_\mathrm{obs})^2 \le \chi^2_{1, \alpha} = z_\alpha^2\)
+gives
+\(\mathcal{C}_\alpha = [X_\mathrm{obs} - z_\alpha, X_\mathrm{obs} + z_\alpha]\)
+--- the standard \(z\)-interval, as expected.
+
+\medskip\hrule\medskip
+
+\section*{Part V — Empirical validation}
+\addcontentsline{toc}{section}{Part V — Empirical validation}
+
+\section{Architecture and training}\label{sec:7}
+
+\subsection{UMNN building blocks}\label{subsec:7.1}
+
+\textbf{Definition (UMNN; Wehenkel \& Louppe 2019).} A
+\emph{Unconstrained Monotonic Neural Network} parameterizes a scalar
+function \(g(z; c)\) that is strictly monotone-increasing in \(z\) at
+fixed context \(c\) by writing \[
+g(z; c) = \mathrm{bias}(c) + \int_{z_0}^z \mathrm{softplus}\bigl(\mathrm{MLP}(t, c)\bigr)\, dt,
+\] where \(\mathrm{MLP}(\cdot, c)\) is an unconstrained neural network.
+The integrand is positive everywhere (softplus is positive), so \(g\) is
+strictly monotone in \(z\) by construction. The derivative
+\(\partial_z g(z; c) = \mathrm{softplus}(\mathrm{MLP}(z, c))\) is
+closed-form --- the Jacobian factor needed for NF-MLE is available
+without recursive autograd.
+
+We use Gauss--Legendre quadrature (\(n = 12\) nodes by default) to
+evaluate the integral.
+
+Hidden width 32 throughout. Final-layer weights initialized to zero so
+the bias dominates at init and the model starts near a near-identity
+transformation. We multiply the integrated function by a learnable
+positive scalar \(\alpha\) (initialized at \(0.5 / \ln 2 \approx 0.72\),
+giving init effective slope \(0.5\), deliberately wrong) so optimization
+has to find the right scale.
+
+\subsection{Training schedule}\label{subsec:7.2}
+
+\begin{itemize}
+\tightlist
+\item
+  Batch size 512, Adam at learning rate \(3 \times 10^{-3}\), gradient
+  clipping at norm 5.
+\item
+  3,000--4,000 steps total. On CPU with 4 threads, this runs in 2--3
+  minutes per experiment.
+\item
+  Single-stage training. No annealing schedule (NF-MLE doesn't need
+  one).
+\end{itemize}
+
+\subsection{Diagnostics}\label{subsec:7.3}
+
+For each trained model:
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\tightlist
+\item
+  \textbf{Pivot RMSE vs \(r^*\)} on a dense grid, where \(r^*\) is
+  closed-form. Sanity check that the model recovered the analytical
+  answer.
+\item
+  \textbf{Marginal PIT.} \(\Phi(r_k(\theta_i, X_i))\) on
+  training-distribution samples should be \(U(0,1)\).
+  Kolmogorov--Smirnov (KS) test.
+\item
+  \textbf{Conditional PIT.} At fixed \(\theta_0\),
+  \(r_k(\theta_0, X) \mid \theta_0\) should be \(\mathcal{N}(0,1)\). KS
+  test at \(\geq 5\) \(\theta_0\) values.
+\item
+  \textbf{Joint Mahalanobis (\(d > 1\)).}
+  \(\|r(\theta_0, X)\|^2 \mid \theta_0\) should be \(\chi^2_d\). KS
+  test.
+\item
+  \textbf{Coverage.}
+  \(\mathbb{P}_{X \sim P_{\theta_0}}(\theta_0 \in \mathcal{C}_\alpha(X))\)
+  across \(\theta_0\) and confidence levels
+  \(\alpha \in \{0.5, 0.68, 0.9, 0.95\}\). This is the inferentially
+  relevant test.
+\end{enumerate}
+
+\textbf{Statistical noise floor for KS.} Under the null,
+\(\sqrt{N} \cdot \mathrm{KS}\) has the Kolmogorov limiting distribution
+with \(\Pr(\sqrt{N}\cdot\mathrm{KS} > 1.628) = 0.01\). At \(N = 5000\),
+this gives a noise floor of
+\(\mathrm{KS} \approx 1.628/\sqrt{5000} \approx 0.023\) for the
+0.01-level threshold; at \(N = 6000\), the floor is \(\approx 0.021\).
+We refer to this floor when interpreting ``borderline'' results in \S\ref{sec:8}.
+
+Related diagnostic frameworks include simulation-based calibration (SBC;
+Talts et al.~2018), sampling-based accuracy testing (TARP; Lemos et
+al.~2023), and the LF2I conditional-coverage diagnostic (Dalmasso et
+al.~2024). Our coverage diagnostic (item 5) is closest in spirit to the
+LF2I local-coverage check.
+
+\medskip\hrule\medskip
+
+\section{Four experiments}\label{sec:8}
+
+Each experiment is supporting evidence for a specific theoretical claim
+from Parts III--IV. They are not validation in the sense of ``checking
+that the method works'' --- the theory already establishes correctness
+in the population limit. They validate that (i) finite-sample
+optimization actually reaches the population optimum at practical
+training budgets, and (ii) the architectural prescriptions matter as the
+theory says they should.
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Experiment
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Supports
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\S\ref{subsec:8.1} 1D location-normal & Theorem A (1D uniqueness in
+\(\mathcal{F}_{C^1}\)) \\
+\S\ref{subsec:8.2} 2D location, \(\Sigma = I\) & Triangular flow construction
+(\S\ref{subsec:6.1}--6.2) on a clean diagonal case \\
+\S\ref{subsec:8.3} 2D location, \(\Sigma\) correlated & Theorem A-d / KR uniqueness
+(\S\ref{subsec:6.3}), via recovered Jacobian \(= L^{-1}\) \\
+\S\ref{subsec:8.4} Exponential rate & Architectural prescription (R2): the
+doubly-monotone construction succeeds, the autograd-Jacobian ablation
+fails \\
+\end{longtable}
+
+Each experiment trains in 2--4 minutes on CPU.
+
+\subsection{1D location-normal}\label{subsec:8.1}
+
+\textbf{Setup.} \(X \sim \mathcal{N}(\theta, 1)\),
+\(\theta \sim U[-7, 7]\). Truth \(r^*(\theta, X) = \theta - X\).
+
+\textbf{Architecture.} Additive flow
+\(r(\theta, X) = \alpha_a \cdot a(\theta) - \alpha_b \cdot b(X)\) with
+\(a, b\) scalar UMNNs.
+
+\textbf{Results.}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Diagnostic
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Value
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Status
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+Pivot RMSE & 0.030 & clean (\textasciitilde0.3\% of dynamic range) \\
+Slope at \(\theta = 0, X = 0\) & \(\partial_\theta r = 0.997\),
+\(\partial_X r = -0.983\) & within 1--2\% of truth \\
+Marginal PIT KS & 0.008 & PASS (well below noise floor) \\
+Conditional PIT KS at 7 \(\theta_0\) values & bulk KS \(\approx 0.01\),
+edge KS up to 0.05 & bulk PASS; edge effects at \(\rho\) boundary \\
+Coverage error at all levels in interior & \(< 0.01\) & excellent \\
+\end{longtable}
+
+The 1D case is a sanity check. Both the additive architecture and a
+(more flexible) joint UMNN architecture converge under NF-MLE, with the
+additive form converging 20× faster and to lower RMSE because it exactly
+contains \(r^*\). The conditional PIT shows degradation near the support
+boundary of \(\rho\) --- a known finite-sample effect from undersampling
+near the support edges, not a structural issue.
+
+\subsection{2D location-Gaussian, \(\Sigma = I\)}\label{subsec:8.2}
+
+\textbf{Setup.} \(X \mid \theta \sim \mathcal{N}(\theta, I_2)\),
+\(\theta \sim U[-7, 7]^2\). Truth \(r^*(\theta, X) = \theta - X\)
+component-wise.
+
+\textbf{Architecture.} Triangular flow as in \S\ref{subsec:6.1} (additive form):
+\[r_1(\theta, X) = a_1(\theta_1) - b_1(X_1), \qquad r_2(\theta, X) = a_2(\theta_2; \theta_1, X_1) - b_2(X_2; \theta_1, X_1).\]
+\(a_1, b_1\) scalar UMNNs; \(a_2, b_2\) contextual UMNNs taking
+\((\theta_1, X_1)\) as context. 5,004 parameters total.
+
+\textbf{Results.}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Diagnostic
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Value
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Status
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+Pivot RMSE (total) & 0.044 & clean \\
+Per-component: \(r_1\) & 0.014 & excellent \\
+Per-component: \(r_2\) & 0.061 & clean (conditioning network learning
+slower) \\
+Marginal PIT KS: \(r_1, r_2\) & 0.007, 0.006 & both PASS
+(\(p > 0.1\)) \\
+Joint Mahalanobis vs \(\chi^2_2\) KS & 0.011 & clean \\
+Conditional PIT at 5 \(\theta_0\): \(r_1\) & KS 0.011--0.018, all PASS &
+clean \\
+Conditional PIT at 5 \(\theta_0\): \(r_2\) & KS 0.007--0.044, 3/5
+borderline at \(\alpha=0.01\) & KS values near the \(N=5000\) noise
+floor (0.023) \\
+Conditional Mahalanobis at 5 \(\theta_0\) & KS 0.008--0.016, all PASS &
+clean \\
+Coverage error across \(\theta_0\), all \(\alpha\) & \(< 0.01\) &
+excellent \\
+\end{longtable}
+
+The clean result. Triangular construction scales naturally, and the
+joint Mahalanobis test (which \(r_1, r_2\) being individually calibrated
+does \emph{not} automatically imply) passes. The ``borderline''
+conditional PIT for \(r_2\) reflects KS values within \textasciitilde2×
+the noise floor at \(N = 5000\); the more inferentially relevant joint
+Mahalanobis and coverage tests are clean.
+
+\subsection{2D location-Gaussian, \(\Sigma\) correlated}\label{subsec:8.3}
+
+\textbf{Setup.}
+\(\Sigma = \begin{pmatrix} 1 & 0.5 \\ 0.5 & 1 \end{pmatrix}\). Truth
+\(r^*(\theta, X) = L^{-1}(\theta - X)\) where \(LL^T = \Sigma\).
+Explicitly:
+\[r_1^* = \theta_1 - X_1, \qquad r_2^* = -0.577(\theta_1 - X_1) + 1.155(\theta_2 - X_2).\]
+The conditioning network for \(r_2\) now must learn nontrivial
+cross-coupling on \((\theta_1, X_1)\), with slope \(-0.577\).
+
+\textbf{Results.}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Diagnostic
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Value
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Status
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+Pivot RMSE (total) & 0.27 & ``large'' (but see commentary) \\
+Marginal PIT KS: \(r_1, r_2\) & 0.010, 0.003 & both PASS \\
+Joint Mahalanobis vs \(\chi^2_2\) KS & 0.012 & clean \\
+Coverage error across all \(\theta_0\), \(\alpha\) & \(< 0.015\) &
+excellent \\
+Recovered \(\partial_\theta r\) at 200 random points &
+\(\mathbb{E}[J_\theta] = \begin{pmatrix} 1.000 & 0 \\ -0.569 & 1.154\end{pmatrix} \pm \begin{pmatrix} 0.004 & 0 \\ 0.049 & 0.007\end{pmatrix}\)
+& matches \(L^{-1}\) to 1--2\% \\
+\end{longtable}
+
+The ``high'' pivot RMSE of 0.27 is misleading: \(r_2\) has dynamic range
+\(\sim 12\), so 0.27 is \(\sim 3\%\) relative. The recovered linear
+Jacobian coefficients match \(L^{-1}\) to 1--2\% on average, with
+residual variance \(\sim 0.05\) in the off-diagonal entries reflecting
+finite-network approximation error around the \emph{unique} KR target
+(Theorem A-d, \S\ref{subsec:6.3}). Coverage is exact to within 1.5\%.
+
+\textbf{What this validates.} Theorem A-d says the calibration manifold
+within the autoregressive triangular class is the singleton
+Knothe--Rosenblatt rearrangement. For Gaussian models, KR equals
+\(L^{-1}(\theta - X)\) (corollary in \S\ref{subsec:6.3}). The recovered average
+Jacobian matches this exactly; the pointwise residuals are
+finite-network noise around the population-level singleton, not evidence
+of non-uniqueness. The proper diagnostic in multivariate is the
+recovered Jacobian (matches truth to 1--2\%) and coverage (within
+1.5\%), not the pointwise pivot RMSE (which conflates approximation
+error with non-canonical alignment).
+
+\subsection{Exponential rate: validating the non-additive case}\label{subsec:8.4}
+
+\textbf{Setup.} \(X_i \sim \mathrm{Exp}(\theta)\) iid, \(n = 5\) samples
+summed into \(T = \sum_i X_i\). \(\theta \sim U[0.3, 3.0]\). Truth
+\(r^*(\theta, T) = \Phi^{-1}(F_{\chi^2_{10}}(2\theta T))\) ---
+non-additive, with multiplicative \(\theta T\) interaction. This tests
+whether the framework handles models outside the additive class of
+\S\ref{subsec:8.1}--8.3.
+
+\textbf{Doubly-monotone architecture (\S\ref{subsec:6.1}, form 2).} Both
+monotonicities enforced architecturally, with \(X\)-dependence through
+the sufficient statistic \(T\): \[
+r(\theta, T) = b_\mathrm{umnn}(T) + \int_{\theta_\mathrm{ref}}^{\theta} \mathrm{softplus}\bigl(\alpha(t) + \beta_\mathrm{umnn}(T)\bigr)\, dt,
+\] where \(b_\mathrm{umnn}, \beta_\mathrm{umnn}\) are
+monotone-increasing UMNNs of \(T\). Then
+\(\partial_\theta r = \mathrm{softplus}(\cdot) > 0\) (R1) and
+\(\partial_T r = b'_\mathrm{umnn}(T) + \beta'_\mathrm{umnn}(T) \int_{\theta_\mathrm{ref}}^\theta \sigma(\cdot)\, dt > 0\)
+(R2), both in closed form.
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Diagnostic
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Value
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Status
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+Pivot RMSE on natural support & 0.045 & clean \\
+Final loss & 0.87 & matches truth's 0.88 to batch noise \\
+Marginal PIT KS & 0.006 (\(p = 0.23\)) & PASS \\
+Conditional PIT KS at 5 \(\theta_0\) & 0.016--0.028 & borderline
+(\(N=6000\) noise floor \(\approx 0.021\)) \\
+Coverage error across \(\theta_0, \alpha\) & \(< 0.015\) & excellent \\
+\end{longtable}
+
+The doubly-monotone construction recovers \(r^*\) to within batch noise,
+demonstrating that the framework extends beyond the additive class.
+
+\textbf{Architectural ablation: why (R2) must be enforced
+architecturally.} Replacing the doubly-monotone construction with a
+joint UMNN in \(\theta\) that uses autograd to compute \(\partial_T r\)
+--- i.e., no architectural enforcement of monotone-in-\(T\) --- yields
+RMSE 1.56, conditional PIT KS 0.045--0.080 (all FAIL relative to the
+noise floor), and final loss 0.56. The loss value 0.56 is \emph{below}
+the analytical truth's loss of 0.88, which would be impossible if the
+ablation model lived in a valid (bijective-in-\(X\)) class. The
+mechanism: when \(T \mapsto r\) is non-bijective, \(\hat p_r\) is not
+normalized in \(T\) at fixed \(\theta\), so \(-\log \hat p_r\) has no
+lower bound at the conditional entropy. Concretely, in regions where the
+autograd \(|\partial r / \partial T|\) is locally inflated by a fold,
+\(\log|\partial r / \partial T|\) contributes a large positive value to
+the surrogate log-density without \(\hat p_r\) being a valid density.
+This is direct empirical evidence for (R2): architectural enforcement of
+monotone-in-\(X\) is not a stylistic preference but a correctness
+requirement for the NF-MLE objective.
+
+\subsection{Synthesis}\label{subsec:8.5}
+
+The four experiments collectively establish that the population-level
+theory of Parts III--IV is reached at practical finite-sample budgets
+(\(N \in [5000, 10000]\), training time 2--4 min on CPU). Mapping
+experiments back to claims:
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Theoretical claim
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Empirical evidence
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+Theorem A: \(r^* = \theta - X\) uniquely calibrates in 1D & \S\ref{subsec:8.1}: RMSE
+0.030; slopes recovered to 1--2\%; coverage error \(< 0.01\) \\
+Triangular flow construction yields a valid CD pivot in \(d > 1\)
+(\S\ref{subsec:6.1}--6.2) & \S\ref{subsec:8.2}: joint Mahalanobis KS 0.011, coverage error
+\(< 0.01\) \\
+Theorem A-d: KR \(= L^{-1}(\theta - X)\) is the unique pivot in
+triangular class for Gaussian (\S\ref{subsec:6.3} corollary) & \S\ref{subsec:8.3}: recovered
+\(\mathbb{E}[J_\theta]\) matches \(L^{-1}\) to 1--2\%; coverage exact to
+within 1.5\% \\
+(R2) is a correctness requirement, not a stylistic preference & \S\ref{subsec:8.4}:
+doubly-monotone construction recovers \(r^*\) (RMSE 0.045);
+autograd-Jacobian ablation produces a loss \emph{below} truth and fails
+calibration \\
+\end{longtable}
+
+Summary table:
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 8\tabcolsep) * \real{0.2000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 8\tabcolsep) * \real{0.2000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 8\tabcolsep) * \real{0.2000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 8\tabcolsep) * \real{0.2000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 8\tabcolsep) * \real{0.2000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Experiment
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Pivot RMSE
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Marg KS
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Coverage error
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Theoretical claim supported
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+1D location-normal & 0.030 & 0.008 & \(< 0.01\) & Theorem A \\
+2D loc, \(\Sigma = I\) & 0.044 & 0.007, 0.006 & \(< 0.01\) & \S\ref{subsec:6.1}
+construction \\
+2D loc, \(\Sigma\) corr. & 0.27 (3\% rel.) & 0.010, 0.003 & \(< 0.015\)
+& Theorem A-d (Jacobian \(= L^{-1}\)) \\
+Exp-rate (doubly-mono) & 0.045 & 0.006 & \(< 0.015\) & (R2)
+sufficiency \\
+Exp-rate (autograd Jac, ablation) & 1.56 & 0.024 & up to 3.4\% & (R2)
+necessity \\
+\end{longtable}
+
+The architectural prescription distilled across all four cases:
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\tightlist
+\item
+  \textbf{NF-MLE loss} (\S\ref{sec:3}, Lemma 4.3).
+\item
+  \textbf{Monotone in \(\theta\), architecturally} (R1) --- UMNN
+  integration in \(\theta\).
+\item
+  \textbf{Monotone in \(X\), architecturally} (R2) --- additive
+  structure with monotone-in-\(X\) heads, triangular flow in \(d > 1\),
+  or doubly-monotone UMNN for non-additive \(X\)-dependence.
+\end{enumerate}
+
+\medskip\hrule\medskip
+
+\section*{Part VI — Practice and position}
+\addcontentsline{toc}{section}{Part VI — Practice and position}
+
+\section{Implementation recipe}\label{sec:9}
+
+A practitioner's checklist for applying CD-SBI to a new model:
+
+\textbf{1. Identify the structure of the truth \(r^*\).} Is it additive
+in \((\theta, X)\)? Multiplicative? Does the sufficient statistic factor
+through? This tells you which architecture to use:
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+If truth is approximately
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Use architecture
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+Additive: \(r^* \approx a(\theta) - b(X)\) & Additive flow (\S\ref{subsec:6.1} form 1;
+\S\ref{subsec:8.1}--8.2) \\
+Multivariate with cross-coupling & Triangular flow, additive form (\S\ref{subsec:6.1}
+form 1; \S\ref{subsec:8.3}) \\
+Has multiplicative \(\theta\)--\(X\) interaction & Doubly-monotone
+construction (\S\ref{subsec:6.1} form 2; \S\ref{subsec:8.4}) \\
+No prior knowledge & Doubly-monotone construction with autoregressive
+conditioning \\
+\end{longtable}
+
+\textbf{2. Enforce both monotonicities architecturally.} Never rely on
+autograd to give you a valid Jacobian without architectural support. The
+\S\ref{subsec:8.4} ablation is documentation of why.
+
+\textbf{3. Use a proposal \(\rho\) with full support on the region of
+interest.} The framework is robust to the choice of \(\rho\) in the
+population limit, but finite-sample performance benefits from \(\rho\)
+covering the region where inference will be performed. Edge effects
+(\S\ref{subsec:8.1}) appear near the support boundary.
+
+\textbf{4. Train with NF-MLE.} No annealing schedule needed. Batch size
+256--1024; Adam at \(\sim 3 \times 10^{-3}\); 3,000--10,000 steps
+depending on problem complexity.
+
+\textbf{5. Validate.} Run all five diagnostics in \S\ref{subsec:7.3}. The critical one
+is coverage: if coverage matches nominal at multiple \(\theta_0\) and
+multiple \(\alpha\) levels, the pivot is valid. If only marginal PIT
+passes but conditional fails, you have a Hermans-style problem and need
+to revisit the architecture.
+
+\textbf{6. At test time, invert.} Given observed \(X_\mathrm{obs}\),
+compute
+\(\mathcal{C}_\alpha = \{\theta : \|r(\theta, X_\mathrm{obs})\|^2 \le \chi^2_{d, \alpha}\}\)
+by 1D root-finding (autoregressively, in \(d > 1\)).
+
+\medskip\hrule\medskip
+
+\section{Position in the SBI literature}\label{sec:10}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.2500}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.2500}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.2500}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.2500}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Approach
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Target
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Calibration
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Reference
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+NPE / SNPE & Bayesian posterior & None built-in & Papamakarios \& Murray
+2016; Greenberg et al.~2019 \\
+NLE / SNL & Likelihood & None built-in & Papamakarios et al.~2019 \\
+NRE / SNRE & Likelihood ratio & None built-in & Hermans et al.~2020;
+Miller et al.~2022 \\
+Balanced NRE & Posterior & Conservative regularizer & Delaunoy et
+al.~2022 \\
+Calibrated NPE & Posterior & Differentiable coverage & Falkiewicz et
+al.~2023 \\
+LF2I (ACORE, BFF) & Confidence sets & Neyman construction on learned
+test stat & Dalmasso et al.~2024 \\
+WALDO & Confidence sets & Neyman inversion on Wald-style stat &
+Masserano et al.~2023 \\
+Box CD & Confidence sets & Depth-based, hyper-rectangles & Bortolato \&
+Ventura 2025 \\
+Variational SBI w/ coverage & Posterior & Conformal post-hoc & Patel et
+al.~2023 \\
+\textbf{CD-SBI (this work)} & \textbf{Confidence distribution} &
+\textbf{Pointwise, by construction} & --- \\
+\end{longtable}
+
+The closest cousins are LF2I and WALDO (which target test-statistic CDFs
+to construct confidence sets via Neyman inversion) and SNL (which uses
+the same NF-MLE loss but without the monotone-in-\(\theta\)
+architectural constraint, and without the frequentist inference
+machinery).
+
+CD-SBI's specific contribution is the architectural recipe (monotone in
+\(\theta\) + monotone in \(X\) + triangular structure for multivariate)
+that converts the standard SNL training objective into a procedure that
+produces a calibrated confidence distribution. The framework inherits
+all of SNL's tooling and scalability while providing pointwise
+frequentist coverage by construction. Unlike LF2I/WALDO, which require a
+separately-trained calibration step (the ``critical-values branch''),
+CD-SBI is single-stage: the same network output gives both the CD and
+the confidence set, with the calibration enforced in the population
+limit by the architecture + loss combination rather than by a hold-out
+calibration sample.
+
+The framework also relates to the implicit-likelihood-ratio tradition
+(Cranmer et al.~2015): the optimal pivot in the location-normal model is
+the standardized log-likelihood gradient, and in regular exponential
+families more generally relates to the signed-root log-likelihood ratio
+(Schweder \& Hjort 2016, ch.~5).
+
+\medskip\hrule\medskip
+
+\section*{Part VII — Open questions}
+\addcontentsline{toc}{section}{Part VII — Open questions}
+
+\section{Open problems}\label{sec:11}
+
+\subsection{Uniqueness beyond the autoregressive triangular class}\label{subsec:11.1}
+Theorem A-d (\S\ref{subsec:6.3}) establishes uniqueness within autoregressive
+triangular flows: the calibration manifold is the singleton
+Knothe--Rosenblatt rearrangement. But the \emph{full} calibration
+manifold over more flexible architectures (e.g., dense flows,
+non-autoregressive coupling layers) is generically not a singleton ---
+orthogonal rotations of \(r\) preserve calibration since
+\(\mathcal{N}(0, I_d)\) is rotation-invariant. Whether NF-MLE with
+looser architectural constraints still converges to a canonical pivot,
+or whether the practitioner must commit to a specific autoregressive
+structure to guarantee uniqueness, is open. The practical implication,
+supported by the 2D correlated experiment, is that \emph{some}
+triangular ordering must be chosen architecturally.
+
+\subsection{Ordering selection in KR}\label{subsec:11.2}
+When there is no natural
+ordering of the coordinates of \(X\), different choices of
+autoregressive ordering give different valid pivots, all in
+\(\mathcal{M}\), all yielding exact coverage. Whether some orderings
+have better finite-sample optimization behavior --- easier-to-learn
+conditionals, lower variance gradients --- is an empirical question
+worth investigating. The optimal-transport literature
+(Carlier--Galichon--Santambrogio 2010) connects KR maps with \(t \to 1\)
+to Brenier maps, suggesting that a more isotropic transport target might
+give better-behaved finite-sample training; this is unexplored in the
+CD-SBI context.
+
+\subsection{The \(C^0\) residual in 1D}\label{subsec:11.3}
+Theorem A* requires (R3) as an
+extra assumption. Whether (R3) follows from (R1) + Lipschitz +
+calibration alone is open. Lemma 4.3 gives first-order rigidity, so any
+failure mode is isolated; in practice, architectural enforcement makes
+the question moot.
+
+\subsection{Misspecification}\label{subsec:11.4}
+When the simulator does not exactly
+generate the data, the calibration target \(\mathcal{N}(0, I_d)\)
+becomes wrong. Robust-SBI ideas (Schmon et al.~2020; Dellaporta et
+al.~2022; Wehenkel et al.~2025) should integrate with CD-SBI but the
+right framework is unclear. Specifically: under misspecification, the
+population minimizer of NF-MLE is no longer the true CD pivot but rather
+the moment-projection of the model density onto the architectural class.
+What this object's coverage properties are --- and whether CD-SBI
+inherits a degraded but still useful guarantee --- is an open question.
+
+\subsection{Higher-dimensional scaling}\label{subsec:11.5}
+The triangular flow scales
+linearly in \(d\) for the Jacobian, but conditioning networks for
+high-\(k\) components carry growing context dimension. For
+\(d \gtrsim 10\), careful architecture design (sparse autoregressive
+structure, attention-based conditioning) likely becomes important.
+Empirical validation up to \(d = 10\) is a natural next milestone.
+
+\subsection{Sequential / amortized variants}\label{subsec:11.6}
+SBI has both amortized
+(single network for all \(X_\mathrm{obs}\)) and sequential (refine
+around a specific \(X_\mathrm{obs}\)) variants. CD-SBI as developed here
+is amortized; a sequential variant would train \(\rho\) to concentrate
+around \(\theta\) values consistent with \(X_\mathrm{obs}\). Whether the
+calibration guarantee survives sequential refinement is non-trivial: the
+implicit conditioning on the iterative procedure changes the
+population-level distribution that the loss converges to.
+
+\subsection{Discrete data with no scalar sufficient statistic}\label{subsec:11.7}
+For
+models where no scalar sufficient statistic exists (e.g., images,
+sequences), the discrete extension of \S\ref{subsec:5.7} must be combined with feature
+extraction. Whether the Lancaster randomization argument extends to
+learned-feature settings is open.
+
+\subsection{Efficient computation of \(\mathcal{C}_\alpha\) for
+multivariate}\label{subsec:11.8}
+Inversion via
+\(\|r(\theta, X_\mathrm{obs})\|^2 \le \chi^2_{d, \alpha}\) requires
+evaluating \(r\) on a grid or via root-finding. For visualization and
+reporting, efficient confidence-set computation in \(d \geq 3\) ---
+perhaps via direct sampling from the implicit set, or via a learned
+set-boundary parameterization --- is worth developing.
+
+\medskip\hrule\medskip
+
+\section*{Status of claims}
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Claim
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Status
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Notes
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+NF-MLE strictly proper for \(\mathcal{M}\) & Proven (\S\ref{subsec:3.2}; Lemma 4.3) &
+KL non-negativity, conditional \\
+Theorem A: uniqueness in 1D location-normal, \(C^1\) & Proven (\S\ref{subsec:4.3}) &
+Three-lemma proof \\
+Theorem A*: uniqueness in 1D, Lipschitz & Proven (\S\ref{subsec:4.4}) & Requires (R3)
+as extra \\
+Schweder--Hjort bridge & Proven (\S\ref{subsec:4.5}) &
+\(r^* = \theta - X \Leftrightarrow C^*_\mathrm{SH}\) \\
+Theorem C: lift to continuous one-parameter exponential families &
+Proven (\S\ref{subsec:5.2}) & Same three-lemma structure in transformed coordinates \\
+Theorem C*: discrete one-parameter, randomized & Proven (\S\ref{subsec:5.7}) &
+Lex-order monotone rearrangement; requires (R4) \\
+Theorem A-d: multivariate uniqueness within triangular class & Proven
+(\S\ref{subsec:6.3}) & Calibration manifold \(=\) singleton KR; inductive reduction to
+1D \\
+Corollary: KR \(= L^{-1}(\theta - X)\) for multivariate
+location-Gaussian & Proven (\S\ref{subsec:6.3}) & Verified empirically in \S\ref{subsec:8.3} \\
+Empirical: 1D location-normal & Validated (\S\ref{subsec:8.1}) & RMSE 0.030, coverage
+\(< 1\%\) error \\
+Empirical: 2D location, \(\Sigma = I\) & Validated (\S\ref{subsec:8.2}) & RMSE 0.044,
+joint Mahalanobis PASS \\
+Empirical: 2D location, \(\Sigma\) correlated, recovers \(L^{-1}\) &
+Validated (\S\ref{subsec:8.3}) & Jacobian within 1--2\% of KR; coverage exact \\
+Empirical: exponential rate doubly-monotone & Validated (\S\ref{subsec:8.4}) & RMSE
+0.045; autograd ablation produces direct evidence for (R2) \\
+Uniqueness outside autoregressive triangular class & Open (\S\ref{subsec:11.1}) &
+Rotational ambiguity in dense flows \\
+KR ordering selection for unordered data & Open (\S\ref{subsec:11.2}) & Multiple valid
+pivots; finite-sample comparison unclear \\
+(R3) automatic for Lipschitz & Open (\S\ref{subsec:11.3}) & Architectural enforcement
+sufficient in practice \\
+Misspecification & Open (\S\ref{subsec:11.4}) & Not addressed \\
+Higher-\(d\) scaling & Open (\S\ref{subsec:11.5}) & \(d \leq 2\) validated;
+\(d \leq 10\) next milestone \\
+Sequential refinement & Open (\S\ref{subsec:11.6}) & Theory unclear \\
+\end{longtable}
+
+\medskip\hrule\medskip
+
+\section*{References}
+
+\textbf{Confidence distributions and fiducial inference.}
+
+\begin{itemize}
+\tightlist
+\item
+  Cox, D. R. (1958). ``Some problems connected with statistical
+  inference.'' \emph{Annals of Mathematical Statistics}, 29(2),
+  357--372.
+\item
+  Efron, B. (1993). ``Bayes and likelihood calculations from confidence
+  intervals.'' \emph{Biometrika}, 80(1), 3--26.
+\item
+  Efron, B. (1998). ``R. A. Fisher in the 21st century.''
+  \emph{Statistical Science}, 13(2), 95--122.
+\item
+  Fisher, R. A. (1930). ``Inverse probability.'' \emph{Proceedings of
+  the Cambridge Philosophical Society}, 26, 528--535.
+\item
+  Fraser, D. A. S. (2011). ``Is Bayes posterior just quick and dirty
+  confidence?'' \emph{Statistical Science}, 26(3), 299--316.
+\item
+  Hwang, J. T. G., \& Yang, M.-C. (2001). ``An optimality theory for mid
+  p-values in \(2 \times 2\) contingency tables.'' \emph{Statistica
+  Sinica}, 11(3), 807--826.
+\item
+  Lancaster, H. O. (1961). ``Significance tests in discrete
+  distributions.'' \emph{JASA}, 56(294), 223--234.
+\item
+  Schweder, T., \& Hjort, N. L. (2016). \emph{Confidence, Likelihood,
+  Probability: Statistical Inference with Confidence Distributions}.
+  Cambridge University Press.
+\item
+  Singh, K., Xie, M., \& Strawderman, W. E. (2007). ``Confidence
+  distribution (CD) --- distribution estimator of a parameter.''
+  \emph{IMS Lecture Notes --- Monograph Series}, 54, 132--150.
+\item
+  Xie, M., \& Singh, K. (2013). ``Confidence distribution, the
+  frequentist distribution estimator of a parameter: A review.''
+  \emph{International Statistical Review}, 81(1), 3--39.
+\end{itemize}
+
+\textbf{Simulation-based inference.}
+
+\begin{itemize}
+\tightlist
+\item
+  Bortolato, E., \& Ventura, L. (2025). ``Box Confidence Depth:
+  Simulation-Based Inference with Hyper-Rectangles.'' arXiv:2502.11072.
+\item
+  Cranmer, K., Brehmer, J., \& Louppe, G. (2020). ``The frontier of
+  simulation-based inference.'' \emph{PNAS}, 117(48), 30055--30062.
+\item
+  Cranmer, K., Pavez, J., \& Louppe, G. (2015). ``Approximating
+  likelihood ratios with calibrated discriminative classifiers.''
+  arXiv:1506.02169.
+\item
+  Dalmasso, N., Masserano, L., Zhao, D., Izbicki, R., \& Lee, A. B.
+  (2024). ``Likelihood-free frequentist inference: bridging classical
+  statistics and machine learning for reliable simulator-based
+  inference.'' \emph{Electronic Journal of Statistics}, 18(2),
+  5045--5090. arXiv:2107.03920.
+\item
+  Delaunoy, A., Hermans, J., Rozet, F., Wehenkel, A., \& Louppe, G.
+  (2022). ``Towards reliable simulation-based inference with balanced
+  neural ratio estimation.'' \emph{NeurIPS 35}.
+\item
+  Dellaporta, C., Knoblauch, J., Damoulas, T., \& Briol, F.-X. (2022).
+  ``Robust Bayesian inference for simulator-based models via the MMD
+  posterior bootstrap.'' \emph{AISTATS}.
+\item
+  Falkiewicz, M., Takeishi, N., Shekhzadeh, I., Wehenkel, A., Delaunoy,
+  A., Louppe, G., \& Kalousis, A. (2023). ``Calibrating neural
+  simulation-based inference with differentiable coverage probability.''
+  \emph{NeurIPS 36}. arXiv:2310.13402.
+\item
+  Greenberg, D., Nonnenmacher, M., \& Macke, J. (2019). ``Automatic
+  posterior transformation for likelihood-free inference.'' \emph{ICML}.
+\item
+  Hermans, J., Begy, V., \& Louppe, G. (2020). ``Likelihood-free MCMC
+  with amortized approximate ratio estimators.'' \emph{ICML}.
+\item
+  Hermans, J., Delaunoy, A., Rozet, F., Wehenkel, A., Begy, V., \&
+  Louppe, G. (2022). ``A trust crisis in simulation-based inference?
+  Your posterior approximations can be unfaithful.'' \emph{Transactions
+  on Machine Learning Research}. arXiv:2110.06581.
+\item
+  Lemos, P., Coogan, A., Hezaveh, Y., \& Perreault-Levasseur, L. (2023).
+  ``Sampling-based accuracy testing of posterior estimators for general
+  inference (TARP).'' \emph{ICML}.
+\item
+  Masserano, L., Dorigo, T., Izbicki, R., Kuusela, M., \& Lee, A. B.
+  (2023). ``Simulator-based inference with WALDO: Confidence regions by
+  leveraging prediction algorithms and posterior estimators for inverse
+  problems.'' \emph{AISTATS}. arXiv:2205.15680.
+\item
+  Miller, B. K., Weniger, C., \& Forré, P. (2022). ``Contrastive neural
+  ratio estimation.'' \emph{NeurIPS 35}.
+\item
+  Papamakarios, G., \& Murray, I. (2016). ``Fast \(\epsilon\)-free
+  inference of simulation models with Bayesian conditional density
+  estimation.'' \emph{NeurIPS}.
+\item
+  Papamakarios, G., Sterratt, D., \& Murray, I. (2019). ``Sequential
+  neural likelihood.'' \emph{AISTATS}.
+\item
+  Patel, Y., McNamara, D., Loper, J., Regier, J., \& Tewari, A. (2023).
+  ``Variational inference with coverage guarantees in simulation-based
+  inference.'' arXiv:2305.14275.
+\item
+  Schmon, S. M., Cannon, P. W., \& Knoblauch, J. (2020). ``Generalized
+  posteriors in approximate Bayesian computation.'' arXiv:2011.08644.
+\item
+  Talts, S., Betancourt, M., Simpson, D., Vehtari, A., \& Gelman, A.
+  (2018). ``Validating Bayesian inference algorithms with
+  simulation-based calibration.'' arXiv:1804.06788.
+\item
+  Wehenkel, A., Gamella, J. L., Sener, O., Behrmann, J., Sapiro, G.,
+  Jacobsen, J.-H., \& Cuturi, M. (2025). ``Addressing misspecification
+  in simulation-based inference through data-driven calibration.''
+  \emph{ICML}. arXiv:2405.08719.
+\end{itemize}
+
+\textbf{Normalizing flows, monotone networks, optimal transport.}
+
+\begin{itemize}
+\tightlist
+\item
+  Brenier, Y. (1991). ``Polar factorization and monotone rearrangement
+  of vector-valued functions.'' \emph{Comm. Pure Appl. Math.}, 44(4),
+  375--417.
+\item
+  Carlier, G., Galichon, A., \& Santambrogio, F. (2010). ``From Knothe's
+  transport to Brenier's map and a continuation method for optimal
+  transport.'' \emph{SIAM J. Math. Anal.}, 41(6), 2554--2576.
+\item
+  Durkan, C., Bekasov, A., Murray, I., \& Papamakarios, G. (2019).
+  ``Neural spline flows.'' \emph{NeurIPS 32}.
+\item
+  Papamakarios, G., Nalisnick, E., Rezende, D. J., Mohamed, S., \&
+  Lakshminarayanan, B. (2021). ``Normalizing flows for probabilistic
+  modeling and inference.'' \emph{JMLR}, 22, 1--64.
+\item
+  Rosenblatt, M. (1952). ``Remarks on a multivariate transformation.''
+  \emph{Annals of Mathematical Statistics}, 23(3), 470--472.
+\item
+  Wehenkel, A., \& Louppe, G. (2019). ``Unconstrained monotonic neural
+  networks.'' \emph{NeurIPS 32}. arXiv:1908.05164.
+\end{itemize}
+
+\textbf{Kernel methods and divergences.}
+
+\begin{itemize}
+\tightlist
+\item
+  Gneiting, T., \& Raftery, A. E. (2007). ``Strictly proper scoring
+  rules, prediction, and estimation.'' \emph{JASA}, 102(477), 359--378.
+\item
+  Gretton, A., Bousquet, O., Smola, A., \& Schölkopf, B. (2005).
+  ``Measuring statistical dependence with Hilbert--Schmidt norms.''
+  \emph{Algorithmic Learning Theory}, 63--77.
+\item
+  Lyons, R. (2013). ``Distance covariance in metric spaces.''
+  \emph{Annals of Probability}, 41(5), 3284--3305.
+\item
+  Sriperumbudur, B., Fukumizu, K., \& Lanckriet, G. (2011).
+  ``Universality, characteristic kernels and RKHS embedding of
+  measures.'' \emph{JMLR}, 12, 2389--2410.
+\end{itemize}
+\end{document}
