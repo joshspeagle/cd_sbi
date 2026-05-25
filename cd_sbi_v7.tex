@@ -2042,13 +2042,19 @@ Multivariate with cross-coupling & Triangular flow, additive form (\S\ref{subsec
 form 1; \S\ref{subsec:8.3}) \\
 Has multiplicative \(\theta\)--\(X\) interaction & Doubly-monotone
 construction (\S\ref{subsec:6.1} form 2; \S\ref{subsec:8.4}) \\
-No prior knowledge & Doubly-monotone construction with autoregressive
-conditioning \\
+No prior knowledge (default suggestion) & Doubly-monotone construction
+with autoregressive conditioning --- informed by the §\ref{subsec:6.1}
+form-2 architecture rather than empirically validated for the unknown-
+structure case; see \S\ref{subsec:11.5} on higher-\(d\) scaling \\
 \end{longtable}
 
 \textbf{2. Enforce both monotonicities architecturally.} Never rely on
-autograd to give you a valid Jacobian without architectural support. The
-\S\ref{subsec:8.4} ablation is documentation of why.
+autograd-only Jacobians. The theoretical argument in \S\ref{subsec:3.5}
+gives the mechanism (folding makes \(\hat p_r\) non-normalized and the
+loss unbounded below); the \S\ref{subsec:8.4} ablation confirms it
+empirically in one setup. Theory is doing the heavy lifting; the
+single ablation is the smoking gun, not the entire basis. We treat
+this as a hard rule because the failure mode is structural.
 
 \textbf{3. Use a proposal \(\rho\) with full support on the region of
 interest.} The framework is robust to the choice of \(\rho\) in the
@@ -2063,8 +2069,9 @@ depending on problem complexity.
 \textbf{5. Validate.} Run all five diagnostics in \S\ref{subsec:7.3}. The critical one
 is coverage: if coverage matches nominal at multiple \(\theta_0\) and
 multiple \(\alpha\) levels, the pivot is valid. If only marginal PIT
-passes but conditional fails, you have a Hermans-style problem and need
-to revisit the architecture.
+passes but conditional fails, you have the kind of conditional
+miscalibration that Hermans et al.~(2022) documented in standard SBI
+methods, and you need to revisit the architecture.
 
 \textbf{6. At test time, invert.} Given observed \(X_\mathrm{obs}\),
 compute
@@ -2099,8 +2106,8 @@ NPE / SNPE & Bayesian posterior & None built-in & Papamakarios \& Murray
 NLE / SNL & Likelihood & None built-in & Papamakarios et al.~2019 \\
 NRE / SNRE & Likelihood ratio & None built-in & Hermans et al.~2020;
 Miller et al.~2022 \\
-Balanced NRE & Posterior & Conservative regularizer & Delaunoy et
-al.~2022 \\
+Balanced NRE & Likelihood ratio (goal: more reliable posteriors) &
+Conservative regularizer & Delaunoy et al.~2022 \\
 Calibrated NPE & Posterior & Differentiable coverage & Falkiewicz et
 al.~2023 \\
 LF2I (ACORE, BFF) & Confidence sets & Neyman construction on learned
@@ -2116,10 +2123,11 @@ al.~2023 \\
 \end{longtable}
 
 The closest cousins are LF2I and WALDO (which target test-statistic CDFs
-to construct confidence sets via Neyman inversion) and SNL (which uses
-the same NF-MLE loss but without the monotone-in-\(\theta\)
-architectural constraint, and without the frequentist inference
-machinery).
+to construct confidence sets via Neyman inversion) and SNL (same NF-MLE
+loss, but with a generic flow architecture rather than the
+monotone-in-\(\theta\) + monotone-in-\(X\) prescription, and with MCMC
+on the surrogate likelihood rather than direct chi-square pivot
+inversion).
 
 CD-SBI's specific contribution is the architectural recipe (monotone in
 \(\theta\) + monotone in \(X\) + triangular structure for multivariate)
@@ -2134,10 +2142,14 @@ limit by the architecture + loss combination rather than by a hold-out
 calibration sample.
 
 The framework also relates to the implicit-likelihood-ratio tradition
-(Cranmer et al.~2015): the optimal pivot in the location-normal model is
-the standardized log-likelihood gradient, and in regular exponential
-families more generally relates to the signed-root log-likelihood ratio
-(Schweder \& Hjort 2016, ch.~5).
+(Cranmer et al.~2015). For the location-normal model the score
+\(\partial_\theta \log p(X \mid \theta) = X - \theta\) is the
+standardized log-likelihood gradient; our optimal pivot
+\(r^*(\theta; X) = \theta - X\) is its negative, with the sign chosen to
+match the (R1) convention that \(\partial_\theta r > 0\). Up to this
+sign, \(r^*\) is the standardized score; in regular exponential
+families more generally this connects to the signed-root log-likelihood
+ratio (Schweder \& Hjort 2016, ch.~5).
 
 \medskip\hrule\medskip
 
