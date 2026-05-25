@@ -137,157 +137,6 @@ enforcement) and its fix.
 
 \medskip\hrule\medskip
 
-\section*{Glossary}
-\addcontentsline{toc}{section}{Glossary}
-
-A reference card for terms that recur throughout the manuscript. Each
-entry gives a short working definition and points to where the formal
-treatment lives.
-
-\noindent\textbf{Core objects.}
-
-\begin{itemize}
-\tightlist
-\item
-  \textbf{Confidence distribution (CD).} A data-dependent distribution
-  function \(H(\cdot; X)\) on \(\Theta\) whose \(\alpha\)-quantile is
-  the upper endpoint of an exact one-sided \(\alpha\)-confidence
-  interval. Frequentist analogue of the Bayesian posterior; depends only
-  on the model \(\{P_\theta\}\) and the data, not on a prior. See
-  \S\ref{subsec:1.2}.
-\item
-  \textbf{Pivot.} A function \(r(\theta; X)\) of data and parameter
-  whose distribution does not depend on \(\theta\) when \(X \sim P_\theta\).
-  Here we require the stronger property \(r(\theta_0; X) \mid \theta_0 \sim \mathcal{N}(0, I_d)\)
-  exactly. See \S\ref{subsec:2.2}.
-\item
-  \textbf{Calibration manifold} \(\mathcal{M}\). The set of \(r\) in a
-  given architectural class that satisfy the pivot calibration
-  condition. See \S\ref{subsec:2.2}.
-\item
-  \textbf{Probability integral transform (PIT).} For continuous
-  \(Y \sim G\), the random variable \(G(Y)\) is uniform on \([0, 1]\).
-  Applied to a pivot, the PIT converts the pivot's law to the reference
-  Gaussian. See \S\ref{subsec:1.2}.
-\end{itemize}
-
-\noindent\textbf{Architectures.}
-
-\begin{itemize}
-\tightlist
-\item
-  \textbf{Normalizing flow.} A learnable diffeomorphism that transports
-  a complicated density to a simple base (here, the standard Gaussian)
-  via the change-of-variables formula. Lets us learn a conditional
-  density by parameterizing the transport map and maximizing its
-  implied log-likelihood. See \S\ref{subsec:3.1}.
-\item
-  \textbf{Change-of-variables Jacobian.} The factor
-  \(|\det \partial r / \partial X|\) by which the density is rescaled
-  when \(r\) transports \(X\); a normalizing flow's likelihood
-  evaluation requires it.
-\item
-  \textbf{Unconstrained Monotonic Neural Network (UMNN;
-  \citealp{WehenkelLouppe2019}).} A parameterization of a strictly
-  monotone scalar function as the integral of a strictly positive neural
-  network. Strict monotonicity holds by construction (integrating a
-  positive function gives an increasing one), and the derivative is
-  closed-form. See \S\ref{subsec:7.1}.
-\item
-  \textbf{Knothe--Rosenblatt (KR) rearrangement.} The unique transport
-  map of triangular form between two atomless probability measures on
-  \(\mathbb{R}^d\); each coordinate's transform conditions on
-  previously-transformed coordinates. See \S\ref{subsec:6.3}.
-\item
-  \textbf{Brenier map.} The unique \(L^2\)-optimal transport map
-  between two atomless measures on \(\mathbb{R}^d\), equal to the
-  gradient of a convex function. Distinct from the KR map (KR depends
-  on coordinate ordering; Brenier does not). See \S\ref{subsec:6.3}.
-\end{itemize}
-
-\noindent\textbf{Exponential families and related.}
-
-\begin{itemize}
-\tightlist
-\item
-  \textbf{Sufficient statistic} \(T(X)\). A function of the data
-  through which all parameter-dependent information passes; the
-  likelihood depends on \(X\) only through \(T(X)\). See \S\ref{subsec:5.1}.
-\item
-  \textbf{Monotone likelihood ratio (MLR).} The family
-  \(\{P_\theta\}\) has MLR in \(T\) if the likelihood ratio
-  \(p(X \mid \theta_2) / p(X \mid \theta_1)\) is a monotone function
-  of \(T(X)\) for all \(\theta_1 < \theta_2\). Powers most classical
-  optimality results. See \S\ref{subsec:5.1}.
-\item
-  \textbf{Ancillary statistic.} A function of the data whose
-  distribution does not depend on the parameter; conditioning on an
-  ancillary loses no information \citep{Cox1958}.
-\item
-  \textbf{Randomized PIT \citep{Stevens1950, Lancaster1961}.}
-  Extension of the PIT to discrete distributions by spreading each
-  atom of \(T(X)\) across a sub-interval of \([0, 1]\) using an
-  independent uniform \(U\). See \S\ref{subsec:5.7}.
-\end{itemize}
-
-\noindent\textbf{Regularity conditions used.}
-
-\begin{itemize}
-\tightlist
-\item
-  \textbf{(R1) Monotonicity in \(\theta\).} The pivot \(r\) is strictly
-  increasing in each coordinate \(\theta_k\); enforced architecturally.
-  See \S\ref{subsec:2.2}.
-\item
-  \textbf{(R2) Invertibility in \(X\).} \(X \mapsto r(\theta; X)\) is
-  a \(C^1\) diffeomorphism onto its image. The Lipschitz case requires
-  the additional bound (R3).
-\item
-  \textbf{(R3).} \(|\partial_X r| \ge c > 0\) a.e.; used in the
-  Lipschitz form of Theorem A* (\S\ref{subsec:4.4}).
-\item
-  \textbf{(R4) and (R3\(_U\)).} Discrete-case regularity for the
-  randomized-PIT extension: (R3\(_U\)) is strict monotonicity in the
-  auxiliary uniform \(U\); (R4) is order-coherence between \(T(X)\)
-  values and the pivot. See \S\ref{subsec:5.7}.
-\item
-  \textbf{(R1\(^{\mathrm{auto}}\)), (R2\(^{\mathrm{auto}}\)).}
-  Autoregressive specializations of (R1) and (R2) used in the
-  triangular-flow class of \S\ref{sec:6}. Each \(r_k\) depends only on
-  inputs with index \(\le k\), and within that scope is monotone in
-  its own coordinate.
-\end{itemize}
-
-\noindent\textbf{SBI methods (compared in \S\ref{sec:10}).}
-
-\begin{itemize}
-\tightlist
-\item
-  \textbf{NPE / SNPE} (Neural / Sequential Neural Posterior Estimation):
-  train a density estimator on \(\theta \mid X\). \citep{PapamakariosMurray2016, GreenbergEtAl2019}
-\item
-  \textbf{NLE / SNL} (Neural / Sequential Neural Likelihood): train a
-  density estimator on \(X \mid \theta\), then MCMC over the learned
-  surrogate. \citep{PapamakariosEtAl2019}
-\item
-  \textbf{NRE / SNRE} (Neural / Sequential Neural Ratio Estimation):
-  train a binary classifier to recover the likelihood ratio.
-  \citep{HermansEtAl2020, MillerEtAl2022}
-\item
-  \textbf{LF2I} (Likelihood-Free Frequentist Inference): learn a test
-  statistic, then construct confidence sets by Neyman inversion using
-  separately-learned critical values. \citep{DalmassoEtAl2024}
-\item
-  \textbf{WALDO}: Wald-style test statistic + Neyman inversion via
-  simulated quantiles. \citep{MasseranoEtAl2023}
-\item
-  \textbf{CD-SBI} (this work): per-sample NF-MLE on a monotone-in-\(\theta\),
-  monotone-in-\(X\) flow. Output is a calibrated CD with pointwise
-  frequentist coverage by construction; the same forward pass yields
-  the confidence set via chi-square inversion.
-\end{itemize}
-
-\medskip\hrule\medskip
 
 \section*{Part I — Framework}
 \addcontentsline{toc}{section}{Part I — Framework}
@@ -634,6 +483,51 @@ satisfying (R1) (\(\partial_\theta r^* = +1\)) and (R2)
 \(H_{r^*}(\theta; X) = \Phi(\theta - X)\) recovers the textbook one. The
 framework we develop is: find the analogue of \(r^*\) when no closed
 form is available, by training a neural surrogate.
+
+\paragraph{Regularity conditions at a glance.} The manuscript accumulates
+additional regularity conditions on \(r\) as we move from \(C^1\) to
+Lipschitz to discrete to multivariate settings. The full set is
+small --- seven names --- but easy to lose track of, so we collect them
+here for reference; each is defined where it first becomes load-bearing.
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.13}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.18}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.69}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Condition
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+First defined
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+What it asserts
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+(R1) & \S\ref{subsec:2.2} & \(\theta_k \mapsto r_k(\theta; X)\) strictly
+increasing at fixed other arguments. Eliminates direction / rotation
+ambiguity in the calibration manifold. \\
+(R2) & \S\ref{subsec:2.2} & For each fixed \(\theta\),
+\(X \mapsto r(\theta; X)\) is a \(C^1\) diffeomorphism onto its image.
+Makes the change-of-variables Jacobian valid. \\
+(R3) & \S\ref{subsec:4.4} & \(|\partial_X r| \ge c > 0\) a.e.\ on the
+differentiability set. Lipschitz strengthening when (R2) is too weak
+for non-\(C^1\) architectures. \\
+(R3\(_U\)) & \S\ref{subsec:5.7} & Strict monotonicity of the pivot in
+the auxiliary uniform variable \(U\) used for discrete-distribution
+randomization. \\
+(R4) & \S\ref{subsec:5.7} & Order-coherence between \(T(X)\) values
+and the pivot in the discrete case; eliminates a residual permutation
+ambiguity that survives (R1)--(R3\(_U\)). \\
+(R1\(^{\mathrm{auto}}\)) & \S\ref{subsec:6.1} & Autoregressive
+specialization of (R1) for the triangular-flow class: \(r_k\) depends
+on \(\theta\) only through \(\theta_{\le k}\). \\
+(R2\(^{\mathrm{auto}}\)) & \S\ref{subsec:6.1} & Autoregressive
+specialization of (R2): \(r_k\) depends on \(X\) only through
+\(X_{\le k}\) with strict monotonicity in \(X_k\). \\
+\end{longtable}
 
 \subsection{The role of (R1): why monotonicity in \(\theta\) is needed}\label{subsec:2.3}
 
