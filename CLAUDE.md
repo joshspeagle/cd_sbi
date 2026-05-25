@@ -39,15 +39,16 @@ scaling beyond the toy validation experiments currently in the draft.
 
 ## Round-1 status (May 2026)
 
-Round 1 of the three-round vetting workflow is complete pending user
-sign-off. Eight critic agents (one per Part + cross-cutting) flagged 88
-items across the manuscript (~39 ✓, ~43 ⚠, ~6 ✗); all were integrated
-into `cd_sbi_v7.tex` except one **escalation** flagged with an inline
-`% TODO(round1-escalation)` marker:
-
-- **Bin(1, θ) counterexample in §5.7.2 (C-5.7-counterex)** does not
-  actually separate (R4) from (R3_U). A Bin(2, θ) replacement is the
-  recommended fix; the v6 construction is preserved pending user input.
+Round 1 of the three-round vetting workflow is **complete**. Eight
+critic agents (one per Part + cross-cutting) flagged 88 items across
+the manuscript (~39 ✓, ~43 ⚠, ~6 ✗); all were integrated into
+`cd_sbi_v7.tex`. The one initially-escalated item — the §5.7.2 Bin(1, θ)
+counterexample (C-5.7-counterex) — was resolved by a follow-up
+math-skeptic agent that found a working Bin(3, θ) construction (the
+intermediate Bin(2, θ) attempt also fails; see
+`reviews/round1/r4_independence_check.md`). The agent's finding also
+caught a sign-convention issue in the manuscript's (R4), which has been
+corrected.
 
 Round 2 (literature & citations + BibTeX migration) is the next phase;
 see `/home/joshspeagle/.claude/plans/our-first-task-will-mellow-harbor.md`

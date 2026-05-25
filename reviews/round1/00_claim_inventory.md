@@ -12,10 +12,21 @@
 | `50e6856` | Part V (§7–8): UMNN quadrature note; diagnostic hierarchy; per-bin noise floor; §8.1 edge-effect framing; §8.3 dynamic-range arithmetic fixed; §8.4 ablation tied to §3.2/§3.5; §8.5 scope calibration. |
 | `e7922cf` | Part VI (§9–10): §9 step-1 default softened; §9 step-2 reframed; "Hermans-style" attribution fixed; Balanced NRE row corrected; §10 cousins paragraph names both monotonicities; C-10-IRT sign fixed. |
 | `419c455` | Part VII (§11): OP-11.1 rotation argument tightened; OP-11.2 conjecture framing; OP-11.4 forward-KL projection; OP-11.5 d=10 cutoff replaced; OP-11.6 split into two sub-problems; OP-11.7 obstruction specified; **OP-11.8 downgraded from open problem to implementation challenge**. |
+| `b3e2858` | §5.7.2 escalation resolved: Bin(3, θ) `(0, 2, 1, 3)` counterexample replaces the broken Bin(1, θ) construction; (R4) sign convention corrected; `(R4) automatic in continuous case` paragraph updated to match. |
+| `afd4b3e` | Replace unicode ✓ in the new §5.7.2 verification block with `\(\checkmark\)` so pdflatex builds clean. |
 
 **Escalations to user (deferred from round 1 end-of-round handoff):**
 
-- **C-5.7-counterex** — Bin(1, θ) counterexample in §5.7.2 does not actually separate (R4) from (R3_U) under any monotone-in-U completion of V'_θ(1, ·). Part III review (claim C-5.7-counterex) recommends a Bin(2, θ) replacement with three atoms and a non-trivial T-permutation. A `% TODO(round1-escalation)` marker has been added in-text in §5.7.2; the original v6 construction is preserved pending user input.
+- **C-5.7-counterex** [**RESOLVED** at `b3e2858`] — Bin(1, θ)
+  counterexample in §5.7.2 did not actually separate (R4) from (R3_U).
+  A dedicated math-skeptic agent (`reviews/round1/r4_independence_check.md`)
+  found that the round-1 reviewer's suggested Bin(2, θ) replacement also
+  fails — under MLR-increasing, (R1) alone forces canonical ordering up
+  through n = 2. The smallest model where (R4) is genuinely independent
+  is **Bin(3, θ)** via the permutation (0, 2, 1, 3), which works due to
+  the algebraic accident that `(1−θ)(1 − 2θ + 4θ²)` has derivative
+  `−3(2θ−1)² ≤ 0`. The same investigation surfaced a sign-convention
+  error in the manuscript's (R4) (corrected at the same commit).
 
 **Document under review:** `cd_sbi_v7.tex`
 **Round 1 scope:** factual / logical correctness of claims and proofs.
