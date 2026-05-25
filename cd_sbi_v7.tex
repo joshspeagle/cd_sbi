@@ -736,14 +736,23 @@ term penalizes \(r\) for over-stretching the local geometry of
 The central claim of Part II is that NF-MLE on \(\mathcal{F}\)
 \emph{exactly} recovers the calibration manifold: the population-level
 minimizers of \(L\) are precisely the calibrated pivots in
-\(\mathcal{F}\), nothing else.
+\(\mathcal{F}\), nothing else. This property has a name from the
+scoring-rule literature, \emph{strict propriety}: a loss \(L\) is
+strictly proper for a target set \(\mathcal{M}\) within a function
+class \(\mathcal{F}\) if \(\arg\min_{r \in \mathcal{F}} L(r) = \mathcal{M}\)
+--- minimum attained exactly on \(\mathcal{M}\), nowhere else, and no
+auxiliary penalties needed. \citet{GneitingRaftery2007} is the standard
+reference. The theorem below says NF-MLE is strictly proper for the
+calibration manifold.
 
 \textbf{Theorem 3.2 (Strict propriety of NF-MLE).}\label{thm:strictprop}
 \emph{Let \(\mathcal{F}\) be a class of measurable functions
 \(r: \Theta \times \mathcal{X} \to \mathbb{R}^d\) every element of which
-satisfies the invertibility condition (R2) of \S\ref{subsec:2.2} (or
-its autoregressive analogue (R2\(^{\mathrm{auto}}\)) of \S\ref{subsec:6.1};
-the two are equivalent for our purposes). Then}
+makes \(\hat p_r(\cdot \mid \theta)\) a valid normalized density on
+\(\mathcal{X}\) at each fixed \(\theta\). This holds when every element
+satisfies the invertibility condition (R2) of \S\ref{subsec:2.2}, the
+autoregressive analogue (R2\(^{\mathrm{auto}}\)) of \S\ref{subsec:6.1},
+or the Lipschitz form (R2 + R3) of \S\ref{subsec:4.4}. Then}
 \[
 \arg\min_{r \in \mathcal{F}} L(r) \;=\; \mathcal{M}_\mathcal{F},
 \]
@@ -896,7 +905,7 @@ surrogate is not a probability density on \(\mathcal{X}\) at fixed
 \(\theta\); concretely, if we define
 \(Z(\theta) := \int_\mathcal{X} \hat p_r(X \mid \theta)\,dX\), folding
 drives \(Z(\theta)\) above \(1\). In practice the regions of
-\(X\)-space where \(r\) folds are precisely where
+\(X\)-space where \(r\) folds tend to be regions where
 \(|\det \partial r / \partial X|\) is large (the local volume rescaling
 goes up to compensate for the under-counting), which the autograd
 Jacobian during training picks up as ``high local likelihood'' --- the
@@ -1076,10 +1085,14 @@ loss is therefore \emph{minimized by collapsing \(r(\theta, X)\) to a
 constant at the median}, the opposite of calibration.
 
 The same conclusion follows from the more elementary expansion
-\(\mathbb{E}_{Y \sim G}[\mathrm{CRPS}(F, Y)] = \int F^2\,dz + \int G(z)(1-2F(z))\,dz\)
-after suitable regularization of the (individually divergent) integrals:
-the coefficient \(1 - 2\Phi(z)\) is positive on \(z < 0\) and negative
-on \(z > 0\), so the pointwise-optimal valid CDF \(G\) takes \(G(z) = 0\)
+\(\mathbb{E}_{Y \sim G}[\mathrm{CRPS}(F, Y)] = \int F^2\,dz + \int G(z)(1-2F(z))\,dz\),
+where both integrals are individually divergent on \(\mathbb{R}\) but
+their \emph{difference} is finite and equal to the (well-defined) dual
+form above; the calculation should be read modulo this regularization
+(equivalently, recentering at the reference median \(0\) so both
+integrals are absolutely convergent). With that proviso: the
+coefficient \(1 - 2\Phi(z)\) is positive on \(z < 0\) and negative on
+\(z > 0\), so the pointwise-optimal valid CDF \(G\) takes \(G(z) = 0\)
 for \(z < 0\) and \(G(z) = 1\) for \(z > 0\) --- the step function for
 \(\delta_0\).
 
@@ -1548,6 +1561,23 @@ V_\theta(X, U) \;:=\; F_\theta(T(X)^-) + U \cdot p_\theta(T(X)).
 \] \emph{Fact.} Under \(X \sim P_{\theta_0}\), \(U \sim U(0,1)\)
 independent: \(V_{\theta_0}(X, U) \sim U(0,1)\) exactly.
 
+\emph{Quick worked example.} Take \(X \sim \mathrm{Bin}(1, \theta)\)
+with \(\theta = 0.3\), so \(p_\theta(0) = 0.7\) and \(p_\theta(1) = 0.3\).
+The randomized PIT spreads the \(X = 0\) atom across \([0, 0.7]\) and
+the \(X = 1\) atom across \([0.7, 1]\):
+\[
+V_\theta(0, U) = 0.7\,U \in [0, 0.7],
+\qquad
+V_\theta(1, U) = 0.7 + 0.3\,U \in [0.7, 1].
+\]
+Each conditional distribution \(V_\theta(t, U) \mid T = t\) is uniform
+on its sub-interval. Sampling \(X\) then \(U\) gives, for any \(v \in [0, 1]\),
+\(P(V_\theta(X, U) \le v) = 0.7 \cdot \min(v / 0.7, 1) + 0.3 \cdot \max(0, (v - 0.7)/0.3)\)
+\(= v\) --- i.e.,
+\(V_\theta(X, U) \sim U(0, 1)\), as the Fact asserts. The composition
+\(r^*_\mathrm{rand}(\theta; X, U) := \Phi^{-1}(1 - V_\theta(X, U))\)
+then has the desired \(\mathcal{N}(0, 1)\) calibration.
+
 The CD-SBI framework lifts to this setting by enlarging the input space:
 the pivot becomes
 \(r: \Theta \times \mathcal{X} \times [0,1] \to \mathbb{R}\), training
@@ -1976,8 +2006,12 @@ so \(\sigma(\theta, X_{<k}) = \sigma(\theta, r_{<k})\). Conditioning on
 
 \emph{Calibration $\Rightarrow$ conditional Gaussianity.} The full
 calibration constraint \(r(\theta; X) \mid \theta \sim \mathcal{N}(0, I_d)\)
-implies that all components are jointly standard normal. Combined with
-the \(\sigma\)-algebra identity,
+makes \(r_1, \ldots, r_d \mid \theta\) jointly standard normal, with
+independent coordinates (\(\mathcal{N}(0, I_d)\) has diagonal covariance,
+so the marginals are independent). Independence + standard-normal
+marginals means each \(r_k\) is \(\mathcal{N}(0, 1)\) regardless of what
+we condition on among the other coordinates. Combined with the
+\(\sigma\)-algebra identity above, this gives
 \(r_k \mid \theta, X_{<k} \sim \mathcal{N}(0, 1)\).
 
 \emph{1D rigidity.} By (R2\(^\mathrm{auto}\)),
@@ -2117,16 +2151,41 @@ At an observed \(X_\mathrm{obs}\), the level-\(\alpha\) confidence set
 is \[
 \mathcal{C}_\alpha(X_\mathrm{obs}) := \bigl\{\theta : \|r(\theta; X_\mathrm{obs})\|^2 \leq \chi^2_{d, \alpha}\bigr\}.
 \] Under (C1), \(\|r(\theta_0; X)\|^2 \mid \theta_0 \sim \chi^2_d\) for
-every \(\theta_0 \in \Theta\) (note: the NF-MLE training argument
-delivers calibration only \(\rho\)-a.e.; the lift to every \(\theta_0\)
-uses continuity of \(r\) in \(\theta\) under the architectural class plus
-\(\rho\)'s full support on the inferential region). Thus
+every \(\theta_0 \in \Theta\) on the inferential region, so
 \(\mathcal{C}_\alpha\) has exact frequentist coverage: \[
 \mathbb{P}_{X \sim P_{\theta_0}}\bigl(\theta_0 \in \mathcal{C}_\alpha(X)\bigr) = \alpha.
 \] The set \(\mathcal{C}_\alpha\) is found by numerical root-finding in
 \(\theta\): since \(r\) is monotone in \(\theta\) (autoregressively),
 each ``slice'' \(\theta_k \mid \theta_{<k}\) is a 1D root-finding
 problem.
+
+\paragraph{From \(\rho\)-a.e.\ calibration to pointwise calibration.}
+The KL identity in the proof of Theorem~\ref{thm:strictprop} concludes
+that any NF-MLE minimizer is calibrated for \(\rho\)-a.e.\ \(\theta_0\).
+Coverage at \emph{every} \(\theta_0\) inside the inferential region is
+a strictly stronger property, so closing the gap is load-bearing. The
+lift uses two ingredients. First, every architecture in this paper
+makes \(r\) continuous (in fact, smooth) in \(\theta\) by construction
+--- UMNN integrals and triangular flows are both \(C^1\) in the
+parameter argument. Second, \(\rho\) has full support on the
+inferential region by the standing assumption of \S\ref{subsec:2.1}, so
+the set on which calibration holds is dense.
+
+The continuity-plus-dense-support argument is then short. Fix a target
+\(\theta_0\) inside the inferential region. The map
+\(\theta \mapsto \mathrm{Law}(r(\theta; X) \mid \theta_0 \text{ if we substitute } \theta = \theta_0)\)
+is continuous in \(\theta\) in the weak-convergence sense, because
+\(r\) is continuous in \(\theta\) and the law of \(X \mid \theta_0\) is
+fixed. There exists a sequence
+\(\theta^{(n)} \to \theta_0\) along which calibration holds (the
+\(\rho\)-a.e.\ set is dense in the inferential region). The weak limit
+of the laws \(\mathrm{Law}(r(\theta^{(n)}; X) \mid \theta_0)\) is
+\(\mathcal{N}(0, I_d)\) (the calibrated law along the sequence) and
+also \(\mathrm{Law}(r(\theta_0; X) \mid \theta_0)\) (by continuity).
+Uniqueness of weak limits gives
+\(r(\theta_0; X) \mid \theta_0 \sim \mathcal{N}(0, I_d)\) at the
+particular \(\theta_0\) chosen, hence at every \(\theta_0\) in the
+inferential region.
 
 \textbf{Worked example (1D location-normal).} With
 \(r^*(\theta; X) = \theta - X\),
