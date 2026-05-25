@@ -137,6 +137,158 @@ enforcement) and its fix.
 
 \medskip\hrule\medskip
 
+\section*{Glossary}
+\addcontentsline{toc}{section}{Glossary}
+
+A reference card for terms that recur throughout the manuscript. Each
+entry gives a short working definition and points to where the formal
+treatment lives.
+
+\noindent\textbf{Core objects.}
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Confidence distribution (CD).} A data-dependent distribution
+  function \(H(\cdot; X)\) on \(\Theta\) whose \(\alpha\)-quantile is
+  the upper endpoint of an exact one-sided \(\alpha\)-confidence
+  interval. Frequentist analogue of the Bayesian posterior; depends only
+  on the model \(\{P_\theta\}\) and the data, not on a prior. See
+  \S\ref{subsec:1.2}.
+\item
+  \textbf{Pivot.} A function \(r(\theta; X)\) of data and parameter
+  whose distribution does not depend on \(\theta\) when \(X \sim P_\theta\).
+  Here we require the stronger property \(r(\theta_0; X) \mid \theta_0 \sim \mathcal{N}(0, I_d)\)
+  exactly. See \S\ref{subsec:2.2}.
+\item
+  \textbf{Calibration manifold} \(\mathcal{M}\). The set of \(r\) in a
+  given architectural class that satisfy the pivot calibration
+  condition. See \S\ref{subsec:2.2}.
+\item
+  \textbf{Probability integral transform (PIT).} For continuous
+  \(Y \sim G\), the random variable \(G(Y)\) is uniform on \([0, 1]\).
+  Applied to a pivot, the PIT converts the pivot's law to the reference
+  Gaussian. See \S\ref{subsec:1.2}.
+\end{itemize}
+
+\noindent\textbf{Architectures.}
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Normalizing flow.} A learnable diffeomorphism that transports
+  a complicated density to a simple base (here, the standard Gaussian)
+  via the change-of-variables formula. Lets us learn a conditional
+  density by parameterizing the transport map and maximizing its
+  implied log-likelihood. See \S\ref{subsec:3.1}.
+\item
+  \textbf{Change-of-variables Jacobian.} The factor
+  \(|\det \partial r / \partial X|\) by which the density is rescaled
+  when \(r\) transports \(X\); a normalizing flow's likelihood
+  evaluation requires it.
+\item
+  \textbf{Unconstrained Monotonic Neural Network (UMNN;
+  \citealp{WehenkelLouppe2019}).} A parameterization of a strictly
+  monotone scalar function as the integral of a strictly positive neural
+  network. Strict monotonicity holds by construction (integrating a
+  positive function gives an increasing one), and the derivative is
+  closed-form. See \S\ref{subsec:7.1}.
+\item
+  \textbf{Knothe--Rosenblatt (KR) rearrangement.} The unique transport
+  map of triangular form between two atomless probability measures on
+  \(\mathbb{R}^d\); each coordinate's transform conditions on
+  previously-transformed coordinates. See \S\ref{subsec:6.3}.
+\item
+  \textbf{Brenier map.} The unique \(L^2\)-optimal transport map
+  between two atomless measures on \(\mathbb{R}^d\), equal to the
+  gradient of a convex function. Distinct from the KR map (KR depends
+  on coordinate ordering; Brenier does not). See \S\ref{subsec:6.3}.
+\end{itemize}
+
+\noindent\textbf{Exponential families and related.}
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Sufficient statistic} \(T(X)\). A function of the data
+  through which all parameter-dependent information passes; the
+  likelihood depends on \(X\) only through \(T(X)\). See \S\ref{subsec:5.1}.
+\item
+  \textbf{Monotone likelihood ratio (MLR).} The family
+  \(\{P_\theta\}\) has MLR in \(T\) if the likelihood ratio
+  \(p(X \mid \theta_2) / p(X \mid \theta_1)\) is a monotone function
+  of \(T(X)\) for all \(\theta_1 < \theta_2\). Powers most classical
+  optimality results. See \S\ref{subsec:5.1}.
+\item
+  \textbf{Ancillary statistic.} A function of the data whose
+  distribution does not depend on the parameter; conditioning on an
+  ancillary loses no information \citep{Cox1958}.
+\item
+  \textbf{Randomized PIT \citep{Stevens1950, Lancaster1961}.}
+  Extension of the PIT to discrete distributions by spreading each
+  atom of \(T(X)\) across a sub-interval of \([0, 1]\) using an
+  independent uniform \(U\). See \S\ref{subsec:5.7}.
+\end{itemize}
+
+\noindent\textbf{Regularity conditions used.}
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{(R1) Monotonicity in \(\theta\).} The pivot \(r\) is strictly
+  increasing in each coordinate \(\theta_k\); enforced architecturally.
+  See \S\ref{subsec:2.2}.
+\item
+  \textbf{(R2) Invertibility in \(X\).} \(X \mapsto r(\theta; X)\) is
+  a \(C^1\) diffeomorphism onto its image. The Lipschitz case requires
+  the additional bound (R3).
+\item
+  \textbf{(R3).} \(|\partial_X r| \ge c > 0\) a.e.; used in the
+  Lipschitz form of Theorem A* (\S\ref{subsec:4.4}).
+\item
+  \textbf{(R4) and (R3\(_U\)).} Discrete-case regularity for the
+  randomized-PIT extension: (R3\(_U\)) is strict monotonicity in the
+  auxiliary uniform \(U\); (R4) is order-coherence between \(T(X)\)
+  values and the pivot. See \S\ref{subsec:5.7}.
+\item
+  \textbf{(R1\(^{\mathrm{auto}}\)), (R2\(^{\mathrm{auto}}\)).}
+  Autoregressive specializations of (R1) and (R2) used in the
+  triangular-flow class of \S\ref{sec:6}. Each \(r_k\) depends only on
+  inputs with index \(\le k\), and within that scope is monotone in
+  its own coordinate.
+\end{itemize}
+
+\noindent\textbf{SBI methods (compared in \S\ref{sec:10}).}
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{NPE / SNPE} (Neural / Sequential Neural Posterior Estimation):
+  train a density estimator on \(\theta \mid X\). \citep{PapamakariosMurray2016, GreenbergEtAl2019}
+\item
+  \textbf{NLE / SNL} (Neural / Sequential Neural Likelihood): train a
+  density estimator on \(X \mid \theta\), then MCMC over the learned
+  surrogate. \citep{PapamakariosEtAl2019}
+\item
+  \textbf{NRE / SNRE} (Neural / Sequential Neural Ratio Estimation):
+  train a binary classifier to recover the likelihood ratio.
+  \citep{HermansEtAl2020, MillerEtAl2022}
+\item
+  \textbf{LF2I} (Likelihood-Free Frequentist Inference): learn a test
+  statistic, then construct confidence sets by Neyman inversion using
+  separately-learned critical values. \citep{DalmassoEtAl2024}
+\item
+  \textbf{WALDO}: Wald-style test statistic + Neyman inversion via
+  simulated quantiles. \citep{MasseranoEtAl2023}
+\item
+  \textbf{CD-SBI} (this work): per-sample NF-MLE on a monotone-in-\(\theta\),
+  monotone-in-\(X\) flow. Output is a calibrated CD with pointwise
+  frequentist coverage by construction; the same forward pass yields
+  the confidence set via chi-square inversion.
+\end{itemize}
+
+\medskip\hrule\medskip
+
 \section*{Part I — Framework}
 \addcontentsline{toc}{section}{Part I — Framework}
 
@@ -341,6 +493,68 @@ explicit extensions to (i) discrete one-parameter families via auxiliary
 randomization, and (ii) multivariate \(\theta\) via autoregressive
 triangular flows. Misspecification is acknowledged but not addressed.
 
+\subsection{Roadmap}\label{subsec:1.5}
+
+The seven Parts of the manuscript build a single argument: Parts I--II
+set up the framework and training objective; Parts III--IV prove
+uniqueness theorems that say what the population-limit minimizer looks
+like; Part V validates those predictions empirically; Parts VI--VII
+translate the framework into practitioner guidance and demarcate what
+remains open. Specifically:
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.10}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.35}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.30}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.25}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Part
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+What it does
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Key results
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Where
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+I & Frame the problem and the calibration desiderata; introduce the
+pivot, the calibration manifold, and the regularity conditions (R1) and
+(R2). & (C1)/(C2) characterizing pivots; (R1)/(R2) defining the
+architectural class. & \S\ref{sec:1}--\S\ref{sec:2} \\
+II & State the training objective (NF-MLE) and show that its population
+minimizers are exactly the calibrated pivots. & Strict-propriety result
+(\S\ref{subsec:3.2}); five-class taxonomy of alternative objectives. &
+\S\ref{sec:3} \\
+III & Prove uniqueness in 1D within the architectural class. & Theorems
+A, A\(^*\) (location-normal, \(C^1\) and Lipschitz);
+C (regular exp.\ families); C\(^*\) (discrete via randomization). &
+\S\ref{sec:4}--\S\ref{sec:5} \\
+IV & Lift to multivariate \(\theta\). & Theorem A-d (singleton =
+Knothe--Rosenblatt rearrangement); closed-form Gaussian corollary
+\(r^{\mathrm{KR}} = L^{-1}(\theta - X)\). & \S\ref{sec:6} \\
+V & Validate at finite sample size. & Four experiments
+(1D loc-normal, 2D loc \(\Sigma = I\), 2D loc correlated, exp rate)
+plus the (R2) ablation showing what fails without architectural
+enforcement. & \S\ref{sec:7}--\S\ref{sec:8} \\
+VI & Translate into a practitioner recipe and position vs.\ other SBI
+methods. & Six-step recipe; comparison table against NPE/NLE/NRE/LF2I/
+WALDO/Box CD/Variational SBI. & \S\ref{sec:9}--\S\ref{sec:10} \\
+VII & Demarcate open problems. & Eight problems grouped by theme
+(theoretical extensions, robustness, scaling, engineering). &
+\S\ref{sec:11} \\
+\end{longtable}
+
+A reader who wants to skim should read the Abstract, \S\ref{subsec:1.2},
+\S\ref{subsec:1.3} (top-line goal), and the synthesis table at the end
+of \S\ref{sec:8}; a reader who wants the full argument should read the
+Parts in order. Forward and backward references are kept explicit
+throughout. Terms used repeatedly without re-definition are collected
+in the Glossary preceding Part I.
+
 \medskip\hrule\medskip
 
 \section{The pivot and the calibration manifold}\label{sec:2}
@@ -481,6 +695,17 @@ true model's 0.88). Enforcing (R2) architecturally fixes this.
 
 \section*{Part II — Loss design}
 \addcontentsline{toc}{section}{Part II — Loss design}
+
+Part I introduced two desiderata for a pivot: calibration (C1) and
+monotonicity in \(\theta\) (C2). Part II turns these into a training
+objective. We will see that minimizing the per-sample negative
+log-likelihood of \(X \mid \theta\) under the surrogate density implied
+by \(r\) --- the standard normalizing-flow MLE objective ---
+\emph{exactly} recovers the set of calibrated pivots within any
+architectural class satisfying the invertibility condition (R2). After
+proving this strict-propriety result, we contrast NF-MLE with four
+alternative classes of loss design (Class 1--4) and explain why none
+deliver pointwise frequentist calibration as cleanly.
 
 \section{The NF-MLE objective}\label{sec:3}
 
@@ -793,6 +1018,18 @@ frequentist CD by construction.
 
 \section*{Part III — Theory in one parameter}
 \addcontentsline{toc}{section}{Part III — Theory in one parameter}
+
+Part II showed that NF-MLE on a class \(\mathcal{F}\) recovers the
+calibration manifold \(\mathcal{M}_\mathcal{F}\). That is a population
+statement about \emph{a set} of functions. Part III asks: how big is
+that set? In 1D, within a natural \(C^1\) class, the answer is that
+\(\mathcal{M}\) is a \emph{singleton} --- and that singleton is the
+classical Schweder--Hjort UMP-unbiased confidence distribution.
+Theorem A proves this for the location-normal model; Theorem A\(^*\)
+extends to Lipschitz architectures (e.g.\ ReLU networks) under one
+extra condition; Theorem C lifts both to regular one-parameter
+exponential families with monotone likelihood ratio; Theorem C\(^*\)
+handles discrete data via auxiliary randomization.
 
 \section{Uniqueness in the location-normal model}\label{sec:4}
 
@@ -1267,6 +1504,20 @@ of mid-p in the closely related contingency-table setting.
 \section*{Part IV — Multivariate generalization}
 \addcontentsline{toc}{section}{Part IV — Multivariate generalization}
 
+In dimension \(d > 1\), the calibration constraint
+\(r \sim \mathcal{N}(0, I_d)\) admits the entire orthogonal group
+\(O(d)\) --- any rotation of a calibrated pivot is again calibrated,
+because the standard Gaussian is rotation-invariant. So the singleton
+result of Part III cannot hold without additional architectural
+restriction. We restrict to \emph{autoregressive triangular} flows,
+where each coordinate \(r_k\) depends only on inputs with index
+\(\le k\). Within that class, Theorem A-d again pins the calibration
+manifold to a singleton --- the \emph{Knothe--Rosenblatt rearrangement}.
+For Gaussian \(X \mid \theta \sim \mathcal{N}(\theta, \Sigma)\), the
+rearrangement has the closed form \(L^{-1}(\theta - X)\) where
+\(LL^T = \Sigma\) is the Cholesky factorization. The architecture
+scales linearly in \(d\) (its Jacobian is lower-triangular).
+
 \section{The triangular-autoregressive flow construction}\label{sec:6}
 
 For \(d > 1\), the architectural recipe is \emph{autoregressive
@@ -1570,6 +1821,24 @@ gives
 
 \section*{Part V — Empirical validation}
 \addcontentsline{toc}{section}{Part V — Empirical validation}
+
+The first four Parts develop the population-limit theory; Part V
+validates it at practical sample sizes. Four small-scale experiments
+verify the predicted behavior in regimes where the canonical pivot
+\(r^*\) is closed-form, so we can compute the gap between what the
+network learned and what the theorems say it should learn: §8.1
+(1D location-normal) probes Theorem A; §8.2 (2D location, \(\Sigma = I\))
+probes the triangular-flow construction; §8.3 (2D location, correlated
+\(\Sigma\)) probes Theorem A-d via the Cholesky corollary; §8.4
+(exponential rate) probes the doubly-monotone architecture for
+non-additive pivots. §8.4 also includes a controlled ablation that
+deliberately violates (R2) --- the manuscript's smoking-gun
+demonstration of what fails when architectural monotonicity-in-\(X\)
+is dropped: the loss falls below the true model's entropy bound, a
+violation of Gibbs's inequality that is impossible for any valid
+normalized density. Section~\ref{sec:7} sets up the building blocks
+(UMNN, training schedule, diagnostics); Section~\ref{sec:8} runs the
+experiments.
 
 \section{Architecture and training}\label{sec:7}
 
@@ -2081,6 +2350,17 @@ them).
 \section*{Part VI — Practice and position}
 \addcontentsline{toc}{section}{Part VI — Practice and position}
 
+Parts I--V develop the framework and validate it on small problems.
+Part VI translates that work into practitioner guidance and situates
+it in the SBI literature. Section~\ref{sec:9} gives a six-step recipe
+for applying CD-SBI to a new model: identify the structure of the
+truth, pick an architecture, enforce both monotonicities, train,
+validate, invert. Section~\ref{sec:10} positions CD-SBI against
+NPE/NLE/NRE and the frequentist-coverage SBI line (LF2I, WALDO, Box CD),
+arguing that CD-SBI is the natural single-stage analogue: same NF-MLE
+loss as SNL, same target as LF2I/WALDO (confidence sets), with neither
+the two-stage critical-values branch nor the missing-coverage gap.
+
 \section{Implementation recipe}\label{sec:9}
 
 A practitioner's checklist for applying CD-SBI to a new model:
@@ -2222,6 +2502,17 @@ ratio \citep[ch.~5]{SchwederHjort2016}.
 
 \section*{Part VII — Open questions}
 \addcontentsline{toc}{section}{Part VII — Open questions}
+
+The framework as developed has clear scope: 1D and modest multivariate
+cases (\(d \le 2\) in the experiments), well-specified simulators,
+amortized inference, and an autoregressive triangular flow architecture.
+Part VII enumerates what remains open beyond that scope, organized by
+theme: theoretical extensions (uniqueness outside the autoregressive
+class, ordering selection, the \(C^0\) residual in 1D); robustness
+under misspecification; scaling and practice (higher dimensions,
+sequential variants, learned-feature discrete extensions); and one
+implementation challenge (efficient \(C_\alpha\) computation in
+\(d \ge 3\)).
 
 \section{Open problems}\label{sec:11}
 
