@@ -84,6 +84,56 @@ Round 2 of the vetting workflow is **complete**.
 Round 3 (holistic review and cleanup) is the next phase; per the plan,
 the user re-plans round 3's scope after round 2 lands.
 
+## Round-3 status (May 2026)
+
+Round 3 of the vetting workflow is **complete**. Focused on pedagogy
+and accessibility for an audience that includes astronomers as well as
+statisticians, with two failure modes targeted: undefined / under-
+explained terms (especially around normalizing-flow and architectural
+content), and "oracle-style" writing where conclusions are asserted in
+friendly language but never motivated.
+
+Workflow: seven per-Part discovery agents + one global agent did a
+phase A+B survey (`reviews/round3/part{0..7}_discovery.md`); main
+thread synthesized findings into a detailed plan
+(`/home/joshspeagle/.claude/plans/round3-pedagogy.md`); per-Part edits
+were applied in seven separate commits, each with a clean pdflatex
+build; two fresh-reader agents (astronomer + statistician) did a
+final cold-read (`reviews/round3/{astronomer,statistician}_review.md`)
+and surfaced a final round of targeted fixes that landed in one
+last commit.
+
+What changed at the manuscript level:
+- §1.5 Roadmap added; opening paragraphs added at each Part (II–VII).
+- §2.2 "Regularity conditions at a glance" reference table covers the
+  full R-zoo (R1–R4, R3_U, R1^auto, R2^auto) with first-defined
+  locations.
+- In-line "what is X" introductions for the load-bearing concepts
+  (CD, pivot, calibration manifold, PIT, normalizing flow, change-of-
+  variables Jacobian, UMNN, sufficient statistic, MLR, KR
+  rearrangement).
+- Each major theorem now has a "what we are about to prove" preamble
+  (T-A, T-A*, T-C, T-C*, T-A-d, and the new labeled Theorem 3.2 on
+  strict propriety of NF-MLE).
+- §3.5 -log Z(θ) mechanism, §8.4 ablation, and §3.7 Class 1–5
+  taxonomy rewritten as multi-step stories.
+- §6 multivariate intro expanded with a 1D → multivariate bridge;
+  worked d=2 example added in §6.1; Cholesky corollary reframed as
+  example-then-theorem.
+- §9 architecture-choice table now has in-cell glosses (not just
+  section pointers); §10 reorganized around two axes with explicit
+  "what CD-SBI buys you" comparisons.
+- §11 open problems grouped by theme (theoretical extensions /
+  robustness / scaling & practice / engineering); Status of claims
+  table now category-tagged.
+- §6.4 closes the load-bearing ρ-a.e.→every-θ_0 calibration lift with
+  a short continuity-plus-dense-support argument.
+
+End-of-round 3 PDF: 47 pages (from 35 at end of round 2). Build clean
+via pdflatex + bibtex + pdflatex + pdflatex. The manuscript is in a
+shape suitable for sharing with both astronomer and statistician
+collaborators per the dual-reader fresh-reviewer agents' verdicts.
+
 ## Conceptual map of the draft
 
 - **Parts I–II — Framework + loss.** Pivot `r`, calibration manifold `M`,
