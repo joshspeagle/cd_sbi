@@ -494,20 +494,28 @@ irrelevant constant \(\tfrac{d}{2}\log(2\pi)\) dropped.
 
 Write the model density implied by \(r\) as
 \(\hat p_r(X \mid \theta) := \phi_d(r(\theta, X)) \cdot |\det \partial r / \partial X|\).
-Direct algebra gives \[
+\textbf{Under (R2)}, \(\hat p_r(\cdot \mid \theta)\) is a normalized
+probability density on \(\mathcal{X}\) at every fixed \(\theta\) (the
+change-of-variables formula pushes \(\mathcal{N}(0, I_d)\) forward via
+\(r^{-1}\), preserving total mass). The standard identity
+\(\mathbb{E}_{X \mid \theta}[-\log \hat p_r] = H(X \mid \theta) + \mathrm{KL}(p \,\|\, \hat p_r)\)
+therefore holds, and averaging over \(\rho\) gives \[
 L(r) \;=\; \mathbb{E}_\rho\bigl[\mathbb{E}_{X \mid \theta}[-\log \hat p_r(X \mid \theta)]\bigr] \;=\; \mathbb{E}_\rho\bigl[\mathrm{KL}\bigl(p(\cdot \mid \theta) \,\|\, \hat p_r(\cdot \mid \theta)\bigr)\bigr] + \mathrm{const},
-\] where the constant is the conditional entropy of \(X \mid \theta\)
-averaged over \(\rho\) (independent of \(r\)). Since
-\(\mathrm{KL} \ge 0\) with equality iff the two densities agree a.e.,
-\(L(r)\) is minimized iff
+\] where the constant
+\(\mathbb{E}_\rho[H(X \mid \theta)]\) is the conditional entropy of
+\(X \mid \theta\) averaged over \(\rho\) and is independent of \(r\).
+Since \(\mathrm{KL} \ge 0\) with equality iff the two densities agree
+a.e., \(L(r)\) is minimized iff
 \(\hat p_r(\cdot \mid \theta) = p(\cdot \mid \theta)\) for \(\rho\)-a.e.
 \(\theta\). Equivalently,
 \(r(\theta_0; X) \mid \theta_0 \sim \mathcal{N}(0, I_d)\) for
 \(\rho\)-a.e. \(\theta_0\). So: \[
 \arg\min_{r \in \mathcal{F}} L(r) \;=\; \mathcal{M}_\mathcal{F},
-\] where \(\mathcal{F}\) is the architectural class over which the
-optimization ranges (assumed to satisfy (R2) so \(\hat p_r\) is a valid
-density).
+\] where \(\mathcal{F}\) is any architectural class whose every element
+satisfies (R2) --- in particular, the autoregressive class of \S\ref{sec:6}
+(since (R2\(^{\mathrm{auto}}\)) \(\Rightarrow\) (R2); see \S\ref{subsec:6.1}).
+Without (R2), \(\hat p_r\) is not a probability density, the KL identity
+above fails, and the loss is unbounded below; see \S\ref{subsec:3.5}.
 
 This is what is meant by \textbf{strict propriety}: a loss is
 \emph{strictly proper} for a target \(\mathcal{M}\) if its
@@ -552,9 +560,13 @@ the function-class restriction makes the population optimum unique.
 
 \subsection{The Bayesian connection: NF-MLE is the SNL loss}\label{subsec:3.4}
 
-The objective \(L(r)\) is \emph{identical} to the loss used by
-Sequential Neural Likelihood (SNL; Papamakarios et al.~2019). The full
-picture is:
+The objective \(L(r)\) is \emph{identical} to the per-round training
+loss of Sequential Neural Likelihood (SNL; Papamakarios et al.~2019).
+SNL is sequential by default: it refits the flow on simulator outputs
+drawn near the current posterior estimate, so the proposal \(\rho\)
+changes between rounds. CD-SBI as developed here uses a fixed \(\rho\)
+(amortized inference); at the single-round / non-sequential level the
+two losses coincide. The full picture is:
 
 \begin{longtable}[]{@{}
   >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}
@@ -604,10 +616,21 @@ autograd to compute the Jacobian during training --- the model can find
 regions of \(X\)-space where \(r\) folds and the local
 \(|\partial r / \partial X|\) becomes very large; this gives an
 artificially low loss while \(\hat p_r\) is not actually matching \(p\).
-Because the folded \(\hat p_r\) is not normalized in \(X\) at fixed
-\(\theta\), the loss \(-\mathbb{E}_X[\log \hat p_r]\) has no lower bound
-at the conditional entropy, so it can fall \emph{below} the loss
-attained by the true \(r^*\). The empirical demonstration is in \S\ref{subsec:8.4}.
+Concretely: let
+\(Z(\theta) := \int_\mathcal{X} \hat p_r(X \mid \theta)\,dX\) be the
+total mass of the surrogate density. Under folding the change-of-variables
+formula under-counts (it keeps only one of multiple preimages), driving
+\(Z(\theta) > 1\). Substituting the normalized density
+\(\hat p_r / Z(\theta)\) into the KL identity gives
+\[
+\mathbb{E}_{X \mid \theta}[-\log \hat p_r] = \mathrm{KL}\!\bigl(p \,\big\|\, \hat p_r / Z(\theta)\bigr) + H(X \mid \theta) - \log Z(\theta),
+\]
+where the KL term remains nonnegative but the \(-\log Z(\theta) < 0\)
+shift breaks the conditional-entropy lower bound that ordinarily would
+hold by Gibbs's inequality. Hence \(L(r)\) can fall \emph{below} the
+loss attained by the true \(r^*\) by exactly \(\mathbb{E}_\rho[\log Z(\theta)]\).
+The empirical demonstration is in \S\ref{subsec:8.4}, where the
+autograd-Jacobian ablation attains loss \(0.56 < 0.88\) (the truth's loss).
 
 The clean fix is to enforce strict monotonicity in \(X\) architecturally
 --- either via \emph{Unconstrained Monotonic Neural Networks} (UMNNs;
@@ -644,20 +667,31 @@ any strictly proper distance --- CvM, energy distance, KL --- between
 \(\mathrm{Law}(\Phi(r(\theta, X)))\) and \(U(0,1)^d\) on the joint
 training distribution. Strictly proper for \emph{marginal} calibration.
 \textbf{Insufficient on its own}: marginal \(\Phi(r) \sim U(0,1)\) does
-not imply conditional \(\Phi(r) \mid \theta \sim U(0,1)\) --- the
-Hermans trust-crisis pattern lives precisely here, with marginal PIT
-passing while conditional fails.
+not imply conditional \(\Phi(r) \mid \theta \sim U(0,1)\). Explicit
+counterexample: take \(\Theta = \{-1, +1\}\) with \(\rho\) uniform on
+\(\{\pm 1\}\) and \(X \mid \theta \sim \mathcal{N}(\theta, 1)\); the
+pivot \(r(\theta, X) = \mathrm{sign}(\theta)\cdot |X - \theta|\) is a
+half-normal supported on \([0, \infty)\) conditional on \(\theta = +1\)
+and a negative half-normal on \((-\infty, 0]\) conditional on
+\(\theta = -1\), so neither conditional law is \(\mathcal{N}(0,1)\); yet
+the \(1/2\)--\(1/2\) mixture is exactly \(\mathcal{N}(0,1)\) by
+symmetry, so the marginal PIT passes. The Hermans trust-crisis pattern
+lives precisely here.
 
 \textbf{Class 2: Marginal + independence.} Augment Class 1 with an
 independence term \(\mathrm{HSIC}(\theta, \Phi(r))\) or similar.
 Marginal calibration plus \(\theta \perp \Phi(r)\) implies conditional
-calibration. Strictly proper for \(\mathcal{M}\), but empirically
-fragile in three ways: (i) the HSIC term has a weak gradient signal far
-from the optimum compared to a per-sample density target; (ii) the
-marginal-calibration term and the independence term must be balanced via
-hyperparameters, with no principled choice; (iii) the marginal and
-conditional terms can decouple in finite samples, reproducing the
-Class-1 pathology.
+calibration, so this is \emph{population-level} strictly proper for
+\(\mathcal{M}\). Empirically fragile in two ways: (i) the HSIC term has
+a weak gradient signal far from the optimum compared to a per-sample
+density target (a standard observation in the MMD-versus-MLE training
+literature); (ii) the marginal-calibration term and the independence
+term must be balanced via hyperparameters, with no principled choice.
+Finite-sample HSIC estimators also have variance that scales unfavorably
+with the dimension of \(\theta\), so achieving independence in the
+empirical loss does not ensure independence in the underlying
+distribution --- the Class-1 pathology can re-emerge at small sample
+sizes.
 
 \textbf{Class 3: Stratified / conditional matching.} Discretize
 \(\Theta\) into bins; within each bin, apply a two-sample distance
@@ -676,20 +710,35 @@ over the \emph{forecast} \(F\) at \(F = G^*\). Here the situation is
 reversed: the reference \(F = \mathcal{N}(0, I_d)\) is fixed and
 \(Y = r(\theta, X)\) is the learned quantity, so we are minimizing over
 the \emph{sample distribution} \(G\) with \(F\) fixed, which is not the
-proper direction. Concretely, for univariate CRPS with fixed \(F\) and
-\(Y \sim G\), \[
-\mathbb{E}_{Y \sim G}[\mathrm{CRPS}(F, Y)] \;=\; \int F(z)^2\,dz \;+\; \int G(z)\bigl(1 - 2F(z)\bigr)\,dz,
-\] since \(\mathbb{E}[\mathbf{1}\{Y \le z\}] = G(z)\) and the cross-term
-yields the displayed form. The first integral does not depend on \(G\).
-For \(F = \Phi\), the coefficient \(1 - 2\Phi(z)\) is positive on
-\(z < 0\) and negative on \(z > 0\), so the pointwise-optimal \(G\)
-satisfies \(G(z) = 0\) for \(z < 0\) and \(G(z) = 1\) for \(z > 0\) ---
-i.e., \(G = \delta_0\). The CRPS-against-\(\mathcal{N}(0,1)\) loss is
-\emph{minimized by collapsing \(r(\theta, X)\) to a constant at the
-median}, the opposite of calibration. (This is why LF2I uses
-pinball-style losses in the \emph{opposite} direction --- fixing the
-test statistic and learning critical values --- and is not a
-counterexample.)
+proper direction. Concretely, using the dual form of CRPS,
+\(\mathrm{CRPS}(F, y) = \mathbb{E}_{Z \sim F}|Z - y| - \tfrac{1}{2}\,\mathbb{E}_{Z, Z' \sim F}|Z - Z'|\),
+and taking \(Y \sim G\),
+\[
+\mathbb{E}_{Y \sim G}\bigl[\mathrm{CRPS}(F, Y)\bigr] \;=\; \mathbb{E}_{Z \sim F,\, Y \sim G}\,|Z - Y| \;-\; \tfrac{1}{2}\,\mathbb{E}_{Z, Z' \sim F}|Z - Z'|.
+\]
+The second term does not depend on \(G\); the first is the
+\(L^1\)-energy distance contribution between \(G\) and \(F\). For
+\(F = \mathcal{N}(0,1)\), this is minimized over distributions \(G\) at
+\(G = \delta_{m(F)}\) where \(m(F) = 0\) is the median of \(F\) (the
+\(L^1\) projection of any distribution onto a point mass collapses to
+the median of the reference). The CRPS-against-\(\mathcal{N}(0,1)\)
+loss is therefore \emph{minimized by collapsing \(r(\theta, X)\) to a
+constant at the median}, the opposite of calibration.
+
+The same conclusion follows from the more elementary expansion
+\(\mathbb{E}_{Y \sim G}[\mathrm{CRPS}(F, Y)] = \int F^2\,dz + \int G(z)(1-2F(z))\,dz\)
+after suitable regularization of the (individually divergent) integrals:
+the coefficient \(1 - 2\Phi(z)\) is positive on \(z < 0\) and negative
+on \(z > 0\), so the pointwise-optimal valid CDF \(G\) takes \(G(z) = 0\)
+for \(z < 0\) and \(G(z) = 1\) for \(z > 0\) --- the step function for
+\(\delta_0\).
+
+(LF2I (Dalmasso et al.~2024) avoids this collapse by applying pinball
+loss in the standard direction: the test statistic is a function of the
+data and parameter whose conditional distribution under \(P_\theta\) is
+fixed by the simulator, and the learned quantity is the critical-value
+function. Sample distribution is given, forecast is learned --- the
+proper direction --- so the Class-4 obstruction does not apply.)
 
 \textbf{Class 5: Per-sample conditional log-density (NF-MLE).} Apply KL
 on the conditional density:
