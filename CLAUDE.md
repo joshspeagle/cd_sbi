@@ -25,114 +25,64 @@ The eventual goal of the codebase is infrastructure to train SBI models
 that produce UMP(U)-style confidence distributions in this framework,
 scaling beyond the toy validation experiments currently in the draft.
 
+## Commands
+
+**Build the manuscript** (clean BibTeX cycle):
+
+```bash
+pdflatex cd_sbi_v7 && bibtex cd_sbi_v7 && pdflatex cd_sbi_v7 && pdflatex cd_sbi_v7
+```
+
+**Python codebase** (available once Task 1 of the v0 plan lands):
+
+```bash
+pip install -e ".[dev]"               # install cdsbi package + dev deps
+pytest                                # fast tests (unit + integration + diagnostics)
+pytest -m intensive                   # opt-in full-budget replication (minutes)
+python -m cdsbi.experiments.run experiment=8_1_replication seed=0   # single run
+python -m cdsbi.experiments.run -m experiment=8_1_baseline_sweep    # full sweep
+```
+
 ## Current state of the repo
 
-- `cd_sbi_v7.tex` — the manuscript, renamed from `cd_sbi_v6.tex` before
-  round 1 of the multi-round vetting workflow. Round 1 (factual
-  accuracy) is complete; the file has been edited in place. See
-  `reviews/round1/` for the audit trail.
-- `reviews/round1/` — round-1 critic reports (one per Part + cross-cutting)
-  and the claim & evidence inventory with an integration log mapping each
-  commit to its Part-level scope.
+- `cd_sbi_v7.tex` — the manuscript (47 pages, post-round-3). Source of truth.
+- `cd_sbi.bib` — 45 BibTeX entries; manuscript uses natbib.
+- `references/<bibkey>.md` — paper note per cited entry, built during round 2.
+- `reviews/round{1,2,3}/` — per-round critic reports and audit trail.
+- `docs/superpowers/specs/` — design specs (v0 infrastructure spec lives here).
+- `docs/superpowers/plans/` — implementation plans (v0 implementation plan lives here).
+- `src/cdsbi/` — Python package (planned; v0 implementation in progress).
 - `LICENSE`, `README.md`, `.gitignore` — repo setup.
-- No code yet.
 
-## Round-1 status (May 2026)
+## Specs and plans
 
-Round 1 of the three-round vetting workflow is **complete**. Eight
-critic agents (one per Part + cross-cutting) flagged 88 items across
-the manuscript (~39 ✓, ~43 ⚠, ~6 ✗); all were integrated into
-`cd_sbi_v7.tex`. The one initially-escalated item — the §5.7.2 Bin(1, θ)
-counterexample (C-5.7-counterex) — was resolved by a follow-up
-math-skeptic agent that found a working Bin(3, θ) construction (the
-intermediate Bin(2, θ) attempt also fails; see
-`reviews/round1/r4_independence_check.md`). The agent's finding also
-caught a sign-convention issue in the manuscript's (R4), which has been
-corrected.
+The repo uses a brainstorm → spec → plan → implementation workflow
+(superpowers skill family). Two artifacts live under `docs/superpowers/`:
 
-## Round-2 status (May 2026)
+- **Specs** (`docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md`) — the
+  validated design output of a brainstorming session. Reviewed by both
+  the author and an independent reviewer agent before being handed off.
+- **Plans** (`docs/superpowers/plans/YYYY-MM-DD-<feature>.md`) — bite-sized
+  TDD-style implementation plans, derived from an approved spec. Each step
+  contains the actual code to write and the test that drives it.
 
-Round 2 of the vetting workflow is **complete**.
+The current active artifacts:
+- `docs/superpowers/specs/2026-05-25-cd-sbi-experiment-infrastructure-design.md`
+- `docs/superpowers/plans/2026-05-25-cd-sbi-v0-experiment-infrastructure.md`
 
-- `cd_sbi.bib` at the repo root holds 45 BibTeX entries (the 30 from the
-  v6 References section, two papers cited inline but missing from v6
-  (Lueckmann 2021, MAF 2017), and four added in round 2: Knothe 1957,
-  Villani 2003, Lehmann-Romano 2005, and Stevens 1950).
-- The manuscript is migrated to natbib (`\cite`/`\citet`/`\citep`).
-  Build cycle is `pdflatex → bibtex → pdflatex → pdflatex`.
-- `references/<bibkey>.md` contains a paper note for each cited entry,
-  built by seven parallel lit-review agents (one per Part).
-- `reviews/round2/` holds the citation inventory and the seven
-  per-Part lit-review reports.
-- Integrated attribution corrections: §1.1 Hermans-2022 scope (three
-  families, not four); §7.1 UMNN (W&L use ELU+1 + Clenshaw-Curtis,
-  not softplus + Gauss-Legendre — softplus is our substitution);
-  §6.3 add Knothe 1957 to KR citation; §11.2 drop "entropic/" from
-  Carlier-Galichon-Santambrogio characterization; §11.4 Wehenkel 2025
-  mechanism is RoPE (OT-on-real-data), not generalized Bayes; §11.6
-  Lueckmann 2021 doesn't measure coverage so removed from the
-  sequential-miscalibration citation; PatelEtAl2023 venue upgraded
-  to ICML 2024.
-- Substantive citation gaps closed: Villani 2003 added at §4.2
-  (1D monotone rearrangement); Lehmann-Romano 2005 at §5.1 (exp-family
-  setup) and §7.3 (KS Kolmogorov distribution); Stevens 1950 alongside
-  Lancaster 1961 at §5.7.1 (randomized PIT priority); CranmerEtAl2020
-  / Fraser2011 / SinghEtAl2007 / XieSingh2013 promoted from \nocite
-  to inline at §1.1–§1.2; GneitingRaftery2007 at §3.7 Class-4 CRPS
-  dual form.
+## Manuscript status
 
-Round 3 (holistic review and cleanup) is the next phase; per the plan,
-the user re-plans round 3's scope after round 2 lands.
+The three-round vetting workflow on the manuscript is **complete** as of
+May 2026. Round 1 was factual accuracy (8 critic agents, 88 items
+integrated); round 2 was citation hygiene + literature review (natbib
+migration, 45 BibTeX entries, 7 per-Part lit-review agents); round 3 was
+pedagogy + accessibility for a mixed astronomer + statistician audience
+(7 discovery agents + 2 fresh-reader agents). See `reviews/round{1,2,3}/`
+for the full audit trail; commit history reflects each round's
+integration.
 
-## Round-3 status (May 2026)
-
-Round 3 of the vetting workflow is **complete**. Focused on pedagogy
-and accessibility for an audience that includes astronomers as well as
-statisticians, with two failure modes targeted: undefined / under-
-explained terms (especially around normalizing-flow and architectural
-content), and "oracle-style" writing where conclusions are asserted in
-friendly language but never motivated.
-
-Workflow: seven per-Part discovery agents + one global agent did a
-phase A+B survey (`reviews/round3/part{0..7}_discovery.md`); main
-thread synthesized findings into a detailed plan
-(`/home/joshspeagle/.claude/plans/round3-pedagogy.md`); per-Part edits
-were applied in seven separate commits, each with a clean pdflatex
-build; two fresh-reader agents (astronomer + statistician) did a
-final cold-read (`reviews/round3/{astronomer,statistician}_review.md`)
-and surfaced a final round of targeted fixes that landed in one
-last commit.
-
-What changed at the manuscript level:
-- §1.5 Roadmap added; opening paragraphs added at each Part (II–VII).
-- §2.2 "Regularity conditions at a glance" reference table covers the
-  full R-zoo (R1–R4, R3_U, R1^auto, R2^auto) with first-defined
-  locations.
-- In-line "what is X" introductions for the load-bearing concepts
-  (CD, pivot, calibration manifold, PIT, normalizing flow, change-of-
-  variables Jacobian, UMNN, sufficient statistic, MLR, KR
-  rearrangement).
-- Each major theorem now has a "what we are about to prove" preamble
-  (T-A, T-A*, T-C, T-C*, T-A-d, and the new labeled Theorem 3.2 on
-  strict propriety of NF-MLE).
-- §3.5 -log Z(θ) mechanism, §8.4 ablation, and §3.7 Class 1–5
-  taxonomy rewritten as multi-step stories.
-- §6 multivariate intro expanded with a 1D → multivariate bridge;
-  worked d=2 example added in §6.1; Cholesky corollary reframed as
-  example-then-theorem.
-- §9 architecture-choice table now has in-cell glosses (not just
-  section pointers); §10 reorganized around two axes with explicit
-  "what CD-SBI buys you" comparisons.
-- §11 open problems grouped by theme (theoretical extensions /
-  robustness / scaling & practice / engineering); Status of claims
-  table now category-tagged.
-- §6.4 closes the load-bearing ρ-a.e.→every-θ_0 calibration lift with
-  a short continuity-plus-dense-support argument.
-
-End-of-round 3 PDF: 47 pages (from 35 at end of round 2). Build clean
-via pdflatex + bibtex + pdflatex + pdflatex. The manuscript is in a
-shape suitable for sharing with both astronomer and statistician
-collaborators per the dual-reader fresh-reviewer agents' verdicts.
+The manuscript is in a shape suitable for sharing with collaborators
+per the round-3 fresh-reader verdicts.
 
 ## Conceptual map of the draft
 
@@ -165,9 +115,14 @@ collaborators per the dual-reader fresh-reviewer agents' verdicts.
   in `θ₀`; the proposal is a sampling device, not a Bayesian object.
 - **Monotonicity is architectural, not penalty-based.** Any implementation
   work should enforce (R1), (R2) by construction (UMNN / triangular
-  flow) — §8.4 is the empirical reason.
+  flow) — §8.4 is the empirical reason. The v0 design encodes this as
+  `Flow.monotonicity_guarantees`, checked against `Loss.required_guarantees`
+  before training (see `docs/superpowers/specs/...`).
 - **Tone.** The draft uses astronomer-friendly bridges (e.g. §1.2). Keep
   that voice for new writing aimed at the same audience.
+- **Brainstorm → spec → plan workflow.** Non-trivial code work goes
+  through the `superpowers:brainstorming` → spec → `superpowers:writing-plans`
+  → execution pipeline. Specs and plans land in `docs/superpowers/`.
 
 ## Notation cheat sheet
 
@@ -182,16 +137,27 @@ collaborators per the dual-reader fresh-reviewer agents' verdicts.
 ## Repo conventions
 
 - Default branch: `main`.
-- LaTeX build artifacts (`*.aux`, `*.log`, `*.bbl`, `*.synctex.gz`, …)
-  and common Python noise are gitignored; the PDF is not committed.
-- Commit / PR style is not yet fixed — check recent history or ask before
-  assuming.
+- LaTeX build artifacts (`*.aux`, `*.log`, `*.bbl`, `*.synctex.gz`, …),
+  common Python noise (`__pycache__`, `*.egg-info`, `.pytest_cache`),
+  and `outputs/` (run-dir root) are gitignored; the PDF is not committed.
+- Commit messages: concise subject line, optional body explaining *why*
+  (not *what*). Claude-assisted commits include a
+  `Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>`
+  trailer. No `--no-verify`, no `--amend` on existing commits unless
+  explicitly requested.
 
-## Possible future directions (not yet committed)
+## v0 codebase status
 
-Flagged in conversation but not promised:
+The v0 experiment infrastructure (replicating manuscript §8.1 + matched-
+budget baselines against NPE / NLE / NRE / LF2I) is **fully specced and
+planned**, awaiting implementation:
 
-- Reference implementation of the §8 experiments.
-- Higher-`d` scaling studies (open problem §11.5).
-- Sequential / amortized variants (open problem §11.6).
-- Misspecification (open problem §11.4).
+- Spec: `docs/superpowers/specs/2026-05-25-cd-sbi-experiment-infrastructure-design.md`
+  (revised twice via dual self-review)
+- Plan: `docs/superpowers/plans/2026-05-25-cd-sbi-v0-experiment-infrastructure.md`
+  (25 TDD-style tasks, every step has full code)
+
+Once v0 lands, the natural next milestones (per the spec's roadmap) are
+v1 (§8.2 multivariate Σ=I), v2 (§8.3 correlated Σ), v3 (§8.4 exponential
+rate + (R2) ablation), then real-data targets (SBI benchmark suite,
+astronomy inference, image observations).
