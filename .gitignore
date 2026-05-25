@@ -40,7 +40,5 @@ env/
 outputs/
 
 # Python build artifacts
-*.egg-info/
-__pycache__/
 .pytest_cache/
 .coverage
