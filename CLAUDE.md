@@ -27,12 +27,31 @@ scaling beyond the toy validation experiments currently in the draft.
 
 ## Current state of the repo
 
-- `cd_sbi_v7.tex` — the manuscript. Treat as broad context, **not** as
-  ground truth. Rigorous checking of the proofs, definitions, and
-  empirical numbers is itself a planned task; flag inconsistencies rather
-  than paper over them.
+- `cd_sbi_v7.tex` — the manuscript, renamed from `cd_sbi_v6.tex` before
+  round 1 of the multi-round vetting workflow. Round 1 (factual
+  accuracy) is complete; the file has been edited in place. See
+  `reviews/round1/` for the audit trail.
+- `reviews/round1/` — round-1 critic reports (one per Part + cross-cutting)
+  and the claim & evidence inventory with an integration log mapping each
+  commit to its Part-level scope.
 - `LICENSE`, `README.md`, `.gitignore` — repo setup.
 - No code yet.
+
+## Round-1 status (May 2026)
+
+Round 1 of the three-round vetting workflow is complete pending user
+sign-off. Eight critic agents (one per Part + cross-cutting) flagged 88
+items across the manuscript (~39 ✓, ~43 ⚠, ~6 ✗); all were integrated
+into `cd_sbi_v7.tex` except one **escalation** flagged with an inline
+`% TODO(round1-escalation)` marker:
+
+- **Bin(1, θ) counterexample in §5.7.2 (C-5.7-counterex)** does not
+  actually separate (R4) from (R3_U). A Bin(2, θ) replacement is the
+  recommended fix; the v6 construction is preserved pending user input.
+
+Round 2 (literature & citations + BibTeX migration) is the next phase;
+see `/home/joshspeagle/.claude/plans/our-first-task-will-mellow-harbor.md`
+for the workflow plan.
 
 ## Conceptual map of the draft
 

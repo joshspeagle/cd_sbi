@@ -1,5 +1,22 @@
 # Round 1 — Claim & Evidence Inventory
 
+## Round 1 integration log
+
+| Commit | Scope |
+|---|---|
+| `17be9d5` | Cross-cutting: L-4.2 generalization remark; L-4.3 Lipschitz/autoregressive remark; T-A sign-selection mixture ruling; (R3) vs (R3_U) disambiguation; (R1^auto)/(R2^auto) imply (R1)/(R2) note in §6.1; §11.3 Lipschitz framing. |
+| `36dc00d` | Part I (§1–2): D-CD CDF-in-θ half added; C-1.2-LocNorm regularity tightened; (C2) coordinate-wise→autoregressive disambiguation; C-1.3-ρ saturated-class qualifier; (R1)/(R2) restated; C-2.3 Z_2^d→infinite-dim; C-2.4 folding mechanism tightened. |
+| `5a407cc` | Part II (§3): (R2) caveat leads C-3.2-KL; SNL per-round clarification; -log Z(θ) algebra in §3.5; explicit Class-1 counterexample; Class-2 sharpened; CRPS dual form. |
+| `9443bc9` | Part III (§4–5): T-A* class extension; T-C three-lemma proof; T-C* spelled-out proof; **Bin(1,θ) counterexample flagged as TODO escalation**; midp "TV"→"Kolmogorov". |
+| `95ec48c` | Part IV (§6): (R1^auto)/(R2^auto) split into dependence+monotonicity; doubly-monotone β_k clarification; sign convention pinned down; T-A-d σ-algebra equivalence + general-source L-4.2; Cholesky corollary via direct L^{-1} route. |
+| `50e6856` | Part V (§7–8): UMNN quadrature note; diagnostic hierarchy; per-bin noise floor; §8.1 edge-effect framing; §8.3 dynamic-range arithmetic fixed; §8.4 ablation tied to §3.2/§3.5; §8.5 scope calibration. |
+| `e7922cf` | Part VI (§9–10): §9 step-1 default softened; §9 step-2 reframed; "Hermans-style" attribution fixed; Balanced NRE row corrected; §10 cousins paragraph names both monotonicities; C-10-IRT sign fixed. |
+| `419c455` | Part VII (§11): OP-11.1 rotation argument tightened; OP-11.2 conjecture framing; OP-11.4 forward-KL projection; OP-11.5 d=10 cutoff replaced; OP-11.6 split into two sub-problems; OP-11.7 obstruction specified; **OP-11.8 downgraded from open problem to implementation challenge**. |
+
+**Escalations to user (deferred from round 1 end-of-round handoff):**
+
+- **C-5.7-counterex** — Bin(1, θ) counterexample in §5.7.2 does not actually separate (R4) from (R3_U) under any monotone-in-U completion of V'_θ(1, ·). Part III review (claim C-5.7-counterex) recommends a Bin(2, θ) replacement with three atoms and a non-trivial T-permutation. A `% TODO(round1-escalation)` marker has been added in-text in §5.7.2; the original v6 construction is preserved pending user input.
+
 **Document under review:** `cd_sbi_v7.tex`
 **Round 1 scope:** factual / logical correctness of claims and proofs.
 Numbers in tables (RMSE, KS, coverage) are assumed correct; do not
