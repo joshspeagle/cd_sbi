@@ -1747,15 +1747,32 @@ scales linearly in \(d\) (its Jacobian is lower-triangular).
 
 \section{The triangular-autoregressive flow construction}\label{sec:6}
 
-For \(d > 1\), the architectural recipe is \emph{autoregressive
-triangular flows}. An autoregressive flow is one in which the \(k\)-th
-output depends only on inputs with index \(\le k\), so the Jacobian
-matrix is lower-triangular and its determinant is the product of
-diagonal entries. This is the multivariate generalization of (R1) + (R2)
-into a structure that scales linearly in \(d\) and admits closed-form
-Jacobians. Standard references on this architectural pattern include
-the masked autoregressive flow of \citet{PapamakariosEtAl2017}, the
-survey of \citet{PapamakariosEtAl2021}, and the neural spline flow of
+\paragraph{From 1D to multivariate, and why singleton uniqueness needs help.}
+Theorems A and C of Part III pinned down the calibration manifold to a
+singleton in 1D. In \(d > 1\), this is no longer automatic. The
+calibration constraint \(r(\theta; X) \mid \theta \sim \mathcal{N}(0, I_d)\)
+is invariant under the entire orthogonal group \(O(d)\) --- any rotation
+of a calibrated \(r\) remains calibrated, because the standard Gaussian
+is rotation-symmetric. (R1) coordinatewise eliminates the
+\(\mathbb{Z}_2^d\) sign-flip subgroup but not the continuous rotation
+group. So in \(d > 1\), without further architectural restriction, the
+manifold is at least \(d(d-1)/2\)-dimensional; we will not have anything
+like a unique answer.
+
+The restriction we will impose is structural: each output coordinate
+\(r_k\) depends only on input coordinates \(X_j\) and \(\theta_j\) with
+\(j \le k\). A pivot of this form is called an \emph{autoregressive}
+flow; its Jacobian matrices in \(\theta\) and in \(X\) are both
+lower-triangular, the determinant is a product of \(d\) diagonal
+entries, and the architecture is fast to train. The pay-off, which the
+rest of \S\ref{sec:6} develops, is that within this autoregressive
+class the calibration manifold collapses back to a singleton --- the
+\emph{Knothe--Rosenblatt rearrangement} (\S\ref{subsec:6.3},
+Theorem A-d). For Gaussian \(X \mid \theta\), the KR rearrangement has
+the simple closed form \(L^{-1}(\theta - X)\) with \(LL^T = \Sigma\).
+Standard references on the autoregressive-flow architecture include the
+masked autoregressive flow of \citet{PapamakariosEtAl2017}, the survey
+of \citet{PapamakariosEtAl2021}, and the neural spline flow of
 \citet{DurkanEtAl2019}.
 
 \subsection{The architectural class}\label{subsec:6.1}
@@ -1827,6 +1844,30 @@ This class admits at least two practical parameterizations:
 Both forms satisfy (R1\(^\mathrm{auto}\)) and (R2\(^\mathrm{auto}\));
 the Knothe--Rosenblatt uniqueness theorem below applies to both.
 
+\paragraph{A concrete \(d = 2\) example.}
+To anchor the abstract definitions, take \(d = 2\), additive form,
+\(X \mid \theta \sim \mathcal{N}(\theta, I_2)\). A specific
+autoregressive triangular flow in this setting is
+\[
+r_1(\theta_1, X_1) \;=\; \alpha_a \cdot a(\theta_1) \;-\; \alpha_b \cdot b(X_1),
+\qquad
+r_2(\theta, X) \;=\; a_2(\theta_2;\, \theta_1, X_1) \;-\; b_2(X_2;\, \theta_1, X_1),
+\]
+where \(a, b, a_2, b_2\) are scalar UMNNs and \(\alpha_a, \alpha_b > 0\)
+are learnable scalars (initialized to give effective slope away from
+\(1\) so optimization has to find the right scale; see \S\ref{subsec:7.1}).
+The first coordinate \(r_1\) is a 1D additive flow in
+\((\theta_1, X_1)\) only --- no \(\theta_2, X_2\) dependence by
+(R1\(^\mathrm{auto}\)) and (R2\(^\mathrm{auto}\)). The second
+coordinate \(r_2\) is itself a 1D additive flow in
+\((\theta_2, X_2)\), but with the \((\theta_1, X_1)\) values fed as
+context to the conditioning networks \(a_2\) and \(b_2\). The whole map
+is monotone-in-\(\theta\) and monotone-in-\(X\) coordinatewise, in the
+autoregressive sense; the Jacobians in \(\theta\) and in \(X\) are
+both \(2 \times 2\) lower-triangular. This is exactly the architecture
+used in the \S\ref{subsec:8.2} (\(\Sigma = I_2\)) and \S\ref{subsec:8.3}
+(\(\Sigma\) correlated) experiments.
+
 \subsection{Jacobian structure and computational properties}\label{subsec:6.2}
 
 In either parameterization, both Jacobians are lower-triangular by
@@ -1862,6 +1903,19 @@ sample, vs.~\(O(d^3)\) for a general dense Jacobian.
 
 \subsection{Multivariate uniqueness: Knothe--Rosenblatt}\label{subsec:6.3}
 
+\paragraph{What we are about to prove.}
+The intro to \S\ref{sec:6} explained why the multivariate calibration
+manifold cannot be a singleton without architectural restriction. This
+subsection shows that the autoregressive triangular restriction
+(R1\(^\mathrm{auto}\)) + (R2\(^\mathrm{auto}\)) is enough to collapse
+the manifold back to a singleton. The singleton has a name from
+optimal-transport theory: the Knothe--Rosenblatt rearrangement. The
+strategy is induction on the coordinate index --- the base case (\(k = 1\))
+is just Theorem A applied at fixed \(\theta_1\), and the inductive step
+identifies \(r_k\) by applying the general-source form of Lemma~4.2
+(\S\ref{subsec:4.2} remark) to the conditional law
+\(X_k \mid \theta, X_{<k}\).
+
 \emph{Optimal-transport context, briefly.} Between two probability
 measures on \(\mathbb{R}^d\), the \textbf{Knothe--Rosenblatt
 rearrangement} \citep{Knothe1957, Rosenblatt1952} is the unique transport
@@ -1872,7 +1926,11 @@ gradient of a convex function (the \(L^2\)-optimal transport plan). KR
 depends on coordinate ordering; Brenier does not. Both are bijections
 between the two measures; KR is the natural fit for autoregressive
 architectures because its triangular structure aligns with the network's
-autoregressive masking.
+autoregressive masking. For our purposes, the relevant fact is that the
+Knothe--Rosenblatt rearrangement between
+\(\mathrm{Law}(X \mid \theta)\) and \(\mathcal{N}(0, I_d)\) is given
+coordinatewise by \(r_k^{\mathrm{KR}} = \Phi^{-1}\!\bigl(1 - F_k^{(\theta)}(X_k \mid X_{<k})\bigr)\),
+which is the formal statement below.
 
 \textbf{Theorem A-d (Multivariate uniqueness within the autoregressive
 triangular class).} \emph{Let
@@ -1937,20 +1995,46 @@ increasing-in-\(\theta_k\) branch is the one consistent with the sign
 conventions of (R1\(^\mathrm{auto}\)) and (R2\(^\mathrm{auto}\)), giving
 \(r_k = r_k^{\mathrm{KR}}\). \(\blacksquare\)
 
+\paragraph{The Gaussian case: a worked example.}
+Theorem A-d identifies \(r^{\mathrm{KR}}\) in terms of conditional
+CDFs. For the Gaussian model \(X \mid \theta \sim \mathcal{N}(\theta, \Sigma)\),
+that abstract description simplifies dramatically. Take the 2D
+correlated case used in the \S\ref{subsec:8.3} experiment:
+\[
+\Sigma \;=\; \begin{pmatrix} 1 & 0.5 \\ 0.5 & 1 \end{pmatrix}.
+\]
+The Cholesky factorization \(LL^T = \Sigma\) gives
+\(L = \bigl(\!\begin{smallmatrix} 1 & 0 \\ 0.5 & \sqrt{0.75}\end{smallmatrix}\!\bigr)\)
+and consequently
+\(L^{-1} = \bigl(\!\begin{smallmatrix} 1 & 0 \\ -0.577 & 1.155\end{smallmatrix}\!\bigr)\).
+The KR pivot in this case is just \(L^{-1}(\theta - X)\):
+\[
+r_1^{\mathrm{KR}}(\theta, X) \;=\; \theta_1 - X_1,
+\qquad
+r_2^{\mathrm{KR}}(\theta, X) \;=\; 1.155(\theta_2 - X_2) \;-\; 0.577(\theta_1 - X_1).
+\]
+The first coordinate is just the 1D location-normal pivot of
+\S\ref{subsec:1.2}: \(\theta_1\) minus \(X_1\), no cross-coupling.
+The second coordinate is the same idea (\(\theta_2\) minus \(X_2\)),
+but with a cross-coupling correction term that depends on the first-
+coordinate residual. The strength of the cross-coupling is set by the
+off-diagonal of \(L^{-1}\) (i.e.\ by \(\Sigma\)'s correlation
+structure). This generalizes to arbitrary \(d\):
+
 \textbf{Corollary (multivariate location-Gaussian).} \emph{For
 \(X \mid \theta \sim \mathcal{N}(\theta, \Sigma)\) with \(\Sigma\)
 positive definite, let \(LL^T = \Sigma\) be the \textbf{Cholesky
 factorization} (\(L\) lower-triangular with positive diagonal). Then the
 KR pivot is} \[
-r^\mathrm{KR}(\theta, X) = L^{-1}(\theta - X).
+r^{\mathrm{KR}}(\theta, X) = L^{-1}(\theta - X).
 \]
 
 \emph{Proof.} The cleanest route bypasses the Cholesky-regression
 algebra. By definition of the Cholesky factor, \(Z := L^{-1}(X - \theta)\)
 satisfies \(Z \mid \theta \sim \mathcal{N}(0, I_d)\), so
 \(-Z = L^{-1}(\theta - X) \mid \theta \sim \mathcal{N}(0, I_d)\) as well
-(rotational symmetry of the standard Gaussian under sign flip
-coordinatewise). The map \((\theta, X) \mapsto L^{-1}(\theta - X)\) is
+(the standard Gaussian is sign-symmetric coordinatewise). The map
+\((\theta, X) \mapsto L^{-1}(\theta - X)\) is
 \begin{itemize}
 \tightlist
 \item lower-triangular in both \(\theta\) and \(X\) (since \(L^{-1}\) is
@@ -1964,13 +2048,7 @@ coordinatewise). The map \((\theta, X) \mapsto L^{-1}(\theta - X)\) is
 \end{itemize}
 \(L^{-1}(\theta - X)\) is thus a member of the autoregressive
 calibration manifold. By Theorem A-d's uniqueness, it equals
-\(r^{\mathrm{KR}}\). Verification on the 2D correlated experiment
-(\(\Sigma = \bigl(\!\begin{smallmatrix} 1 & 0.5 \\ 0.5 & 1\end{smallmatrix}\!\bigr)\),
-giving
-\(L = \bigl(\!\begin{smallmatrix} 1 & 0 \\ 0.5 & \sqrt{0.75}\end{smallmatrix}\!\bigr)\)
-and \(L^{-1} = \bigl(\!\begin{smallmatrix} 1 & 0 \\ -0.577 & 1.155\end{smallmatrix}\!\bigr)\),
-hence \(r_2^{\mathrm{KR}} = 1.155(\theta_2 - X_2) - 0.577(\theta_1 - X_1)\))
-is reported in \S\ref{subsec:8.3}. \(\blacksquare\)
+\(r^{\mathrm{KR}}\). \(\blacksquare\)
 
 \textbf{Remarks.}
 
@@ -1987,19 +2065,32 @@ spatial data with a fixed sweep), use the data-defined order; for
 unordered data, any ordering is correct, with different choices giving
 different but inferentially equivalent pivots.
 
-\emph{2. ``Calibration manifold is a singleton'' vs.~empirical pointwise
-residuals.} The theorem says the function \(r\) is uniquely determined
-within the class. The architectural decomposition \(r_k = a_k - b_k\)
-(additive form) is \emph{not} uniquely determined --- the simultaneous
-shift \(a_k \mapsto a_k + h(\theta_{<k}, X_{<k})\),
-\(b_k \mapsto b_k + h(\theta_{<k}, X_{<k})\) leaves \(r_k = a_k - b_k\)
-unchanged and preserves the UMNN-monotonicity of each component (since
-\(h\) is constant in the primary argument of both networks, it can be
-absorbed into the UMNN bias term). Only the difference \(r_k = a_k - b_k\)
-is identified. The pointwise residuals seen in the 2D correlated
-experiment (\S\ref{subsec:8.3}) reflect finite-network approximation error
-around the unique target \(r^\mathrm{KR}\), not non-uniqueness of the
-population-level solution.
+\emph{2. If the calibration manifold is a singleton, why do we see
+pointwise residuals in §\ref{subsec:8.3}?} A natural objection: the
+manifold is supposedly a unique function, but the experiments in
+\S\ref{subsec:8.3} report residuals between the trained \(r_k\) and the
+canonical \(r_k^{\mathrm{KR}}\) at individual \((\theta, X)\) points,
+on the order of a few percent of the Jacobian magnitude. Where do those
+residuals come from?
+
+Two sources, neither of which contradicts the singleton result. First,
+the theorem identifies the \emph{function} \(r\) up to the calibration
+manifold's only ambiguity (sign + autoregressive ordering, both of
+which are fixed by (R1) and the architectural choice). But the
+\emph{architectural decomposition} \(r_k = a_k - b_k\) in the additive
+form is \emph{not} uniquely determined: the simultaneous shift
+\(a_k \mapsto a_k + h(\theta_{<k}, X_{<k})\),
+\(b_k \mapsto b_k + h(\theta_{<k}, X_{<k})\) by any context-dependent
+function \(h\) leaves \(r_k = a_k - b_k\) unchanged and preserves the
+UMNN-monotonicity of each component (since \(h\) is constant in the
+primary argument of both networks, it can be absorbed into the UMNN
+bias). Only the difference \(r_k = a_k - b_k\) is identified, so a
+finite-network trained instance can land anywhere on this gauge orbit.
+Second, training is finite: at \(\sim 5000\) samples, the trained \(r\)
+is a finite-network approximation of \(r^{\mathrm{KR}}\), with residual
+variance scaling like \(N^{-1}\). The residuals in \S\ref{subsec:8.3}
+are dominated by these two effects, not by non-uniqueness of the
+population-level optimum.
 
 \emph{3. The role of (R2\(^\mathrm{auto}\)) in multivariate.} Both
 clauses of (R2\(^\mathrm{auto}\)) (\S\ref{subsec:6.1}) are needed in the
