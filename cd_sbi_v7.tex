@@ -2774,6 +2774,21 @@ the two-stage critical-values branch nor the missing-coverage gap.
 
 \section{Implementation recipe}\label{sec:9}
 
+\paragraph{The architectural recipe, briefly.}
+The previous Parts develop a single prescription for what a CD-SBI
+implementation should look like: train a neural pivot \(r(\theta; X)\)
+to minimize the NF-MLE loss
+\(L(r) = \mathbb{E}_{(\theta, X)}\bigl[\tfrac{1}{2}\|r\|^2 - \log|\det \partial r / \partial X|\bigr]\),
+with the architecture chosen so that \(r\) is strictly monotone in
+\(\theta\) (R1) and strictly monotone in \(X\) (R2) by construction ---
+not by penalty, and not as an artifact of training. In 1D the
+architecture is a UMNN-based additive or doubly-monotone flow
+(§\ref{subsec:7.1}); in \(d > 1\) it is an autoregressive triangular
+flow (§\ref{subsec:6.1}). The output is a calibrated CD pivot whose
+chi-square inversion gives confidence sets with exact pointwise
+coverage (§\ref{subsec:6.4}). What follows is the practitioner-facing
+checklist.
+
 A practitioner's checklist for applying CD-SBI to a new model:
 
 \textbf{1. Identify the structure of the truth \(r^*\).} Is it additive
@@ -2793,16 +2808,27 @@ Use architecture
 \endhead
 \bottomrule\noalign{}
 \endlastfoot
-Additive: \(r^* \approx a(\theta) - b(X)\) & Additive flow (\S\ref{subsec:6.1} form 1;
+Additive: \(r^* \approx a(\theta) - b(X)\) & Additive flow: each
+\(r_k = a_k(\theta_k) - b_k(X_k)\) with \(a_k, b_k\) scalar UMNNs.
+1D and uncorrelated multivariate cases. (\S\ref{subsec:6.1} form 1;
 \S\ref{subsec:8.1}--8.2) \\
-Multivariate with cross-coupling & Triangular flow, additive form (\S\ref{subsec:6.1}
-form 1; \S\ref{subsec:8.3}) \\
+Multivariate with cross-coupling & Triangular additive flow: same as
+above, but \(a_k\) and \(b_k\) take \((\theta_{<k}, X_{<k})\) as
+context inputs. Captures Gaussian cross-correlation as in the Cholesky
+corollary. (\S\ref{subsec:6.1} form 1; \S\ref{subsec:8.3}) \\
 Has multiplicative \(\theta\)--\(X\) interaction & Doubly-monotone
-construction (\S\ref{subsec:6.1} form 2; \S\ref{subsec:8.4}) \\
-No prior knowledge (default suggestion) & Doubly-monotone construction
-with autoregressive conditioning --- informed by the §\ref{subsec:6.1}
-form-2 architecture rather than empirically validated for the unknown-
-structure case; see \S\ref{subsec:11.5} on higher-\(d\) scaling \\
+construction: \(r_k\) defined as an integral of softplus of an
+unconstrained MLP, with appropriate monotonicity-preserving
+sub-structures on \(b_k\) and \(\beta_k\). Used when the truth is not
+additive (e.g.\ exponential rate, where \(r^*\) involves \(\theta T\)).
+(\S\ref{subsec:6.1} form 2; \S\ref{subsec:8.4}) \\
+No prior knowledge (default suggestion) & The doubly-monotone
+construction with autoregressive conditioning, as a fallback when
+\(r^*\)'s structure is not known a priori. This is the practitioner
+default but is informed conjecture rather than empirically validated:
+in \S\ref{sec:8} the doubly-monotone form was tested only with a 1D
+sufficient statistic. Higher-\(d\) scaling of this fallback is open
+(\S\ref{subsec:11.5}). \\
 \end{longtable}
 
 \textbf{2. Enforce both monotonicities architecturally.} Never rely on
@@ -2838,6 +2864,17 @@ by 1D root-finding (autoregressively, in \(d > 1\)).
 \medskip\hrule\medskip
 
 \section{Position in the SBI literature}\label{sec:10}
+
+\paragraph{Two axes.}
+We compare CD-SBI against existing SBI methods along two axes:
+\textbf{(a) what the method targets} (Bayesian posterior, likelihood,
+likelihood ratio, confidence set, or confidence distribution), and
+\textbf{(b) how it achieves calibration} (none built in, a conservative
+or differentiable-coverage regularizer added post-hoc, a separately-
+trained Neyman-construction critical-values branch, or by
+architectural construction). The table organizes the literature along
+these axes. After the table we summarize what CD-SBI buys you,
+substantively, relative to its closest cousins.
 
 \begin{longtable}[]{@{}
   >{\raggedright\arraybackslash}p{(\columnwidth - 6\tabcolsep) * \real{0.2500}}
@@ -2880,34 +2917,61 @@ Variational SBI w/ coverage & Posterior & Conformal post-hoc &
 \textbf{Pointwise, by construction} & --- \\
 \end{longtable}
 
-The closest cousins are LF2I and WALDO (which target test-statistic CDFs
-to construct confidence sets via Neyman inversion) and SNL (same NF-MLE
-loss, but with a generic flow architecture rather than the
-monotone-in-\(\theta\) + monotone-in-\(X\) prescription, and with MCMC
-on the surrogate likelihood rather than direct chi-square pivot
-inversion).
+\paragraph{What CD-SBI buys you, by comparison.}
+The closest cousins of CD-SBI are the SBI methods that target
+confidence sets (LF2I and WALDO) and the method with the same training
+loss (SNL).
 
-CD-SBI's specific contribution is the architectural recipe (monotone in
-\(\theta\) + monotone in \(X\) + triangular structure for multivariate)
-that converts the standard SNL training objective into a procedure that
-produces a calibrated confidence distribution. The framework inherits
-all of SNL's tooling and scalability while providing pointwise
-frequentist coverage by construction. Unlike LF2I/WALDO, which require a
-separately-trained calibration step (the ``critical-values branch''),
-CD-SBI is single-stage: the same network output gives both the CD and
-the confidence set, with the calibration enforced in the population
-limit by the architecture + loss combination rather than by a hold-out
-calibration sample.
+\begin{itemize}
+\tightlist
+\item
+  \textbf{Versus LF2I and WALDO.} Same target (confidence sets with
+  frequentist coverage), substantially different architecture. LF2I and
+  WALDO are two-stage: a learned test statistic \(T(X; \theta)\) plus a
+  separately-trained critical-values function \(c_\alpha(\theta)\) that
+  is fit by quantile regression on a hold-out simulation set. CD-SBI is
+  single-stage: the same forward pass through the trained network gives
+  the CD and the confidence set, with the calibration enforced in the
+  population limit by the architecture + loss combination rather than
+  by a separate calibration sample. Lower inference compute at test
+  time, fewer hyperparameters, but the architectural prescription is
+  more restrictive (you commit to autoregressive triangular flows
+  rather than any test statistic).
+\item
+  \textbf{Versus SNL.} Same NF-MLE training loss (Theorem 3.2 covers
+  both), substantially different output. SNL trains a generic
+  normalizing flow on \(X \mid \theta\) and uses MCMC over the learned
+  surrogate likelihood combined with a user-supplied prior to extract
+  posterior samples. CD-SBI trains a monotone-in-\(\theta\),
+  monotone-in-\(X\) flow on the same data and outputs a calibrated CD
+  with pointwise frequentist coverage by construction, with no prior
+  and no MCMC --- inversion is just root-finding on
+  \(\|r(\theta; X_\mathrm{obs})\|^2 \le \chi^2_{d, \alpha}\). For
+  Bayesian use cases SNL is the more natural fit; for frequentist
+  coverage guarantees CD-SBI is.
+\end{itemize}
 
-The framework also relates to the implicit-likelihood-ratio tradition
-\citep{CranmerEtAl2015}. For the location-normal model the score
-\(\partial_\theta \log p(X \mid \theta) = X - \theta\) is the
-standardized log-likelihood gradient; our optimal pivot
-\(r^*(\theta; X) = \theta - X\) is its negative, with the sign chosen to
-match the (R1) convention that \(\partial_\theta r > 0\). Up to this
-sign, \(r^*\) is the standardized score; in regular exponential
-families more generally this connects to the signed-root log-likelihood
-ratio \citep[ch.~5]{SchwederHjort2016}.
+CD-SBI's specific contribution is therefore the architectural recipe
+(monotone in \(\theta\) + monotone in \(X\) + triangular structure for
+multivariate) that converts the standard SNL training objective into a
+procedure whose output is a frequentist CD by construction.
+
+\paragraph{Connection to the implicit-likelihood-ratio tradition.}
+CD-SBI also relates to the implicit-likelihood-ratio (LR) tradition
+\citep{CranmerEtAl2015}, which uses neural classifiers to approximate
+likelihood ratios in scientific simulators. In the location-normal
+model the score is \(\partial_\theta \log p(X \mid \theta) = X - \theta\),
+the standardized log-likelihood gradient; our optimal pivot
+\(r^*(\theta; X) = \theta - X\) is its negative, with the sign chosen
+to match the (R1) convention \(\partial_\theta r > 0\). Up to this
+sign, \(r^*\) is the standardized score. In regular one-parameter
+exponential families more generally, the canonical pivot
+\(r^* = \Phi^{-1}(1 - F_\theta(T(X)))\) of \S\ref{subsec:5.1} is related
+to the \emph{signed-root log-likelihood ratio}: the signed square root
+\(\mathrm{sgn}(\hat\theta - \theta) \sqrt{2[\ell(\hat\theta) - \ell(\theta)]}\),
+which is asymptotically \(\mathcal{N}(0, 1)\) under \(P_\theta\) and is
+the standard frequentist pivot for one-parameter exponential families.
+The connection is developed in \citet[ch.~5]{SchwederHjort2016}.
 
 \medskip\hrule\medskip
 
