@@ -54,9 +54,10 @@ corrected.
 
 Round 2 of the vetting workflow is **complete**.
 
-- `cd_sbi.bib` at the repo root holds 42 BibTeX entries (the 30 from the
+- `cd_sbi.bib` at the repo root holds 45 BibTeX entries (the 30 from the
   v6 References section, two papers cited inline but missing from v6
-  (Lueckmann 2021, MAF 2017), and Knothe 1957 added in round 2).
+  (Lueckmann 2021, MAF 2017), and four added in round 2: Knothe 1957,
+  Villani 2003, Lehmann-Romano 2005, and Stevens 1950).
 - The manuscript is migrated to natbib (`\cite`/`\citet`/`\citep`).
   Build cycle is `pdflatex → bibtex → pdflatex → pdflatex`.
 - `references/<bibkey>.md` contains a paper note for each cited entry,
@@ -72,6 +73,13 @@ Round 2 of the vetting workflow is **complete**.
   Lueckmann 2021 doesn't measure coverage so removed from the
   sequential-miscalibration citation; PatelEtAl2023 venue upgraded
   to ICML 2024.
+- Substantive citation gaps closed: Villani 2003 added at §4.2
+  (1D monotone rearrangement); Lehmann-Romano 2005 at §5.1 (exp-family
+  setup) and §7.3 (KS Kolmogorov distribution); Stevens 1950 alongside
+  Lancaster 1961 at §5.7.1 (randomized PIT priority); CranmerEtAl2020
+  / Fraser2011 / SinghEtAl2007 / XieSingh2013 promoted from \nocite
+  to inline at §1.1–§1.2; GneitingRaftery2007 at §3.7 Class-4 CRPS
+  dual form.
 
 Round 3 (holistic review and cleanup) is the next phase; per the plan,
 the user re-plans round 3's scope after round 2 lands.
