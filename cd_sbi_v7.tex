@@ -24,6 +24,10 @@
 % --- Lists ---
 \providecommand{\tightlist}{\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
 
+% --- Bibliography (natbib + plainnat for author-year inline cites) ---
+\usepackage[round,authoryear]{natbib}
+\bibliographystyle{plainnat}
+
 % --- Hyperref (must be loaded near the end) ---
 \usepackage{xcolor}
 \usepackage[hidelinks,unicode,linktoc=all]{hyperref}
@@ -53,7 +57,7 @@
 Simulation-based inference (SBI) is now the standard tool for
 likelihood-free inference in scientific simulators, but its commonly
 used objectives --- neural posterior, likelihood, and ratio estimation
---- do not enforce frequentist coverage. Hermans et al.~(2022)
+--- do not enforce frequentist coverage. \citet{HermansEtAl2022}
 documented that off-the-shelf SBI methods are often substantially
 overconfident at realistic simulation budgets, with no internal
 diagnostic to detect this.
@@ -78,7 +82,7 @@ The method has three ingredients:
   for \(r\) viewed as a conditional normalizing flow,
   \[L(r) \;=\; \mathbb{E}_{(\theta, X) \sim \rho \otimes P_\theta}\!\left[\tfrac{1}{2}\|r(\theta, X)\|^2 \;-\; \log\bigl|\det \partial r/\partial X\bigr|\right].\]
   This is the same objective used by Sequential Neural Likelihood (SNL;
-  Papamakarios et al.~2019).
+  \citealp{PapamakariosEtAl2019}).
 \item
   \textbf{Architectural monotonicity in \(\theta\)}: \(r\) is
   parameterized so that \(\theta \mapsto r_k(\theta; X)\) is strictly
@@ -153,16 +157,16 @@ The three dominant families are:
 \begin{itemize}
 \tightlist
 \item
-  \textbf{Neural posterior estimation} (NPE; Papamakarios \& Murray
-  2016; Greenberg et al.~2019): train a density estimator directly on
+  \textbf{Neural posterior estimation} (NPE; \citealp{PapamakariosMurray2016};
+  \citealp{GreenbergEtAl2019}): train a density estimator directly on
   the posterior \(\theta \mid X\).
 \item
   \textbf{Neural likelihood estimation / Sequential Neural Likelihood}
-  (NLE/SNL; Papamakarios et al.~2019): train a density estimator on
-  \(X \mid \theta\), then run MCMC over the learned surrogate.
+  (NLE/SNL; \citealp{PapamakariosEtAl2019}): train a density estimator
+  on \(X \mid \theta\), then run MCMC over the learned surrogate.
 \item
-  \textbf{Neural ratio estimation} (NRE; Hermans et al.~2020; Miller et
-  al.~2022): train a binary classifier to distinguish
+  \textbf{Neural ratio estimation} (NRE; \citealp{HermansEtAl2020};
+  \citealp{MillerEtAl2022}): train a binary classifier to distinguish
   \((\theta, X) \sim p(\theta, X)\) from
   \((\theta, X) \sim p(\theta)p(X)\), recovering the likelihood ratio
   via Bayes's rule.
@@ -171,17 +175,18 @@ The three dominant families are:
 On benchmarks with adequate simulation budgets, these methods are
 accurate.
 
-The problem is \emph{miscalibration}. Hermans et al.~(2022) (``A Trust
-Crisis in Simulation-Based Inference?'') documented that all four major
-SBI families systematically produce \emph{overconfident} posteriors at
-realistic budgets --- credible intervals have empirical coverage well
-below nominal. Subsequent work has tried to retrofit calibration via
-conservative regularization (Delaunoy et al.~2022), differentiable
-coverage probabilities (Falkiewicz et al.~2023), Neyman-construction
-wrappers (LF2I: Dalmasso et al.~2024; WALDO: Masserano et al.~2023),
-depth-based hyper-rectangles (Bortolato \& Ventura 2025), and
-variational coverage corrections (Patel et al.~2023). These methods all
-treat calibration as a correction to a non-calibrated primary objective.
+The problem is \emph{miscalibration}. \citet{HermansEtAl2022} (``A
+Trust Crisis in Simulation-Based Inference?'') documented that all four
+major SBI families systematically produce \emph{overconfident}
+posteriors at realistic budgets --- credible intervals have empirical
+coverage well below nominal. Subsequent work has tried to retrofit
+calibration via conservative regularization \citep{DelaunoyEtAl2022},
+differentiable coverage probabilities \citep{FalkiewiczEtAl2023},
+Neyman-construction wrappers (LF2I: \citealp{DalmassoEtAl2024}; WALDO:
+\citealp{MasseranoEtAl2023}), depth-based hyper-rectangles
+\citep{BortolatoVentura2025}, and variational coverage corrections
+\citep{PatelEtAl2023}. These methods all treat calibration as a
+correction to a non-calibrated primary objective.
 
 \subsection{A different starting point: confidence distributions}\label{subsec:1.2}
 
@@ -194,10 +199,11 @@ simulator alone --- a \emph{confidence distribution}.
 data-dependent distribution function \(H(\cdot; X)\) on \(\Theta\) whose
 \(\alpha\)-quantile is the upper endpoint of an exact one-sided
 \(\alpha\)-confidence interval. The modern theory traces back through
-Fisher's fiducial inference (1930), Cox (1958), and Efron (1993, 1998),
-to the synthesis in Schweder \& Hjort (2016). Schweder--Hjort
-(2016, Def.~3.1) require two properties: (i) \(H(\cdot; X)\) is a CDF
-on \(\Theta\) for each \(X\), and (ii) the calibration condition
+Fisher's fiducial inference \citep{Fisher1930}, \citet{Cox1958}, and
+\citet{Efron1993, Efron1998}, to the synthesis in
+\citet{SchwederHjort2016}. \citet[Def.~3.1]{SchwederHjort2016} require
+two properties: (i) \(H(\cdot; X)\) is a CDF on \(\Theta\) for each
+\(X\), and (ii) the calibration condition
 \textbf{exact coverage}: \[
 H(\theta_0; X) \;\sim\; U(0,1) \quad \text{when } X \sim P_{\theta_0}, \text{ for every } \theta_0 \in \Theta.
 \] Property (i) is enforced architecturally in this paper by (R1)
@@ -521,7 +527,7 @@ This is what is meant by \textbf{strict propriety}: a loss is
 \emph{strictly proper} for a target \(\mathcal{M}\) if its
 population-level minimum, over the class of admissible \(r\), is
 attained exactly on \(\mathcal{M}\) and nowhere else. (The term comes
-from the scoring-rule literature; Gneiting \& Raftery 2007 is the
+from the scoring-rule literature; \citealp{GneitingRaftery2007} is the
 standard reference.) NF-MLE is strictly proper for the calibration
 manifold within the architectural class. No auxiliary independence or
 sharpness penalties are needed --- the per-sample log-density already
@@ -561,7 +567,7 @@ the function-class restriction makes the population optimum unique.
 \subsection{The Bayesian connection: NF-MLE is the SNL loss}\label{subsec:3.4}
 
 The objective \(L(r)\) is \emph{identical} to the per-round training
-loss of Sequential Neural Likelihood (SNL; Papamakarios et al.~2019).
+loss of Sequential Neural Likelihood (SNL; \citealp{PapamakariosEtAl2019}).
 SNL is sequential by default: it refits the flow on simulator outputs
 drawn near the current posterior estimate, so the proposal \(\rho\)
 changes between rounds. CD-SBI as developed here uses a fixed \(\rho\)
@@ -634,8 +640,9 @@ autograd-Jacobian ablation attains loss \(0.56 < 0.88\) (the truth's loss).
 
 The clean fix is to enforce strict monotonicity in \(X\) architecturally
 --- either via \emph{Unconstrained Monotonic Neural Networks} (UMNNs;
-Wehenkel \& Louppe 2019), which represent a scalar monotone function as
-the integral of a positive function from a free neural net, or via
+\citealp{WehenkelLouppe2019}), which represent a scalar monotone
+function as the integral of a positive function from a free neural net,
+or via
 autoregressive triangular structure. In both cases the Jacobian is
 closed-form and positive by construction.
 
@@ -655,8 +662,8 @@ the choices made by other SBI methods.
 proper two-sample distance between an empirical CDF \(F_n\) and a
 reference CDF \(F_0\). The \textbf{energy distance} is a related
 \(L^2\)-distance between CDFs in higher dimensions. \textbf{HSIC}
-(Hilbert--Schmidt Independence Criterion; Gretton et al.~2005) is a
-kernel-based test statistic that is zero iff two random variables are
+(Hilbert--Schmidt Independence Criterion; \citealp{GrettonEtAl2005}) is
+a kernel-based test statistic that is zero iff two random variables are
 independent. The \textbf{continuous ranked probability score (CRPS)} is
 \(\int(F(z) - \mathbf{1}\{y \le z\})^2\,dz\), a strictly proper scoring
 rule for predictive distributions; the \textbf{pinball loss} is its
@@ -733,7 +740,7 @@ on \(z > 0\), so the pointwise-optimal valid CDF \(G\) takes \(G(z) = 0\)
 for \(z < 0\) and \(G(z) = 1\) for \(z > 0\) --- the step function for
 \(\delta_0\).
 
-(LF2I (Dalmasso et al.~2024) avoids this collapse by applying pinball
+(LF2I \citep{DalmassoEtAl2024} avoids this collapse by applying pinball
 loss in the standard direction: the test statistic is a function of the
 data and parameter whose conditional distribution under \(P_\theta\) is
 fixed by the simulator, and the learned quantity is the critical-value
@@ -753,19 +760,21 @@ argument breaks.
 \subsubsection*{Position in the SBI literature}
 
 The five classes intersect existing SBI methods as follows. NPE/SNPE
-(Papamakarios \& Murray 2016; Greenberg et al.~2019) minimize per-sample
+\citep{PapamakariosMurray2016, GreenbergEtAl2019} minimize per-sample
 log-density of \(\theta \mid X\) --- a Class-5 loss on the
-\emph{posterior}, with no built-in coverage. NLE/SNL (Papamakarios et
-al.~2019) minimize per-sample log-density of \(X \mid \theta\) ---
-Class-5 on the \emph{likelihood}, which is the same loss CD-SBI uses;
-the difference is the architectural prescription (monotone in \(\theta\)
-+ monotone in \(X\)). NRE (Hermans et al.~2020) targets the ratio via
-binary classification --- a Class-5-flavored loss on a different object.
-Balanced NRE (Delaunoy et al.~2022) and Calibrated NPE (Falkiewicz et
-al.~2023) add regularization terms to address conservativeness post hoc;
-CD-SBI achieves calibration by construction instead. LF2I (Dalmasso et
-al.~2024), WALDO (Masserano et al.~2023), and Box CD (Bortolato \&
-Ventura 2025) operate in a structurally different mode --- they learn
+\emph{posterior}, with no built-in coverage. NLE/SNL
+\citep{PapamakariosEtAl2019} minimize per-sample log-density of
+\(X \mid \theta\) --- Class-5 on the \emph{likelihood}, which is the
+same loss CD-SBI uses; the difference is the architectural prescription
+(monotone in \(\theta\) + monotone in \(X\)). NRE
+\citep{HermansEtAl2020} targets the ratio via binary classification ---
+a Class-5-flavored loss on a different object. Balanced NRE
+\citep{DelaunoyEtAl2022} and Calibrated NPE \citep{FalkiewiczEtAl2023}
+add regularization terms to address conservativeness post hoc; CD-SBI
+achieves calibration by construction instead. LF2I
+\citep{DalmassoEtAl2024}, WALDO \citep{MasseranoEtAl2023}, and Box CD
+\citep{BortolatoVentura2025} operate in a structurally different mode
+--- they learn
 test statistics (or hyper-rectangular acceptance regions) and invert via
 Neyman construction; the calibration target is the CDF of the test
 statistic under each \(\theta\), not the CDF of the parameter under
@@ -963,7 +972,7 @@ A \textbf{UMP-unbiased CD} is, in the classical sense, the CD whose
 associated one-sided test family at each level is uniformly most
 powerful within the class of unbiased tests; this is the analogue of the
 UMPU confidence interval in classical testing theory. For
-\(X \sim \mathcal{N}(\theta, 1)\), Schweder \& Hjort (2016, ch.~5) give
+\(X \sim \mathcal{N}(\theta, 1)\), \citet[ch.~5]{SchwederHjort2016} give
 the UMP-unbiased CD as
 \(C^*_\mathrm{SH}(\theta; X) = \Phi(\theta - X)\). Our optimal pivot
 \(r^*(\theta; X) = \theta - X\) induces
@@ -1045,7 +1054,7 @@ we have \(\mathcal{M} \cap \mathcal{F}^T_{C^1} = \{r^*\}\).}
 \emph{An \textbf{ancillary statistic} is one whose distribution does not
 depend on the parameter; conditioning on an ancillary loses no
 information and is the standard tool for reducing nuisance dimensions in
-classical inference (Cox 1958).}
+classical inference \citep{Cox1958}.}
 
 \textbf{Location-normal with unknown variance.}
 \(X_i \sim \mathcal{N}(\theta, \sigma^2)\) iid, both unknown.
@@ -1071,7 +1080,8 @@ pivots (it does, with the right architecture; see \S\ref{subsec:8.4}).
 For discrete sufficient statistics (T(X) countable), no function of
 \(T(X)\) alone can have a continuous distribution, so the strict
 calibration target \(\mathcal{N}(0,1)\) is unattainable. The standard
-fix (Lancaster 1961) is auxiliary randomization: smear each atom across
+fix \citep{Lancaster1961} is auxiliary randomization: smear each atom
+across
 an interval of an auxiliary uniform variable, so that the combined
 object is continuous.
 
@@ -1239,7 +1249,7 @@ the local CLT gives \(\sup_t p_\theta(t) = \Theta(1/\sqrt{n})\), so
 \(K(\theta) = O(1/\sqrt{n})\). For applications where ease of
 implementation outweighs the small calibration error, the mid-p variant
 trains \(r(\theta; X)\) directly with \(U\) fixed at \(1/2\), dropping
-the auxiliary input. See Hwang \& Yang (2001) for the optimality theory
+the auxiliary input. See \citet{HwangYang2001} for the optimality theory
 of mid-p in the closely related contingency-table setting.
 
 \medskip\hrule\medskip
@@ -1256,7 +1266,7 @@ matrix is lower-triangular and its determinant is the product of
 diagonal entries. This is the multivariate generalization of (R1) + (R2)
 into a structure that scales linearly in \(d\) and admits closed-form
 Jacobians. Standard references on this architectural pattern include
-Papamakarios et al.~(2021) and Durkan et al.~(2019).
+\citet{PapamakariosEtAl2021} and \citet{DurkanEtAl2019}.
 
 \subsection{The architectural class}\label{subsec:6.1}
 
@@ -1364,10 +1374,10 @@ sample, vs.~\(O(d^3)\) for a general dense Jacobian.
 
 \emph{Optimal-transport context, briefly.} Between two probability
 measures on \(\mathbb{R}^d\), the \textbf{Knothe--Rosenblatt
-rearrangement} (Rosenblatt 1952) is the unique transport map of
+rearrangement} \citep{Rosenblatt1952} is the unique transport map of
 triangular form: each coordinate transformation conditions on
 previously-transformed coordinates. It differs from the \textbf{Brenier
-map} (Brenier 1991), which is the unique transport map that is the
+map} \citep{Brenier1991}, which is the unique transport map that is the
 gradient of a convex function (the \(L^2\)-optimal transport plan). KR
 depends on coordinate ordering; Brenier does not. Both are bijections
 between the two measures; KR is the natural fit for autoregressive
@@ -1553,7 +1563,7 @@ gives
 
 \subsection{UMNN building blocks}\label{subsec:7.1}
 
-\textbf{Definition (UMNN; Wehenkel \& Louppe 2019).} A
+\textbf{Definition (UMNN; \citealp{WehenkelLouppe2019}).} A
 \emph{Unconstrained Monotonic Neural Network} parameterizes a scalar
 function \(g(z; c)\) that is strictly monotone-increasing in \(z\) at
 fixed context \(c\) by writing \[
@@ -1666,10 +1676,10 @@ the same values are clean. The corrected comparisons appear inline at
 each experiment.
 
 Related diagnostic frameworks include simulation-based calibration (SBC;
-Talts et al.~2018), sampling-based accuracy testing (TARP; Lemos et
-al.~2023), and the LF2I conditional-coverage diagnostic (Dalmasso et
-al.~2024). Our coverage diagnostic (item 5) is closest in spirit to the
-LF2I local-coverage check.
+\citealp{TaltsEtAl2018}), sampling-based accuracy testing (TARP;
+\citealp{LemosEtAl2023}), and the LF2I conditional-coverage diagnostic
+\citep{DalmassoEtAl2024}. Our coverage diagnostic (item 5) is closest
+in spirit to the LF2I local-coverage check.
 
 \medskip\hrule\medskip
 
@@ -2111,7 +2121,7 @@ depending on problem complexity.
 is coverage: if coverage matches nominal at multiple \(\theta_0\) and
 multiple \(\alpha\) levels, the pivot is valid. If only marginal PIT
 passes but conditional fails, you have the kind of conditional
-miscalibration that Hermans et al.~(2022) documented in standard SBI
+miscalibration that \citet{HermansEtAl2022} documented in standard SBI
 methods, and you need to revisit the architecture.
 
 \textbf{6. At test time, invert.} Given observed \(X_\mathrm{obs}\),
@@ -2142,23 +2152,24 @@ Reference
 \endhead
 \bottomrule\noalign{}
 \endlastfoot
-NPE / SNPE & Bayesian posterior & None built-in & Papamakarios \& Murray
-2016; Greenberg et al.~2019 \\
-NLE / SNL & Likelihood & None built-in & Papamakarios et al.~2019 \\
-NRE / SNRE & Likelihood ratio & None built-in & Hermans et al.~2020;
-Miller et al.~2022 \\
+NPE / SNPE & Bayesian posterior & None built-in &
+\citealp{PapamakariosMurray2016}; \citealp{GreenbergEtAl2019} \\
+NLE / SNL & Likelihood & None built-in &
+\citealp{PapamakariosEtAl2019} \\
+NRE / SNRE & Likelihood ratio & None built-in &
+\citealp{HermansEtAl2020}; \citealp{MillerEtAl2022} \\
 Balanced NRE & Likelihood ratio (goal: more reliable posteriors) &
-Conservative regularizer & Delaunoy et al.~2022 \\
-Calibrated NPE & Posterior & Differentiable coverage & Falkiewicz et
-al.~2023 \\
+Conservative regularizer & \citealp{DelaunoyEtAl2022} \\
+Calibrated NPE & Posterior & Differentiable coverage &
+\citealp{FalkiewiczEtAl2023} \\
 LF2I (ACORE, BFF) & Confidence sets & Neyman construction on learned
-test stat & Dalmasso et al.~2024 \\
+test stat & \citealp{DalmassoEtAl2024} \\
 WALDO & Confidence sets & Neyman inversion on Wald-style stat &
-Masserano et al.~2023 \\
-Box CD & Confidence sets & Depth-based, hyper-rectangles & Bortolato \&
-Ventura 2025 \\
-Variational SBI w/ coverage & Posterior & Conformal post-hoc & Patel et
-al.~2023 \\
+\citealp{MasseranoEtAl2023} \\
+Box CD & Confidence sets & Depth-based, hyper-rectangles &
+\citealp{BortolatoVentura2025} \\
+Variational SBI w/ coverage & Posterior & Conformal post-hoc &
+\citealp{PatelEtAl2023} \\
 \textbf{CD-SBI (this work)} & \textbf{Confidence distribution} &
 \textbf{Pointwise, by construction} & --- \\
 \end{longtable}
@@ -2183,14 +2194,14 @@ limit by the architecture + loss combination rather than by a hold-out
 calibration sample.
 
 The framework also relates to the implicit-likelihood-ratio tradition
-(Cranmer et al.~2015). For the location-normal model the score
+\citep{CranmerEtAl2015}. For the location-normal model the score
 \(\partial_\theta \log p(X \mid \theta) = X - \theta\) is the
 standardized log-likelihood gradient; our optimal pivot
 \(r^*(\theta; X) = \theta - X\) is its negative, with the sign chosen to
 match the (R1) convention that \(\partial_\theta r > 0\). Up to this
 sign, \(r^*\) is the standardized score; in regular exponential
 families more generally this connects to the signed-root log-likelihood
-ratio (Schweder \& Hjort 2016, ch.~5).
+ratio \citep[ch.~5]{SchwederHjort2016}.
 
 \medskip\hrule\medskip
 
@@ -2224,8 +2235,8 @@ autoregressive ordering give different valid pivots, all in
 have better finite-sample optimization behavior --- easier-to-learn
 conditionals, lower variance gradients --- is an empirical question
 worth investigating. The optimal-transport literature
-(Carlier--Galichon--Santambrogio 2010) connects KR maps to Brenier maps
-through an entropic/diagonal-scaling continuation, raising the
+\citep{CarlierEtAl2010} connects KR maps to Brenier maps through an
+entropic/diagonal-scaling continuation, raising the
 \emph{conjecture} that a more isotropic transport target might give
 better-behaved finite-sample training; this is unexplored in the CD-SBI
 context. We are not aware of any published study comparing KR orderings
@@ -2255,20 +2266,20 @@ direction, called the \(M\)-projection in the modern Bregman-geometry
 sense) of the true conditional \(p(\cdot \mid \theta)\) onto the
 architectural class. What this object's coverage properties are ---
 and whether CD-SBI inherits a degraded but still useful guarantee ---
-is open. Wehenkel et al.~(2025) study a related question via a
+is open. \citet{WehenkelEtAl2025} study a related question via a
 reweighted / generalized-Bayes robust SBI objective; a direct
 coverage-degradation analysis of the forward-KL projection of \(p\)
 onto \(\mathcal{F}\) is, to our knowledge, still missing.
-Robust-SBI ideas (Schmon et al.~2020; Dellaporta et al.~2022) should
-also integrate with CD-SBI but the right framework is unclear.
+Robust-SBI ideas \citep{SchmonEtAl2020, DellaportaEtAl2022} should also
+integrate with CD-SBI but the right framework is unclear.
 
 \subsection{Higher-dimensional scaling}\label{subsec:11.5}
 The triangular flow scales linearly in \(d\) for the Jacobian, but
 conditioning networks for high-\(k\) components carry growing context
-dimension. Autoregressive flows scale routinely to \(d \sim 30\) in the
-SBI literature (Lueckmann et al.~2021) and to \(d \sim 100\)+ in
-general normalizing-flow contexts (Papamakarios et al.~2017;
-Durkan et al.~2019). What is specific to CD-SBI is the requirement
+dimension. Autoregressive flows scale routinely to \(d \sim 30\) in the SBI
+literature \citep{LueckmannEtAl2021} and to \(d \sim 100\)+ in general
+normalizing-flow contexts \citep{PapamakariosEtAl2017, DurkanEtAl2019}.
+What is specific to CD-SBI is the requirement
 that the calibration--monotonicity--Jacobian triple be maintained
 jointly at scale; whether that triple remains tractable past the 2D
 experiments here, and in particular whether sparse autoregressive or
@@ -2285,12 +2296,12 @@ variant splits in two:
 \item \emph{Naive sequential CD-SBI (adapting \(\rho\) to concentrate
   near \(X_\mathrm{obs}\)) almost certainly loses pointwise calibration:}
   the adaptive \(\rho\) violates the \(\rho\)-independence-in-the-population-limit
-  argument of \S\ref{subsec:1.3}, and the broader sequential-SBI literature
-  (Hermans et al.~2022; Lueckmann et al.~2021) has documented empirical
-  miscalibration of all naive sequential variants.
+  argument of \S\ref{subsec:1.3}, and the broader sequential-SBI
+  literature \citep{HermansEtAl2022, LueckmannEtAl2021} has documented
+  empirical miscalibration of all naive sequential variants.
 \item \emph{Whether an importance-reweighted or APT-style corrected
   sequential procedure preserves the calibration guarantee is genuinely
-  open.} The closest existing work is Falkiewicz et al.~(2023)
+  open.} The closest existing work is \citet{FalkiewiczEtAl2023}
   (Calibrated NPE), which adds a differentiable coverage regularizer to
   a sequential loop but does not prove a coverage guarantee.
 \end{itemize}
@@ -2379,174 +2390,10 @@ Sequential refinement & Open (\S\ref{subsec:11.6}) & Theory unclear \\
 
 \medskip\hrule\medskip
 
-\section*{References}
+% Background / "see also" entries that appear in the bibliography
+% without inline cites (preserved from the v6 References section).
+\nocite{Fraser2011,SinghEtAl2007,XieSingh2013,CranmerEtAl2020,Lyons2013,SriperumbudurEtAl2011}
 
-\textbf{Confidence distributions and fiducial inference.}
+\bibliography{cd_sbi}
 
-\begin{itemize}
-\tightlist
-\item
-  Cox, D. R. (1958). ``Some problems connected with statistical
-  inference.'' \emph{Annals of Mathematical Statistics}, 29(2),
-  357--372.
-\item
-  Efron, B. (1993). ``Bayes and likelihood calculations from confidence
-  intervals.'' \emph{Biometrika}, 80(1), 3--26.
-\item
-  Efron, B. (1998). ``R. A. Fisher in the 21st century.''
-  \emph{Statistical Science}, 13(2), 95--122.
-\item
-  Fisher, R. A. (1930). ``Inverse probability.'' \emph{Proceedings of
-  the Cambridge Philosophical Society}, 26, 528--535.
-\item
-  Fraser, D. A. S. (2011). ``Is Bayes posterior just quick and dirty
-  confidence?'' \emph{Statistical Science}, 26(3), 299--316.
-\item
-  Hwang, J. T. G., \& Yang, M.-C. (2001). ``An optimality theory for mid
-  p-values in \(2 \times 2\) contingency tables.'' \emph{Statistica
-  Sinica}, 11(3), 807--826.
-\item
-  Lancaster, H. O. (1961). ``Significance tests in discrete
-  distributions.'' \emph{JASA}, 56(294), 223--234.
-\item
-  Schweder, T., \& Hjort, N. L. (2016). \emph{Confidence, Likelihood,
-  Probability: Statistical Inference with Confidence Distributions}.
-  Cambridge University Press.
-\item
-  Singh, K., Xie, M., \& Strawderman, W. E. (2007). ``Confidence
-  distribution (CD) --- distribution estimator of a parameter.''
-  \emph{IMS Lecture Notes --- Monograph Series}, 54, 132--150.
-\item
-  Xie, M., \& Singh, K. (2013). ``Confidence distribution, the
-  frequentist distribution estimator of a parameter: A review.''
-  \emph{International Statistical Review}, 81(1), 3--39.
-\end{itemize}
-
-\textbf{Simulation-based inference.}
-
-\begin{itemize}
-\tightlist
-\item
-  Bortolato, E., \& Ventura, L. (2025). ``Box Confidence Depth:
-  Simulation-Based Inference with Hyper-Rectangles.'' arXiv:2502.11072.
-\item
-  Cranmer, K., Brehmer, J., \& Louppe, G. (2020). ``The frontier of
-  simulation-based inference.'' \emph{PNAS}, 117(48), 30055--30062.
-\item
-  Cranmer, K., Pavez, J., \& Louppe, G. (2015). ``Approximating
-  likelihood ratios with calibrated discriminative classifiers.''
-  arXiv:1506.02169.
-\item
-  Dalmasso, N., Masserano, L., Zhao, D., Izbicki, R., \& Lee, A. B.
-  (2024). ``Likelihood-free frequentist inference: bridging classical
-  statistics and machine learning for reliable simulator-based
-  inference.'' \emph{Electronic Journal of Statistics}, 18(2),
-  5045--5090. arXiv:2107.03920.
-\item
-  Delaunoy, A., Hermans, J., Rozet, F., Wehenkel, A., \& Louppe, G.
-  (2022). ``Towards reliable simulation-based inference with balanced
-  neural ratio estimation.'' \emph{NeurIPS 35}.
-\item
-  Dellaporta, C., Knoblauch, J., Damoulas, T., \& Briol, F.-X. (2022).
-  ``Robust Bayesian inference for simulator-based models via the MMD
-  posterior bootstrap.'' \emph{AISTATS}.
-\item
-  Falkiewicz, M., Takeishi, N., Shekhzadeh, I., Wehenkel, A., Delaunoy,
-  A., Louppe, G., \& Kalousis, A. (2023). ``Calibrating neural
-  simulation-based inference with differentiable coverage probability.''
-  \emph{NeurIPS 36}. arXiv:2310.13402.
-\item
-  Greenberg, D., Nonnenmacher, M., \& Macke, J. (2019). ``Automatic
-  posterior transformation for likelihood-free inference.'' \emph{ICML}.
-\item
-  Hermans, J., Begy, V., \& Louppe, G. (2020). ``Likelihood-free MCMC
-  with amortized approximate ratio estimators.'' \emph{ICML}.
-\item
-  Hermans, J., Delaunoy, A., Rozet, F., Wehenkel, A., Begy, V., \&
-  Louppe, G. (2022). ``A trust crisis in simulation-based inference?
-  Your posterior approximations can be unfaithful.'' \emph{Transactions
-  on Machine Learning Research}. arXiv:2110.06581.
-\item
-  Lemos, P., Coogan, A., Hezaveh, Y., \& Perreault-Levasseur, L. (2023).
-  ``Sampling-based accuracy testing of posterior estimators for general
-  inference (TARP).'' \emph{ICML}.
-\item
-  Masserano, L., Dorigo, T., Izbicki, R., Kuusela, M., \& Lee, A. B.
-  (2023). ``Simulator-based inference with WALDO: Confidence regions by
-  leveraging prediction algorithms and posterior estimators for inverse
-  problems.'' \emph{AISTATS}. arXiv:2205.15680.
-\item
-  Miller, B. K., Weniger, C., \& Forré, P. (2022). ``Contrastive neural
-  ratio estimation.'' \emph{NeurIPS 35}.
-\item
-  Papamakarios, G., \& Murray, I. (2016). ``Fast \(\epsilon\)-free
-  inference of simulation models with Bayesian conditional density
-  estimation.'' \emph{NeurIPS}.
-\item
-  Papamakarios, G., Sterratt, D., \& Murray, I. (2019). ``Sequential
-  neural likelihood.'' \emph{AISTATS}.
-\item
-  Patel, Y., McNamara, D., Loper, J., Regier, J., \& Tewari, A. (2023).
-  ``Variational inference with coverage guarantees in simulation-based
-  inference.'' arXiv:2305.14275.
-\item
-  Schmon, S. M., Cannon, P. W., \& Knoblauch, J. (2020). ``Generalized
-  posteriors in approximate Bayesian computation.'' arXiv:2011.08644.
-\item
-  Talts, S., Betancourt, M., Simpson, D., Vehtari, A., \& Gelman, A.
-  (2018). ``Validating Bayesian inference algorithms with
-  simulation-based calibration.'' arXiv:1804.06788.
-\item
-  Wehenkel, A., Gamella, J. L., Sener, O., Behrmann, J., Sapiro, G.,
-  Jacobsen, J.-H., \& Cuturi, M. (2025). ``Addressing misspecification
-  in simulation-based inference through data-driven calibration.''
-  \emph{ICML}. arXiv:2405.08719.
-\end{itemize}
-
-\textbf{Normalizing flows, monotone networks, optimal transport.}
-
-\begin{itemize}
-\tightlist
-\item
-  Brenier, Y. (1991). ``Polar factorization and monotone rearrangement
-  of vector-valued functions.'' \emph{Comm. Pure Appl. Math.}, 44(4),
-  375--417.
-\item
-  Carlier, G., Galichon, A., \& Santambrogio, F. (2010). ``From Knothe's
-  transport to Brenier's map and a continuation method for optimal
-  transport.'' \emph{SIAM J. Math. Anal.}, 41(6), 2554--2576.
-\item
-  Durkan, C., Bekasov, A., Murray, I., \& Papamakarios, G. (2019).
-  ``Neural spline flows.'' \emph{NeurIPS 32}.
-\item
-  Papamakarios, G., Nalisnick, E., Rezende, D. J., Mohamed, S., \&
-  Lakshminarayanan, B. (2021). ``Normalizing flows for probabilistic
-  modeling and inference.'' \emph{JMLR}, 22, 1--64.
-\item
-  Rosenblatt, M. (1952). ``Remarks on a multivariate transformation.''
-  \emph{Annals of Mathematical Statistics}, 23(3), 470--472.
-\item
-  Wehenkel, A., \& Louppe, G. (2019). ``Unconstrained monotonic neural
-  networks.'' \emph{NeurIPS 32}. arXiv:1908.05164.
-\end{itemize}
-
-\textbf{Kernel methods and divergences.}
-
-\begin{itemize}
-\tightlist
-\item
-  Gneiting, T., \& Raftery, A. E. (2007). ``Strictly proper scoring
-  rules, prediction, and estimation.'' \emph{JASA}, 102(477), 359--378.
-\item
-  Gretton, A., Bousquet, O., Smola, A., \& Schölkopf, B. (2005).
-  ``Measuring statistical dependence with Hilbert--Schmidt norms.''
-  \emph{Algorithmic Learning Theory}, 63--77.
-\item
-  Lyons, R. (2013). ``Distance covariance in metric spaces.''
-  \emph{Annals of Probability}, 41(5), 3284--3305.
-\item
-  Sriperumbudur, B., Fukumizu, K., \& Lanckriet, G. (2011).
-  ``Universality, characteristic kernels and RKHS embedding of
-  measures.'' \emph{JMLR}, 12, 2389--2410.
-\end{itemize}
 \end{document}
