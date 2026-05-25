@@ -15,9 +15,9 @@ class SeededRNGs:
 
 
 def _derive(master: int, label: str) -> int:
-    """Deterministic 64-bit substream seed from (master, label)."""
+    """Deterministic 128-bit substream seed from (master, label)."""
     h = hashlib.sha256(f"{master}:{label}".encode()).digest()
-    return int.from_bytes(h[:8], "big") % (2**63 - 1)
+    return int.from_bytes(h[:16], "big")
 
 
 def seed_everything(seed: int) -> SeededRNGs:
