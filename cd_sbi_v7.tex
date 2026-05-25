@@ -212,11 +212,23 @@ two properties: (i) \(H(\cdot; X)\) is a CDF on \(\Theta\) for each
 H(\theta_0; X) \;\sim\; U(0,1) \quad \text{when } X \sim P_{\theta_0}, \text{ for every } \theta_0 \in \Theta.
 \] Property (i) is enforced architecturally in this paper by (R1)
 (\S\ref{subsec:2.2}); property (ii) is what NF-MLE drives the network
-toward. Equivalently to (ii): \(H(\theta_0; X)\) is the
-\emph{probability integral transform} (PIT) --- the mapping that
-converts any continuous random variable into a uniform \((0,1)\)
-variable via its own CDF --- applied to a correctly chosen
-\emph{pivot}.
+toward.
+
+\paragraph{What is the PIT?} The \emph{probability integral transform}
+is one of the workhorse identities of frequentist statistics: if \(Y\)
+is a continuous random variable with CDF \(G\), then \(G(Y) \sim U(0,1)\).
+(Direct check: \(P(G(Y) \le u) = P(Y \le G^{-1}(u)) = G(G^{-1}(u)) = u\)
+for any \(u \in [0, 1]\).) The PIT is what makes the calibration
+condition (ii) above non-circular --- instead of asking ``does
+\(H(\theta_0; X)\) have the right distribution?'', we can build \(H\) by
+finding any function whose distribution under \(X \sim P_{\theta_0}\) is
+fully known and \(\theta_0\)-free, then composing with that function's
+CDF. The function we are looking for is called a \emph{pivot}, and we
+make this precise in \S\ref{sec:2}. For our purposes, the reference
+distribution is the standard normal, so the relevant identity is
+\(\Phi^{-1}(G(Y)) \sim \mathcal{N}(0, 1)\) when \(Y \sim G\) continuous;
+the formal calibration target is \(\mathcal{N}(0, I_d)\) rather than
+\(U(0,1)^d\), but the two are equivalent under coordinatewise \(\Phi\).
 
 \textbf{Astronomer-friendly comparison.} A CD plays the same role as a
 posterior: a distribution-valued summary of the evidence for \(\theta\).
@@ -240,18 +252,29 @@ discussion of where the two diverge.)
   \(\theta_0\)}, the data being random.
 \end{itemize}
 
-In regular one-parameter exponential families with monotone likelihood
-ratio in a continuous sufficient statistic, the optimal (uniformly most
-powerful unbiased, ``UMPU'') CD is explicit and unique (the precise
-hypotheses are stated in \S\ref{subsec:5.1}; the location-normal model
-is the simplest case). For \(X \sim \mathcal{N}(\theta, 1)\) it is \[
-H^*(\theta; X) = \Phi(\theta - X),
-\] where \(\Phi\) is the standard normal CDF. Check: under
-\(X \sim \mathcal{N}(\theta_0, 1)\) one has \(\theta_0 - X = -Z\) with
-\(Z \sim \mathcal{N}(0,1)\), so
-\(\Phi(\theta_0 - X) = \Phi(-Z) \sim U(0,1)\) exactly. Inverting at
-level \(1-\alpha/2\) and \(\alpha/2\) recovers the textbook
-\(z\)-interval \([X - z_{1-\alpha/2}, X + z_{1-\alpha/2}]\).
+\paragraph{The location-normal CD: a worked example.}
+For the simplest non-trivial model \(X \sim \mathcal{N}(\theta, 1)\),
+constructing an exact CD is elementary. Consider the function
+\(r^*(\theta, X) = \theta - X\). Under \(X \sim \mathcal{N}(\theta_0, 1)\),
+write \(X = \theta_0 + Z\) with \(Z \sim \mathcal{N}(0, 1)\); then
+\(r^*(\theta_0, X) = \theta_0 - X = -Z\), which is exactly
+\(\mathcal{N}(0, 1)\) --- a distribution that does not depend on
+\(\theta_0\). So \(r^*\) is a pivot in the classical sense. Composing
+with the standard normal CDF gives
+\[
+H^*(\theta; X) := \Phi(\theta - X),
+\]
+which is a CDF in \(\theta\) for each \(X\) (property (i)) and which
+satisfies the calibration condition (property (ii)) by direct
+verification: \(\Phi(\theta_0 - X) = \Phi(-Z) \sim U(0, 1)\) exactly.
+Inverting \(H^*\) at the levels \(\alpha/2\) and \(1 - \alpha/2\)
+recovers the textbook \(z\)-interval
+\([X - z_{1-\alpha/2},\, X + z_{1-\alpha/2}]\). More generally, in any
+regular one-parameter exponential family with monotone likelihood ratio
+in a continuous sufficient statistic, an analogous construction gives a
+\emph{uniformly most powerful unbiased} (UMPU) CD; Theorem~C
+(\S\ref{subsec:5.2}) is the precise statement, with the exp-family
+worked development in \S\ref{sec:5}.
 
 Our aim is to compute such a CD from a simulator alone, when no closed
 form is available.
@@ -324,16 +347,31 @@ Place the framework in the SBI literature & \S\ref{subsec:3.7}, \S\ref{sec:10} \
 Demarcate open problems & \S\ref{sec:11} \\
 \end{longtable}
 
-Note carefully: (C1) is a \emph{frequentist} property --- it makes no
-reference to a prior. The training proposal \(\rho\) on \(\Theta\) used
-to draw simulations is purely a sampling distribution; in the population
-limit, \emph{provided the architectural class \(\mathcal{F}\) contains
-the calibration manifold} and \(\rho\) has full support on the region of
-inferential interest, the CD pivot does not depend on \(\rho\). Under
-misspecification or with an under-parameterized architecture, the
-population minimizer of NF-MLE is the \(\rho\)-weighted KL projection
-onto \(\mathcal{F}\) and \emph{does} depend on \(\rho\); see
-\S\ref{subsec:11.4}.
+\paragraph{The proposal \(\rho\) is not a prior.}
+This is worth dwelling on, because it is the single most consequential
+conceptual difference between CD-SBI and Bayesian SBI methods. The
+training distribution \(\theta \sim \rho\), \(X \mid \theta \sim P_\theta\)
+generates the simulation pairs the network sees during training, but
+\(\rho\) plays \emph{no role at inference time}, when only
+\(X_\mathrm{obs}\) is given. Look at property (C1) above: it asserts that
+for \emph{every fixed} true \(\theta_0\), the law of \(r(\theta_0; X)\)
+under \(X \sim P_{\theta_0}\) is \(\mathcal{N}(0, I_d)\). No averaging
+over \(\theta\) occurs; \(\rho\) does not appear. In the population
+limit --- provided the architectural class \(\mathcal{F}\) contains the
+calibration manifold and \(\rho\) has full support on the region of
+inferential interest --- the resulting CD pivot is the same regardless
+of which (full-support) \(\rho\) generated the training data. Under
+misspecification or with an under-parameterized architecture this
+independence breaks down: the population minimizer becomes the
+\(\rho\)-weighted forward-KL projection onto \(\mathcal{F}\), which
+\emph{does} depend on \(\rho\); we revisit this in \S\ref{subsec:11.4}.
+
+If you find yourself thinking of \(\rho\) as a prior, you are reading
+the wrong column of the training matrix. The implicit prior at inference
+time is uniform on \(\Theta\); we sample \(\theta\) only to give the
+network simulated data across the parameter space, the same way one
+might sample synthetic training images across object types without
+claiming any of those images is more probable than another.
 
 \subsection{Scope of this document}\label{subsec:1.4}
 
@@ -408,6 +446,19 @@ in the Glossary preceding Part I.
 
 \section{The pivot and the calibration manifold}\label{sec:2}
 
+Section~\ref{sec:1} stated the goal: produce a function
+\(r(\theta; X)\) whose distribution under the truth is exactly
+\(\mathcal{N}(0, I_d)\) (property (C1)) and which is monotone in
+\(\theta\) (property (C2)). Section~\ref{sec:2} makes this goal
+architecturally precise. We introduce two structural conditions, (R1)
+and (R2), that any candidate \(r\) must satisfy \emph{by construction}
+--- not as a consequence of training, but as a property of the network's
+forward map. (R1) is the engineering form of (C2). (R2) is what makes
+the change-of-variables formula valid so we can write down a likelihood
+for \(r\) in the first place. The calibration manifold
+\(\mathcal{M}\) is then the set of \(r\) in our architectural class
+that additionally satisfy (C1); Section~\ref{sec:3} is about finding it.
+
 \subsection{Notation and standing assumptions}\label{subsec:2.1}
 
 \begin{itemize}
@@ -438,6 +489,22 @@ in the Glossary preceding Part I.
 \end{itemize}
 
 \subsection{The pivot, the implied CD, the calibration manifold}\label{subsec:2.2}
+
+\paragraph{Two structural conditions on a pivot.}
+Two things must hold \emph{by construction} for a measurable function
+\(r: \Theta \times \mathcal{X} \to \mathbb{R}^d\) to function as the
+CD pivot we want. First, the induced CD
+\(H_r(\theta; X) = \Phi_d(r(\theta; X))\) must be a CDF in \(\theta\)
+for each fixed \(X\) --- so that quantile-based confidence regions
+\(H_r^{-1}([\alpha/2, 1-\alpha/2])\) are well-defined connected sets;
+this is what (R1) below enforces. Second, the map
+\(X \mapsto r(\theta; X)\) must be invertible at each fixed \(\theta\)
+--- so that the change-of-variables formula gives a valid density on
+\(\mathcal{X}\) and we can write down a tractable likelihood under the
+model and minimize it; this is (R2). The intuition behind each
+condition, and what fails when it is dropped, is unpacked in
+§§\ref{subsec:2.3}--\ref{subsec:2.4}; here we state the conditions
+formally.
 
 A \textbf{pivot} in the sense used here is a measurable function
 \(r: \Theta \times \mathcal{X} \to \mathbb{R}^d\) satisfying:
@@ -562,7 +629,7 @@ structure of \S\ref{sec:6} is what selects the unique Knothe--Rosenblatt
 representative within the rotation orbit; see \S\ref{subsec:11.1} for
 the related open problem outside the autoregressive class.
 
-\subsection{The role of (R2): why monotonicity in \(X\) is needed}\label{subsec:2.4}
+\subsection{The role of (R2): why invertibility in \(X\) is needed}\label{subsec:2.4}
 
 Invertibility in \(X\) at fixed \(\theta\) is what makes the
 change-of-variables formula valid: \[
@@ -581,9 +648,25 @@ inequality requires a normalized density), and for architectures that
 admit unbounded \(|\det \partial r / \partial X|\) in folded regions ---
 e.g.\ ReLU / UMNN networks with no built-in monotonicity --- the NF-MLE
 loss has no lower bound at all. The formal version is in
-\S\ref{subsec:3.5}; the empirical demonstration in \S\ref{subsec:8.4}
-(where the autograd-Jacobian ablation attains loss 0.56 against the
-true model's 0.88). Enforcing (R2) architecturally fixes this.
+\S\ref{subsec:3.5}.
+
+\paragraph{The empirical smoking gun.}
+\S\ref{subsec:8.4} runs a controlled ablation: the same exponential-rate
+problem trained both with the architectural (R2) enforcement and with
+autograd alone. The autograd-Jacobian ablation reaches an NF-MLE loss
+of \(0.56\); the true (analytically known) model reaches \(0.88\). Read
+directionally: smaller NF-MLE loss looks better on its face, since
+NF-MLE is a negative log-likelihood --- the truth should be the model
+that fits the data best. But for any \emph{valid} normalized
+\(\hat p_r\), Gibbs's inequality forces the population NF-MLE loss to be
+at least the conditional entropy of \(X \mid \theta\), and the truth
+achieves that entropy lower bound exactly: \(0.88\) is a floor that no
+valid model can undercut. The ablation undercuts it, which is
+mathematically impossible unless its \(\hat p_r\) is not a normalized
+density. So the loss \(0.56 < 0.88\) is the smoking-gun evidence that
+the autograd Jacobian is silently letting \(\hat p_r\) accumulate mass
+greater than one in the folded regions. Enforcing (R2) architecturally
+is what keeps \(\hat p_r\) inside the space of valid densities.
 
 \medskip\hrule\medskip
 
