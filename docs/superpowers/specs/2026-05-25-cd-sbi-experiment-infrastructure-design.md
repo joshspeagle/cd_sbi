@@ -674,7 +674,7 @@ DataFrame.
    |---|---|---|---|
    | Pivot RMSE (interior θ_0) | 0.030 | ≤ 0.05 | ~1.5× manuscript; well above optimization noise, well below 1σ of pivot's marginal scale |
    | Marginal PIT KS | 0.008 | ≤ 0.023 | Equal to marginal noise floor at N=5000 (`1.628/√5000`) — "passes the test" |
-   | Conditional PIT KS (interior θ_0) | 0.011–0.018 | ≤ 0.052 | Per-bin noise floor at N=5000, k=5 (`1.628/√1000`) — "passes the test" |
+   | Conditional PIT KS (interior θ_0) | ~0.01 (bulk; manuscript §8.1) | ≤ 0.052 | Per-bin noise floor at N=5000 with k=5 bins of N/k=1000 each (`1.628/√1000`) — "passes the test". Edge θ_0 (boundary of training proposal) excluded from criterion per manuscript §8.1 "interior is uniformly clean" |
    | Coverage error (interior θ_0) | < 0.01 | ≤ 0.02 | ~2× manuscript; tight enough to catch real regressions, loose enough to absorb seed-to-seed variance |
 
 3. All five methods report `n_params()['total']` within ±10% of each
