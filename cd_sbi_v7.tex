@@ -1150,6 +1150,22 @@ exponential families in \S\ref{sec:5}.
 
 \subsection{Statement}\label{subsec:4.1}
 
+\paragraph{What we are about to prove.}
+Theorem~\ref{thm:strictprop} of Part II gave us a \emph{set} of optimal
+pivots: NF-MLE on \(\mathcal{F}\) selects \(\mathcal{M}_\mathcal{F}\)
+(the calibrated subset of \(\mathcal{F}\)) and nothing else. The
+question Part III answers is: how big is \(\mathcal{M}_\mathcal{F}\)?
+For the location-normal model in 1D, restricted to a natural \(C^1\)
+class, the answer is \emph{singleton}. The unique element is the same
+\(r^*(\theta, X) = \theta - X\) that we wrote down by hand at the end
+of \S\ref{subsec:1.2} --- so the framework, properly architected, picks
+out the classical answer rather than something exotic. The strategy is
+simple: show that any candidate \(r \in \mathcal{M} \cap \mathcal{F}_{C^1}\)
+is, at each fixed \(\theta_0\), a strictly monotone function pushing
+\(\mathcal{N}(\theta_0, 1)\) forward to \(\mathcal{N}(0, 1)\) (the
+calibration condition), then use the rigidity of 1D monotone
+rearrangements to pin it down.
+
 \textbf{Theorem A (Uniqueness, \(C^1\)).} \emph{Let
 \(X \sim \mathcal{N}(\theta, 1)\) on \(\Theta = \mathbb{R}\). Within the
 class} \[
@@ -1160,9 +1176,24 @@ class} \[
 minimizer, \(r = r^*\), with \(H_{r^*}(\theta; X) = \Phi(\theta - X)\)
 --- the Schweder--Hjort UMP-unbiased CD.}
 
-The proof rests on three lemmas.
+The proof rests on three lemmas, each carrying one piece of the
+argument.
 
 \subsection{The three lemmas}\label{subsec:4.2}
+
+\paragraph{Three ingredients.} The proof of Theorem A needs three
+separate facts. Lemma~4.1 is a measure-theoretic uniqueness result:
+between two atomless 1D distributions, there is exactly one strictly
+\emph{monotone-increasing} map that pushes one onto the other (and one
+strictly \emph{monotone-decreasing} map). Lemma~4.2 is a rigidity
+result: among \(C^1\) maps that push a Gaussian onto another Gaussian,
+none are non-monotone --- non-monotone candidates produce a divergence
+in the pushforward density at a critical point, which contradicts the
+finiteness of the target Gaussian density. Lemma~4.3 is the propriety
+half of Theorem~\ref{thm:strictprop} of Part II, specialized to the
+\(C^1\) class: any NF-MLE minimizer is calibrated. The Theorem A proof
+combines them in the order 4.3 (calibration), 4.2 (monotonicity), 4.1
+(closed form).
 
 \textbf{Lemma 4.1 (Monotone transport).} \emph{Let
 \(\theta_0 \in \mathbb{R}\) and \(\psi: \mathbb{R} \to \mathbb{R}\)
@@ -1255,11 +1286,26 @@ autoregressive variant (R2\(^{\mathrm{auto}}\)) used in \S\ref{sec:6}.
 
 \emph{Uniqueness.} Let \(r \in \mathcal{M} \cap \mathcal{F}_{C^1}\). For
 each \(\theta_0 \in \mathbb{R}\), define
-\(\psi_{\theta_0}: X \mapsto r(\theta_0; X)\). By Lemma 4.3,
-\(\psi_{\theta_0}\) pushes \(\mathcal{N}(\theta_0, 1)\) to
-\(\mathcal{N}(0,1)\). By Lemma 4.2 (\(\psi_{\theta_0}\) is \(C^1\) by
-hypothesis), \(\psi_{\theta_0}\) is strictly monotone. By Lemma 4.1,
-\(\psi_{\theta_0}(X) \in \{X - \theta_0,\, \theta_0 - X\}\).
+\(\psi_{\theta_0}: X \mapsto r(\theta_0; X)\). We will pin down
+\(\psi_{\theta_0}\) in three steps.
+
+\emph{Step 1: calibration.} Since \(r\) is in the calibration manifold,
+Lemma~4.3 tells us \(\psi_{\theta_0}\) pushes \(\mathcal{N}(\theta_0, 1)\)
+forward to \(\mathcal{N}(0, 1)\). At this point we know
+\(\psi_{\theta_0}\) is a measure-preserving map between two specified
+Gaussians, but nothing else about its shape.
+
+\emph{Step 2: monotonicity.} The \(C^1\) hypothesis on
+\(\psi_{\theta_0}\) plus the calibration property of Step 1 puts us in
+the hypotheses of Lemma~4.2: \(\psi_{\theta_0}\) is strictly monotone.
+This is the substantive step --- it rules out, e.g., a
+\(\psi_{\theta_0}\) that folds the real line.
+
+\emph{Step 3: pinning down the form.} Lemma~4.1 then applies: the only
+strictly monotone maps pushing \(\mathcal{N}(\theta_0, 1)\) to
+\(\mathcal{N}(0, 1)\) are \(\psi_{\theta_0}(X) = X - \theta_0\) (the
+increasing branch) and \(\psi_{\theta_0}(X) = \theta_0 - X\) (the
+decreasing branch).
 
 \emph{Selecting the direction.} A priori, (R1) does not rule out a
 measurable mixture in which \(\psi_{\theta_0}(X) = X - \theta_0\) on
@@ -1277,6 +1323,21 @@ assumption on \(\rho\) (\S\ref{subsec:2.1}) lifts this from \(\rho\)-a.e.
 \(\theta_0\) to all of \(\mathbb{R}\). \(\blacksquare\)
 
 \subsection{Strengthening to Lipschitz: Theorem A*}\label{subsec:4.4}
+
+\paragraph{Why a separate theorem.}
+Theorem A's hypothesis class is \(\mathcal{F}_{C^1}\): \(r\) is \(C^1\)
+in \(X\) at each fixed \(\theta\). Many architectures used in practice
+--- in particular, vanilla ReLU multilayer perceptrons --- are
+Lipschitz but only \emph{piecewise} \(C^1\): they have non-differentiable
+kinks at the boundaries of the ReLU regions. Theorem A's proof breaks
+in this case, specifically at Lemma~4.2: the pushforward-density
+divergence that produced the contradiction relies on the
+quadratic-or-higher-order vanishing of \(\psi'\) at a critical point,
+which is a \(C^1\) phenomenon. A Lipschitz V-shape gives only a
+\emph{bounded} jump in the pushforward density, not a divergence, so
+\(\psi\) can fold without contradiction. Theorem A* recovers the same
+conclusion in the Lipschitz class but needs to assume the monotonicity
+condition that Lemma~4.2 had been proving for free.
 
 Lemma 4.2 uses \(C^1\) regularity essentially: the contradiction comes
 from a \(|v - v_*|^{-1/2}\) (or faster) divergence of the pushforward
@@ -1380,6 +1441,21 @@ on its support.
 
 \subsection{Theorem C: uniqueness}\label{subsec:5.2}
 
+\paragraph{What we are about to prove, and why the lift is easy.}
+Theorem A pinned down the calibration manifold to a singleton in the
+location-normal case. Theorem C extends the same conclusion to any
+regular one-parameter exponential family with MLR. The proof works
+because the manuscript's three-lemma argument never used anything
+specific about Gaussian shape beyond two facts: the source measure has
+a continuous positive density, and the target measure has a finite
+density. The exponential-family setup gives us both: by sufficiency, we
+can work in \(t = T(X)\) coordinates where the source is
+\(g_{T \mid \theta_0}\) (continuous positive density on its support by
+the hypotheses of \S\ref{subsec:5.1}), the target is still the
+standard Gaussian, and the three lemmas of \S\ref{subsec:4.2} apply
+verbatim. The remarks on Lemma~4.2 (general source) and Lemma~4.3
+(Lipschitz / autoregressive variants) cover exactly this transfer.
+
 \textbf{Theorem C (Lift to exponential families).} \emph{Under the setup
 of \S\ref{subsec:5.1}, within the class
 \(\mathcal{F}^T_{C^1} := \{r : t \mapsto r(\theta_0; T^{-1}(t)) \in C^1 \text{ for each } \theta_0\}\),
@@ -1387,7 +1463,8 @@ we have \(\mathcal{M} \cap \mathcal{F}^T_{C^1} = \{r^*\}\).}
 
 \emph{Proof.} Work in \(t = T(X)\) coordinates. The pushforward density
 \(g_{T \mid \theta_0}(t)\) is continuous and positive on its support
-(D-EF). The three-lemma argument of Theorem A then applies:
+by the hypotheses of \S\ref{subsec:5.1}. The three-lemma argument of
+Theorem A then applies in this t-coordinate system:
 \begin{itemize}
 \tightlist
 \item Lemma 4.3 (Lipschitz / autoregressive remark, \S\ref{subsec:4.2})
@@ -1445,6 +1522,23 @@ object is continuous.
 
 \subsubsection{Randomized PIT}\label{subsubsec:5.7.1}
 
+\paragraph{The intuition.}
+The probability integral transform of \S\ref{subsec:1.2} only works for
+continuous random variables --- the identity \(G(Y) \sim U(0, 1)\) needs
+\(G\) continuous, otherwise \(G(Y)\) lives on the discrete set of CDF
+values and cannot be uniform. So if \(T(X)\) is discrete, no
+deterministic function of \(T(X)\) alone can have the continuous
+calibration target \(\mathcal{N}(0, 1)\). The fix is to add randomness:
+spread each atom of \(T(X)\) across an interval of length equal to that
+atom's probability, using an independent uniform \(U\). Concretely, the
+\(t\)-th atom of \(T(X)\) (with probability mass \(p_\theta(t)\) and
+cumulative \(F_\theta(t^-)\) below it) gets stretched into the
+sub-interval \([F_\theta(t^-),\, F_\theta(t^-) + p_\theta(t)]\), with
+each point in the sub-interval indexed by the value of \(U\). The
+resulting "filled-in" random variable is uniform on \([0, 1]\) by
+construction, even though \(T(X)\) itself is discrete.
+
+\paragraph{The formula.}
 Let \(X \sim P_\theta\) discrete with sufficient statistic \(T(X)\) and
 MLR in \(\theta\). Define \(F_\theta(t) = P_\theta(T \leq t)\),
 \(F_\theta(t^-) = P_\theta(T < t)\), \(p_\theta(t) = P_\theta(T = t)\).
@@ -1463,13 +1557,26 @@ r^*_\mathrm{rand}(\theta; X, U) \;:=\; \Phi^{-1}(1 - V_\theta(X, U)).
 
 \subsubsection{Theorem C* (Discrete uniqueness)}\label{subsubsec:5.7.2}
 
-Uniqueness in the randomized class requires four regularity conditions:
-(R1) monotone in \(\theta\), (R2) invertible in \((X, U)\), (R3\(_U\))
-strict monotone in \(U\) (distinct from (R3) of \S\ref{subsec:4.4}: that
-condition was a uniform lower bound \(|\partial_X r| \ge c > 0\) used in
-the Lipschitz case; (R3\(_U\)) here is the strict-monotone-in-\(U\)
-condition needed inside each \(T\)-atom in the discrete setting), plus a
-new condition:
+\paragraph{What this theorem accomplishes.}
+The continuous-case uniqueness theorems (A, A\(^*\), C) had three
+regularity conditions: (R1) on \(\theta\), (R2) on \(X\), and (when
+needed) (R3) on the Lipschitz Jacobian. In the discrete setting we
+gain a fourth, (R4), to pin down the ordering of \(T\)-atoms relative
+to the auxiliary uniform \(U\). The reason: in the continuous case, the
+calibration condition plus monotonicity-in-\(X\) (from (R1) and (R2)
+together with Lemma~4.2's rigidity) already forces a unique
+\emph{ordering} on \(X\)-space; in the discrete setting, the atoms of
+\(T\) can be \emph{permuted} without breaking calibration or
+within-atom monotonicity-in-\(U\), and (R4) is the condition that rules
+out such permutations.
+
+Uniqueness in the randomized class therefore requires four regularity
+conditions: (R1) monotone in \(\theta\), (R2) invertible in \((X, U)\),
+(R3\(_U\)) strict monotone in \(U\) (distinct from (R3) of
+\S\ref{subsec:4.4}: that condition was a uniform lower bound
+\(|\partial_X r| \ge c > 0\) used in the Lipschitz case; (R3\(_U\))
+here is the strict-monotone-in-\(U\) condition needed inside each
+\(T\)-atom in the discrete setting), plus a new condition:
 
 \begin{itemize}
 \tightlist
@@ -1507,17 +1614,26 @@ order is unconstrained; without (R4), a different tiling that
 interleaves \(T\)-atoms across \(U\) gives an alternative calibrated
 pivot. \(\blacksquare\)
 
-\textbf{Explicit counterexample.} A \(\mathrm{Bin}(1, \theta)\)
-construction is too small to separate (R4) from the other conditions:
-any monotone-in-\(U\) completion of an alternative \(V'_\theta\) on a
-binary support preserves (R4), and any completion that violates (R4)
-breaks (R3\(_U\)) via a downward jump. A \(\mathrm{Bin}(2, \theta)\)
-construction also fails to separate (R4): each of the six permutations
-of \(\{0, 1, 2\}\) other than the canonical one has at least one
-endpoint of the form \(\sum_{t \in S} p_\theta(t)\) for a non-prefix
-subset \(S\), and direct calculation shows none of those endpoint
-functions is non-increasing in \(\theta\) --- so (R1) already rules out
-the swaps before (R4) is even considered.
+\textbf{Why (R4) is genuinely needed: an explicit counterexample.}
+A skeptical reader might suspect that (R4) is redundant given
+(R1), (R2), (R3\(_U\)) --- isn't strict monotonicity in \(U\) enough,
+once we have the rest? The answer is subtle: redundancy holds for
+small atom counts but fails at \(\mathrm{Bin}(3, \theta)\) due to an
+algebraic accident in the binomial coefficients. We work through the
+small cases briefly to show why (R4) is not just decoration, then
+exhibit the counterexample.
+
+A \(\mathrm{Bin}(1, \theta)\) construction is too small to separate
+(R4) from the other conditions: any monotone-in-\(U\) completion of an
+alternative \(V'_\theta\) on a binary support preserves (R4), and any
+completion that violates (R4) breaks (R3\(_U\)) via a downward jump. A
+\(\mathrm{Bin}(2, \theta)\) construction also fails to separate (R4):
+each of the six permutations of \(\{0, 1, 2\}\) other than the
+canonical one has at least one endpoint of the form
+\(\sum_{t \in S} p_\theta(t)\) for a non-prefix subset \(S\), and direct
+calculation shows none of those endpoint functions is non-increasing
+in \(\theta\) --- so (R1) already rules out the swaps before (R4) is
+even considered.
 
 The smallest model where (R4) is genuinely independent is
 \(\mathrm{Bin}(3, \theta)\), with atoms
