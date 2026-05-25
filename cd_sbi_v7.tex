@@ -195,13 +195,18 @@ data-dependent distribution function \(H(\cdot; X)\) on \(\Theta\) whose
 \(\alpha\)-quantile is the upper endpoint of an exact one-sided
 \(\alpha\)-confidence interval. The modern theory traces back through
 Fisher's fiducial inference (1930), Cox (1958), and Efron (1993, 1998),
-to the synthesis in Schweder \& Hjort (2016). The defining property is
+to the synthesis in Schweder \& Hjort (2016). Schweder--Hjort
+(2016, Def.~3.1) require two properties: (i) \(H(\cdot; X)\) is a CDF
+on \(\Theta\) for each \(X\), and (ii) the calibration condition
 \textbf{exact coverage}: \[
 H(\theta_0; X) \;\sim\; U(0,1) \quad \text{when } X \sim P_{\theta_0}, \text{ for every } \theta_0 \in \Theta.
-\] Equivalently: \(H(\theta_0; X)\) is the \emph{probability integral
-transform} (PIT) --- the mapping that converts any continuous random
-variable into a uniform \((0,1)\) variable via its own CDF --- applied
-to a correctly chosen \emph{pivot}.
+\] Property (i) is enforced architecturally in this paper by (R1)
+(\S\ref{subsec:2.2}); property (ii) is what NF-MLE drives the network
+toward. Equivalently to (ii): \(H(\theta_0; X)\) is the
+\emph{probability integral transform} (PIT) --- the mapping that
+converts any continuous random variable into a uniform \((0,1)\)
+variable via its own CDF --- applied to a correctly chosen
+\emph{pivot}.
 
 \textbf{Astronomer-friendly comparison.} A CD plays the same role as a
 posterior: a distribution-valued summary of the evidence for \(\theta\).
@@ -223,9 +228,11 @@ The difference is what calibration means.
   \(\theta_0\)}, the data being random.
 \end{itemize}
 
-In regular one-parameter models the optimal (uniformly most powerful
-unbiased, ``UMPU'') CD is explicit and unique. For
-\(X \sim \mathcal{N}(\theta, 1)\) it is \[
+In regular one-parameter exponential families with monotone likelihood
+ratio in a continuous sufficient statistic, the optimal (uniformly most
+powerful unbiased, ``UMPU'') CD is explicit and unique (the precise
+hypotheses are stated in \S\ref{subsec:5.1}; the location-normal model
+is the simplest case). For \(X \sim \mathcal{N}(\theta, 1)\) it is \[
 H^*(\theta; X) = \Phi(\theta - X),
 \] where \(\Phi\) is the standard normal CDF. Check: under
 \(X \sim \mathcal{N}(\theta_0, 1)\) one has \(\theta_0 - X = -Z\) with
@@ -264,11 +271,14 @@ that its distribution under the truth is exactly
   \(H_r(\theta_0; X) \sim U(0,1)^d\). This is a \emph{frequentist}
   property --- no prior, no expectation over \(\theta\).
 \item
-  \textbf{(C2) Monotonicity in \(\theta\).} For each fixed \(X\) and
-  each coordinate \(k\), \(\theta_k \mapsto r_k(\theta; X)\) is strictly
-  increasing (with autoregressive conditioning in \(d > 1\); see \S\ref{sec:6}).
-  This ensures connected level sets, so confidence regions are
-  well-defined geometric objects.
+  \textbf{(C2) Monotonicity in \(\theta\).} In 1D,
+  \(\theta \mapsto r(\theta; X)\) is strictly increasing. In \(d > 1\),
+  \(\theta_k \mapsto r_k(\theta; X)\) is strictly increasing at fixed
+  \(\theta_{<k}\) and \(X\) (the autoregressive form developed in
+  \S\ref{sec:6}). The autoregressive form is what makes the joint
+  \(\Phi_d(r(\cdot; X))\) a Knothe--Rosenblatt-type transport with
+  connected level sets; coordinate-wise monotonicity alone (with all
+  other \(\theta_j\) held fixed) is insufficient in \(d > 1\).
 \end{itemize}
 
 \textbf{Subordinate objectives the rest of the document develops in
@@ -305,8 +315,13 @@ Demarcate open problems & \S\ref{sec:11} \\
 Note carefully: (C1) is a \emph{frequentist} property --- it makes no
 reference to a prior. The training proposal \(\rho\) on \(\Theta\) used
 to draw simulations is purely a sampling distribution; in the population
-limit the CD pivot does not depend on \(\rho\), provided \(\rho\) has
-full support on the region of inferential interest.
+limit, \emph{provided the architectural class \(\mathcal{F}\) contains
+the calibration manifold} and \(\rho\) has full support on the region of
+inferential interest, the CD pivot does not depend on \(\rho\). Under
+misspecification or with an under-parameterized architecture, the
+population minimizer of NF-MLE is the \(\rho\)-weighted KL projection
+onto \(\mathcal{F}\) and \emph{does} depend on \(\rho\); see
+\S\ref{subsec:11.4}.
 
 \subsection{Scope of this document}\label{subsec:1.4}
 
@@ -356,17 +371,25 @@ A \textbf{pivot} in the sense used here is a measurable function
 \begin{itemize}
 \tightlist
 \item
-  \textbf{(R1) Monotonicity in \(\theta\).} For
-  \(\rho \otimes P_\theta\)-a.e. \(X\) and each coordinate \(k\), the
-  map \(\theta_k \mapsto r_k(\theta; X)\) is strictly increasing when
-  other components are held fixed (autoregressively in \(d > 1\); see
-  \S\ref{sec:6}). In 1D this is just: \(\theta \mapsto r(\theta; X)\) is strictly
-  increasing.
+  \textbf{(R1) Monotonicity in \(\theta\).} In 1D,
+  \(\theta \mapsto r(\theta; X)\) is strictly increasing for every
+  \(X\). In \(d > 1\), the autoregressive form
+  (R1\(^\mathrm{auto}\), \S\ref{sec:6}) applies: \(r_k\) depends on
+  \(\theta\) only through \(\theta_{\le k}\), and
+  \(\theta_k \mapsto r_k(\theta; X)\) is strictly increasing at fixed
+  \(\theta_{<k}, X\). The increasing-rather-than-decreasing direction is
+  a sign convention (Lemma 4.1 admits both branches; cf.~\S\ref{subsec:4.3});
+  the convention pins the orientation of \(H_r\) so that larger \(H_r\)
+  corresponds to larger \(\theta\).
 \item
   \textbf{(R2) Invertibility in \(X\).} For each fixed \(\theta\), the
-  map \(X \mapsto r(\theta; X)\) is a \(C^1\) (or Lipschitz, a.e.
-  differentiable) diffeomorphism onto its image. Equivalently,
-  \(\partial r / \partial X\) has full rank a.e.
+  map \(X \mapsto r(\theta; X)\) is a \(C^1\) diffeomorphism onto its
+  image, with full-rank Jacobian everywhere. The Lipschitz extension
+  needed for ReLU-network arguments is handled separately in
+  \S\ref{subsec:4.4} via the auxiliary condition (R3): full-rank a.e.\ is
+  \emph{not} equivalent to injectivity for Lipschitz maps, so
+  (R2)-by-itself is the \(C^1\) statement and the Lipschitz case requires
+  the uniform lower bound \(|\partial_X r| \ge c > 0\).
 \end{itemize}
 
 The \textbf{induced CD} is \[
@@ -406,9 +429,19 @@ sets are connected or interpretable. Monotonicity in \(\theta\) ensures:
   function is the upper endpoint of a one-sided confidence interval.
 \end{itemize}
 
-Without (R1), the calibration manifold has a \(\mathbb{Z}_2^d\)
-ambiguity (sign flips in each coordinate of \(r\)), and the induced
-``confidence sets'' can be disconnected. (R1) eliminates this.
+Without (R1), the calibration manifold is large: any composition of
+\(r\) with a measure-preserving bijection of \(\mathcal{N}(0, I_d)\) to
+itself --- sign flips in each coordinate, non-monotone measure-preserving
+rearrangements in 1D, and the entire orthogonal group \(O(d)\) in
+\(d > 1\) (since \(\mathcal{N}(0, I_d)\) is rotation-invariant) --- stays
+in \(\mathcal{M}\). The ambiguity is infinite-dimensional in general; see
+\S\ref{subsec:3.3} for the explicit characterization. (R1) in 1D
+eliminates the sign-flip and non-monotone-rearrangement ambiguities. In
+\(d > 1\), (R1) eliminates the coordinate-wise sign-flip ambiguity but
+\emph{not} the rotational ambiguity --- the autoregressive triangular
+structure of \S\ref{sec:6} is what selects the unique Knothe--Rosenblatt
+representative within the rotation orbit; see \S\ref{subsec:11.1} for
+the related open problem outside the autoregressive class.
 
 \subsection{The role of (R2): why monotonicity in \(X\) is needed}\label{subsec:2.4}
 
@@ -419,15 +452,19 @@ change-of-variables formula valid: \[
 the sum over preimages when \(X \mapsto r\) is not bijective), and any
 loss built on it is mis-specified.
 
-In \S\ref{sec:3} we will see that NF-MLE applied to a non-bijective \(r\) has
-\emph{spurious} sub-optima below the entropy of the true model --- the
-model gains apparent likelihood by folding \(X\)-space, inflating
-\(|\det \partial r / \partial X|\) in regions where preimages collide.
-Note that under folding, \(\hat p_r\) does \emph{not} integrate to one
-in \(X\) at fixed \(\theta\), so there is no lower bound on
-\(-\log \hat p_r\) from the true conditional entropy; the loss can dip
-arbitrarily far below the true model's NF-MLE value. The empirical
-demonstration is in \S\ref{subsec:8.4}. Enforcing (R2) architecturally fixes this.
+When \(r\) is not injective in \(X\) at fixed \(\theta\), the
+change-of-variables formula requires summing over the multiple preimages
+of each value, but the surrogate \(\hat p_r\) above keeps only one
+preimage's contribution. The result fails to integrate to one in \(X\)
+at fixed \(\theta\); consequently \(-\log \hat p_r\) is not bounded
+below by the conditional entropy of \(X \mid \theta\) (the Gibbs
+inequality requires a normalized density), and for architectures that
+admit unbounded \(|\det \partial r / \partial X|\) in folded regions ---
+e.g.\ ReLU / UMNN networks with no built-in monotonicity --- the NF-MLE
+loss has no lower bound at all. The formal version is in
+\S\ref{subsec:3.5}; the empirical demonstration in \S\ref{subsec:8.4}
+(where the autograd-Jacobian ablation attains loss 0.56 against the
+true model's 0.88). Enforcing (R2) architecturally fixes this.
 
 \medskip\hrule\medskip
 
