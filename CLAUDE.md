@@ -8,7 +8,7 @@ Notes for Claude Code agents working in this repository.
 **calibrated confidence distribution** (CD) — a frequentist alternative to
 the Bayesian posterior / likelihood / ratio targets of mainstream SBI
 methods (NPE, NLE, NRE). The current source of truth is the working draft
-`cd_sbi_v6.tex`.
+`cd_sbi_v7.tex`.
 
 Core idea, in brief:
 
@@ -27,7 +27,7 @@ scaling beyond the toy validation experiments currently in the draft.
 
 ## Current state of the repo
 
-- `cd_sbi_v6.tex` — the manuscript. Treat as broad context, **not** as
+- `cd_sbi_v7.tex` — the manuscript. Treat as broad context, **not** as
   ground truth. Rigorous checking of the proofs, definitions, and
   empirical numbers is itself a planned task; flag inconsistencies rather
   than paper over them.

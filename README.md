@@ -10,14 +10,14 @@ ratio.
 ## Status
 
 Early stage. This repository currently contains a working draft of the
-theory and a small set of validation experiments (`cd_sbi_v6.tex`).
+theory and a small set of validation experiments (`cd_sbi_v7.tex`).
 Nothing here should be treated as final; rigorous verification of the
 math and empirical claims is itself ongoing work. Code, broader
 experiments, and scaling studies are forthcoming.
 
 ## Contents
 
-- `cd_sbi_v6.tex` — working draft: framework, theorems, and small-scale
+- `cd_sbi_v7.tex` — working draft: framework, theorems, and small-scale
   experiments. Build with `pdflatex` (no bibliography backend required).
 - `CLAUDE.md` — orientation notes for Claude Code agents working in this
   repo.
