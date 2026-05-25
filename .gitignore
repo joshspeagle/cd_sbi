@@ -35,3 +35,12 @@ env/
 # Local config
 .env
 .env.local
+
+# CD-SBI experiment outputs
+outputs/
+
+# Python build artifacts
+*.egg-info/
+__pycache__/
+.pytest_cache/
+.coverage

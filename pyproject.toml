@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cdsbi"
+version = "0.0.1"
+description = "Confidence-distribution SBI experiment infrastructure"
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.1",
+    "sbi>=0.22",
+    "nflows>=0.14",
+    "hydra-core>=1.3",
+    "numpy>=1.24",
+    "scipy>=1.11",
+    "pandas>=2.0",
+    "pyarrow>=14.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4", "pytest-xdist>=3.3"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "intensive: full-budget replication tests; opt-in via `pytest -m intensive`",
+]
+addopts = "-m 'not intensive'"
