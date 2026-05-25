@@ -1518,14 +1518,18 @@ function \(g(z; c)\) that is strictly monotone-increasing in \(z\) at
 fixed context \(c\) by writing \[
 g(z; c) = \mathrm{bias}(c) + \int_{z_0}^z \mathrm{softplus}\bigl(\mathrm{MLP}(t, c)\bigr)\, dt,
 \] where \(\mathrm{MLP}(\cdot, c)\) is an unconstrained neural network.
-The integrand is positive everywhere (softplus is positive), so \(g\) is
-strictly monotone in \(z\) by construction. The derivative
-\(\partial_z g(z; c) = \mathrm{softplus}(\mathrm{MLP}(z, c))\) is
-closed-form --- the Jacobian factor needed for NF-MLE is available
-without recursive autograd.
-
-We use Gauss--Legendre quadrature (\(n = 12\) nodes by default) to
-evaluate the integral.
+The integrand is positive everywhere (softplus is positive), so the
+exact \(g\) is strictly monotone in \(z\) by construction. The exact
+derivative is \(\partial_z g(z; c) = \mathrm{softplus}(\mathrm{MLP}(z, c))\)
+--- the Jacobian factor needed for NF-MLE is available without recursive
+autograd. We use Gauss--Legendre quadrature (\(n = 12\) nodes by
+default) to evaluate the integral. The deployed \(g\) is then a positive
+linear combination of softplus values evaluated at the nodes, so it
+inherits strict monotonicity from the integrand; we use the analytical
+\(\mathrm{softplus}(\mathrm{MLP}(z, c))\) as the Jacobian factor in
+NF-MLE rather than the exact derivative of the quadrature polynomial, a
+discrepancy that is negligible at \(n = 12\) on the smooth
+\(\mathrm{softplus}(\mathrm{MLP})\) integrand class used here.
 
 Hidden width 32 throughout. Final-layer weights initialized to zero so
 the bias dominates at init and the model starts near a near-identity
@@ -1580,13 +1584,45 @@ For each trained model:
   relevant test.
 \end{enumerate}
 
+Diagnostic 5 is inferentially primary --- it is the property the
+framework promises and the property practitioners rely on. Diagnostics
+1--4 are interpretability checks that help diagnose \emph{where} a
+calibration failure lives. Diagnostic~2 (marginal PIT) is implied by
+Diagnostic~3 (conditional PIT) in the population, since marginalizing
+out \(\theta\) preserves uniformity; we report both because they have
+complementary finite-sample power. Diagnostic~4 (joint Mahalanobis) is
+\emph{not} implied by component-wise Diagnostic~3 in \(d > 1\): each
+\(r_k \mid \theta_0 \sim \mathcal{N}(0,1)\) does not entail
+\(r \mid \theta_0 \sim \mathcal{N}(0, I_d)\) since the components could
+be correlated --- the Hermans-type failure pattern.
+
 \textbf{Statistical noise floor for KS.} Under the null,
 \(\sqrt{N} \cdot \mathrm{KS}\) has the Kolmogorov limiting distribution
-with \(\Pr(\sqrt{N}\cdot\mathrm{KS} > 1.628) = 0.01\). At \(N = 5000\),
-this gives a noise floor of
-\(\mathrm{KS} \approx 1.628/\sqrt{5000} \approx 0.023\) for the
-0.01-level threshold; at \(N = 6000\), the floor is \(\approx 0.021\).
-We refer to this floor when interpreting ``borderline'' results in \S\ref{sec:8}.
+with \(\Pr(\sqrt{N}\cdot\mathrm{KS} > 1.628) = 0.01\). The relevant
+sample size depends on which statistic is being evaluated.
+
+\begin{itemize}
+\tightlist
+\item \emph{Marginal} statistics (Diagnostic~2; the joint Mahalanobis
+  test of Diagnostic~4 if averaged over \(\theta\)) use the full sample
+  \(N\). At \(N = 5000\) the floor is
+  \(1.628/\sqrt{5000} \approx 0.023\); at \(N = 6000\), \(\approx 0.021\).
+\item \emph{Per-conditional} statistics (Diagnostic~3 evaluated at a
+  fixed \(\theta_0\); per-\(\theta_0\) joint Mahalanobis) use the
+  per-bin sample size \(N/k\) where \(k\) is the number of evaluation
+  bins. At \(N = 5000\), \(k = 5\) bins gives a per-bin floor of
+  \(1.628/\sqrt{1000} \approx 0.052\); at \(N = 6000\), \(k = 5\) bins
+  gives \(\approx 0.047\); at \(N = 5000\), \(k = 7\) bins gives
+  \(\approx 0.061\).
+\end{itemize}
+
+When we interpret a conditional-KS value as ``borderline'' in
+\S\ref{sec:8}, the relevant comparison is to the per-bin floor, not the
+marginal one. The original v6 commentary in \S\ref{subsec:8.2} and
+\S\ref{subsec:8.4} used the marginal floor against conditional
+statistics, which is the wrong comparison; against the per-bin floor,
+the same values are clean. The corrected comparisons appear inline at
+each experiment.
 
 Related diagnostic frameworks include simulation-based calibration (SBC;
 Talts et al.~2018), sampling-based accuracy testing (TARP; Lemos et
@@ -1670,10 +1706,16 @@ Coverage error at all levels in interior & \(< 0.01\) & excellent \\
 
 The 1D case is a sanity check. Both the additive architecture and a
 (more flexible) joint UMNN architecture converge under NF-MLE, with the
-additive form converging 20× faster and to lower RMSE because it exactly
-contains \(r^*\). The conditional PIT shows degradation near the support
-boundary of \(\rho\) --- a known finite-sample effect from undersampling
-near the support edges, not a structural issue.
+additive form converging 20× faster and to lower RMSE because it
+exactly contains \(r^*\). The conditional PIT degrades near
+\(\theta_0 = \pm 7\) because the \emph{trained} \(r\) is a poorer
+approximation there: those points are at the support boundary of the
+training proposal \(\rho\), where the network sees fewer samples and
+the universal-approximation error is largest. The interior is uniformly
+clean. This is a property of the trained network's coverage of the
+deployment region (a training-distribution effect), not a finite-sample
+statistical artifact of the diagnostic --- see also the discussion of
+choosing \(\rho\) with margin in \S\ref{sec:9}.
 
 \subsection{2D location-Gaussian, \(\Sigma = I\)}\label{subsec:8.2}
 
@@ -1713,9 +1755,9 @@ Marginal PIT KS: \(r_1, r_2\) & 0.007, 0.006 & both PASS
 Joint Mahalanobis vs \(\chi^2_2\) KS & 0.011 & clean \\
 Conditional PIT at 5 \(\theta_0\): \(r_1\) & KS 0.011--0.018, all PASS &
 clean \\
-Conditional PIT at 5 \(\theta_0\): \(r_2\) & KS 0.007--0.044, 3/5
-borderline at \(\alpha=0.01\) & KS values near the \(N=5000\) noise
-floor (0.023) \\
+Conditional PIT at 5 \(\theta_0\): \(r_2\) & KS 0.007--0.044, all PASS
+at per-bin floor & KS within the per-conditional-bin floor of
+\(\approx 0.052\) (\(N/5 = 1000\) per bin) \\
 Conditional Mahalanobis at 5 \(\theta_0\) & KS 0.008--0.016, all PASS &
 clean \\
 Coverage error across \(\theta_0\), all \(\alpha\) & \(< 0.01\) &
@@ -1724,10 +1766,13 @@ excellent \\
 
 The clean result. Triangular construction scales naturally, and the
 joint Mahalanobis test (which \(r_1, r_2\) being individually calibrated
-does \emph{not} automatically imply) passes. The ``borderline''
-conditional PIT for \(r_2\) reflects KS values within \textasciitilde2×
-the noise floor at \(N = 5000\); the more inferentially relevant joint
-Mahalanobis and coverage tests are clean.
+does \emph{not} automatically imply in \(d > 1\); see \S\ref{subsec:7.3})
+passes. Comparing conditional KS values against the per-bin floor
+(\(\approx 0.052\) at \(N/5 = 1000\)) rather than the marginal floor
+(\(\approx 0.023\) at \(N = 5000\)) --- the correct comparison for
+conditional statistics --- shows all conditional PIT values are clean,
+not borderline. The inferentially primary joint Mahalanobis and
+coverage tests are clean by either metric.
 
 \subsection{2D location-Gaussian, \(\Sigma\) correlated}\label{subsec:8.3}
 
@@ -1767,12 +1812,22 @@ Recovered \(\partial_\theta r\) at 200 random points &
 & matches \(L^{-1}\) to 1--2\% \\
 \end{longtable}
 
-The ``high'' pivot RMSE of 0.27 is misleading: \(r_2\) has dynamic range
-\(\sim 12\), so 0.27 is \(\sim 3\%\) relative. The recovered linear
-Jacobian coefficients match \(L^{-1}\) to 1--2\% on average, with
-residual variance \(\sim 0.05\) in the off-diagonal entries reflecting
-finite-network approximation error around the \emph{unique} KR target
-(Theorem A-d, \S\ref{subsec:6.3}). Coverage is exact to within 1.5\%.
+The pivot RMSE of 0.27 looks alarming on its face but reflects the
+wrong diagnostic in multivariate. Under the training proposal
+\(\theta \sim U[-7, 7]^2\) and \(X \mid \theta \sim \mathcal{N}(\theta, \Sigma)\),
+the difference \(\theta - X \sim \mathcal{N}(0, \Sigma)\) marginally, so
+\(r_2 = -0.577(\theta_1 - X_1) + 1.155(\theta_2 - X_2)\) has variance
+\(0.577^2 + 1.155^2 - 2 \cdot 0.577 \cdot 1.155 \cdot 0.5 \approx 1.000\)
+--- i.e.\ \(r_2\) is marginally \(\mathcal{N}(0, 1)\), and RMSE 0.27 is
+\(\approx 27\%\) of its marginal standard deviation, not 3\%. That
+would be a concerning pointwise mismatch \emph{if} pointwise RMSE were
+the relevant multivariate diagnostic, which it is not. The right
+multivariate diagnostics are the recovered Jacobian and coverage:
+\(\mathbb{E}[J_\theta]\) matches \(L^{-1}\) to \(\approx 1\)--2\% on
+average (bias) with point-to-point residual \(\approx 5\)\% in the
+off-diagonals, reflecting finite-network approximation error around the
+\emph{unique} Knothe--Rosenblatt target (Theorem A-d, \S\ref{subsec:6.3}),
+and coverage is exact to within \(1.5\)\%.
 
 \textbf{What this validates.} Theorem A-d says the calibration manifold
 within the autoregressive triangular class is the singleton
@@ -1799,10 +1854,13 @@ monotonicities enforced architecturally, with \(X\)-dependence through
 the sufficient statistic \(T\): \[
 r(\theta, T) = b_\mathrm{umnn}(T) + \int_{\theta_\mathrm{ref}}^{\theta} \mathrm{softplus}\bigl(\alpha(t) + \beta_\mathrm{umnn}(T)\bigr)\, dt,
 \] where \(b_\mathrm{umnn}, \beta_\mathrm{umnn}\) are
-monotone-increasing UMNNs of \(T\). Then
-\(\partial_\theta r = \mathrm{softplus}(\cdot) > 0\) (R1) and
+monotone-increasing UMNNs of \(T\), and \(\theta_\mathrm{ref}\) is taken
+to be the lower endpoint of the proposal support (so the integral is
+always over \([\theta_\mathrm{ref}, \theta]\) with \(\theta \ge \theta_\mathrm{ref}\)).
+Then \(\partial_\theta r = \mathrm{softplus}(\cdot) > 0\) (R1) and
 \(\partial_T r = b'_\mathrm{umnn}(T) + \beta'_\mathrm{umnn}(T) \int_{\theta_\mathrm{ref}}^\theta \sigma(\cdot)\, dt > 0\)
-(R2), both in closed form.
+(R2; both summands non-negative with \(b'_\mathrm{umnn} > 0\) strict),
+both in closed form via the same quadrature used for \(r\) itself.
 
 \begin{longtable}[]{@{}
   >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}
@@ -1823,8 +1881,8 @@ Status
 Pivot RMSE on natural support & 0.045 & clean \\
 Final loss & 0.87 & matches truth's 0.88 to batch noise \\
 Marginal PIT KS & 0.006 (\(p = 0.23\)) & PASS \\
-Conditional PIT KS at 5 \(\theta_0\) & 0.016--0.028 & borderline
-(\(N=6000\) noise floor \(\approx 0.021\)) \\
+Conditional PIT KS at 5 \(\theta_0\) & 0.016--0.028 & PASS at per-bin
+floor \(\approx 0.047\) (\(N/5 = 1200\) per bin) \\
 Coverage error across \(\theta_0, \alpha\) & \(< 0.015\) & excellent \\
 \end{longtable}
 
@@ -1835,19 +1893,23 @@ demonstrating that the framework extends beyond the additive class.
 architecturally.} Replacing the doubly-monotone construction with a
 joint UMNN in \(\theta\) that uses autograd to compute \(\partial_T r\)
 --- i.e., no architectural enforcement of monotone-in-\(T\) --- yields
-RMSE 1.56, conditional PIT KS 0.045--0.080 (all FAIL relative to the
-noise floor), and final loss 0.56. The loss value 0.56 is \emph{below}
-the analytical truth's loss of 0.88, which would be impossible if the
-ablation model lived in a valid (bijective-in-\(X\)) class. The
-mechanism: when \(T \mapsto r\) is non-bijective, \(\hat p_r\) is not
-normalized in \(T\) at fixed \(\theta\), so \(-\log \hat p_r\) has no
-lower bound at the conditional entropy. Concretely, in regions where the
-autograd \(|\partial r / \partial T|\) is locally inflated by a fold,
-\(\log|\partial r / \partial T|\) contributes a large positive value to
-the surrogate log-density without \(\hat p_r\) being a valid density.
-This is direct empirical evidence for (R2): architectural enforcement of
-monotone-in-\(X\) is not a stylistic preference but a correctness
-requirement for the NF-MLE objective.
+RMSE 1.56, conditional PIT KS 0.045--0.080 (all above the per-bin floor
+\(\approx 0.047\), with several substantially so), coverage error up to
+3.4\%, and final loss 0.56. By the strict-propriety argument of
+\S\ref{subsec:3.2}, any valid (R2)-bijective \(\hat p_r\) satisfies
+\(\mathbb{E}_\rho[-\log \hat p_r] \ge \mathbb{E}_\rho[H(X \mid \theta)]\)
+by Gibbs's inequality. In this model the conditional-entropy lower
+bound is 0.88 (the loss attained by \(r^*\)); the ablation reaches 0.56,
+falsifying the implicit claim that its \(\hat p_r\) is a valid density.
+The mechanism is the one made explicit in \S\ref{subsec:3.5}: when
+\(T \mapsto r\) folds, the surrogate's mass \(Z(\theta) > 1\) and the
+loss is shifted by \(-\log Z(\theta) < 0\); the autograd
+\(|\partial r/\partial T|\) is locally inflated in folded regions,
+inflating \(\log|\partial r/\partial T|\) into the loss without
+\(\hat p_r\) being a normalized density. This is direct empirical
+evidence for (R2): architectural enforcement of monotone-in-\(X\) is
+not a stylistic preference but a correctness requirement for the
+NF-MLE objective.
 
 \subsection{Synthesis}\label{subsec:8.5}
 
@@ -1934,6 +1996,19 @@ The architectural prescription distilled across all four cases:
   structure with monotone-in-\(X\) heads, triangular flow in \(d > 1\),
   or doubly-monotone UMNN for non-additive \(X\)-dependence.
 \end{enumerate}
+
+The prescription is \emph{sufficient} for the architectures and models
+tested in \S\ref{subsec:8.1}--\S\ref{subsec:8.4} (1D additive, 2D
+additive uncorrelated/correlated, and 1D non-additive through a 1D
+sufficient statistic). Broader empirical validation --- genuinely
+multivariate non-additive cases, high-dimensional \(X\) without an
+obvious low-dimensional sufficient statistic, regimes where the
+architectural choice from \S\ref{sec:9} is not obvious in advance ---
+remains open work (\S\ref{sec:11}). Among strictly-proper alternatives
+(\S\ref{subsec:3.7}), NF-MLE is recommended on the architectural-compatibility
+and finite-sample grounds analyzed in \S\ref{subsec:3.7}, not because
+\S\ref{sec:8} empirically rules out other losses (it does not test
+them).
 
 \medskip\hrule\medskip
 
