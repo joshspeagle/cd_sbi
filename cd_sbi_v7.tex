@@ -1229,14 +1229,27 @@ with \(d\)-dim \(r\)). We work in the class of pivots of the form
 \tightlist
 \item
   \textbf{(R1\(^\mathrm{auto}\)) Autoregressive monotonicity in
-  \(\theta\):} \(r_k\) depends on \(\theta\) only through
-  \(\theta_{\le k}\), and \(\theta_k \mapsto r_k\) is strictly
-  increasing at fixed \(\theta_{<k}, X\).
+  \(\theta\):} \emph{(dependence)} \(r_k\) is a measurable function of
+  \((\theta_{\le k}, X)\) only; \emph{(monotonicity)} at fixed
+  \(\theta_{<k}, X\), the map \(\theta_k \mapsto r_k\) is strictly
+  increasing.
 \item
   \textbf{(R2\(^\mathrm{auto}\)) Autoregressive monotonicity in \(X\):}
-  \(r_k\) depends on \(X\) only through \(X_{\le k}\), and
-  \(X_k \mapsto r_k\) is strictly monotone at fixed \(\theta, X_{<k}\).
+  \emph{(dependence)} \(r_k\) is a measurable function of
+  \((\theta, X_{\le k})\) only; \emph{(monotonicity)} at fixed
+  \(\theta, X_{<k}\), the map \(X_k \mapsto r_k\) is strictly monotone
+  with a consistent sign across coordinates (we use the convention
+  \(\partial_{X_k} r_k < 0\), matching the KR map
+  \(r_k^{\mathrm{KR}} = \Phi^{-1}(1 - F_k^{(\theta)}(X_k \mid X_{<k}))\)).
 \end{itemize}
+
+Both clauses of (R2\(^\mathrm{auto}\)) are load-bearing: the
+\emph{dependence} clause is what makes \(\partial_X r\) lower-triangular
+(\S\ref{subsec:6.2}) and \(\sigma(\theta, X_{<k}) = \sigma(\theta, r_{<k})\)
+(used in the induction of \S\ref{subsec:6.3}); the \emph{monotonicity}
+clause is what makes the conditional pushforward of \(X_k\) under
+\(r_k\) a measure-preserving rearrangement onto \(\mathcal{N}(0,1)\),
+the input to the Lemma~4.2 rigidity argument.
 
 (R1\(^\mathrm{auto}\)) and (R2\(^\mathrm{auto}\)) are the autoregressive
 specializations of (R1) and (R2). (R1\(^\mathrm{auto}\)) implies the
@@ -1260,9 +1273,14 @@ This class admits at least two practical parameterizations:
 \item
   \textbf{Doubly-monotone UMNN form (non-additive interactions, \S\ref{subsec:8.4}):}
   \[r_k(\theta, X) = b_k(X_k;\, X_{<k}) \;+\; \int_{\theta_{k,\mathrm{ref}}}^{\theta_k} \mathrm{softplus}\bigl(\alpha_k(t;\, \theta_{<k}, X_{<k}) + \beta_k(X_k;\, X_{<k})\bigr)\, dt,\]
-  which is monotone in both \(\theta_k\) (by positivity of the
-  integrand) and \(X_k\) (by appropriate UMNN sub-structure on \(b_k\)
-  and \(\beta_k\)).
+  monotone in \(\theta_k\) by positivity of the softplus integrand
+  (giving R1\(^\mathrm{auto}\)). For monotonicity in \(X_k\) (R2\(^\mathrm{auto}\)),
+  we further require that \(b_k\) is a UMNN in \(X_k\) and that
+  \(\beta_k\) is monotone non-decreasing in \(X_k\) (also implemented as
+  a UMNN, or constant in \(X_k\)). Then
+  \(\partial_{X_k} r_k = \partial_{X_k} b_k + \int \mathrm{softplus}'(\cdot)\,\partial_{X_k}\beta_k\, dt\)
+  is a sum of non-negative terms with the first strictly positive, so
+  monotonicity holds.
 \end{enumerate}
 
 Both forms satisfy (R1\(^\mathrm{auto}\)) and (R2\(^\mathrm{auto}\));
@@ -1274,18 +1292,29 @@ In either parameterization, both Jacobians are lower-triangular by
 construction: \[
 \bigl[\partial_\theta r\bigr]_{k\ell} = \begin{cases} \partial_{\theta_k} r_k > 0 & k = \ell \\ \text{(free)} & \ell < k \\ 0 & \ell > k \end{cases}
 \qquad
-\bigl[\partial_X r\bigr]_{k\ell} = \begin{cases} \mathrm{sgn} \cdot \partial_{X_k} r_k & k = \ell \\ \text{(free)} & \ell < k \\ 0 & \ell > k \end{cases}
-\] (with a consistent sign convention on \(\partial_X r\) across
-coordinates). The determinant is the product of diagonals, and \[
-\log\bigl|\det \partial_X r\bigr| \;=\; \sum_{k=1}^{d} \log \bigl|\partial_{X_k} r_k\bigr|,
-\] all closed-form from the UMNN positive integrand. No
+\bigl[\partial_X r\bigr]_{k\ell} = \begin{cases} \partial_{X_k} r_k < 0 & k = \ell \\ \text{(free)} & \ell < k \\ 0 & \ell > k \end{cases}
+\] (sign convention on the \(X\)-diagonal: negative throughout, matching
+\(\partial_{X_k} r_k^{\mathrm{KR}} = -1/\sigma_k(\theta, X_{<k}) < 0\)).
+The determinant is the product of diagonals, and \[
+\log\bigl|\det \partial_X r\bigr| \;=\; \sum_{k=1}^{d} \log \bigl|\partial_{X_k} r_k\bigr|.
+\] For the \emph{additive} parameterization, \(\partial_{X_k} r_k = -\partial_{X_k} b_k\),
+closed-form from the UMNN's softplus integrand. For the
+\emph{doubly-monotone} parameterization, \(\partial_{X_k} r_k\) involves
+the integral \(\int \mathrm{softplus}'\,\partial_{X_k}\beta_k\,dt\),
+which requires the same Gauss--Legendre quadrature already used for the
+\(\theta\)-integral evaluating \(r_k\). In both cases, no
 autograd-on-autograd is needed; this is essential for stable training in
 \(d > 1\).
 
-\textbf{Connected CD level sets.} \(r\) is monotone-increasing in
-\(\theta_k\) at fixed \(\theta_{<k}\), so \(H_r(\cdot; X)\) has
-connected level sets in the natural autoregressive sense. Confidence
-sets via the chi-square inversion are well-defined.
+\textbf{Connected CD level sets.} Under (R1\(^\mathrm{auto}\)) and
+\(C^1\) regularity, the sub-level set
+\(\{\theta : \|r(\theta; X)\|^2 \le c\}\) is the image of a continuous
+autoregressive interval-valued selection (each
+\(\theta_k\)-slice at fixed \(\theta_{<k}\) is an interval by strict
+monotonicity, with endpoints continuous in \(\theta_{<k}\) by \(C^1\)
+regularity), hence connected as a subset of \(\mathbb{R}^d\). Confidence
+sets via the chi-square inversion are therefore well-defined geometric
+objects.
 
 \textbf{Linear scaling in \(d\).} All operations cost \(O(d)\) per
 sample, vs.~\(O(d^3)\) for a general dense Jacobian.
@@ -1332,22 +1361,40 @@ monotone-in-\(X_1\) pushforward of the marginal \(X_1 \mid \theta_1\) to
 \(\mathcal{N}(0,1)\) is \(\Phi^{-1}(1 - F_1^{(\theta_1)}(X_1))\).
 (R1\(^\mathrm{auto}\)) fixes the sign.
 
-\emph{Inductive step (\(k > 1\)).} Assume \(r_1, \ldots, r_{k-1}\) are
-uniquely identified. Consider \(r_k(\theta, X_{\le k})\) at fixed
-\((\theta, X_{<k})\). The calibration constraint
-\(r(\theta; X) \mid \theta \sim \mathcal{N}(0, I_d)\) implies that the
-components are jointly standard normal; since \(r_1, \ldots, r_{k-1}\)
-are deterministic functions of \((\theta, X_{<k})\), conditioning on
-them (given \(\theta\)) is equivalent to conditioning on \(X_{<k}\).
-Hence
-\(r_k(\theta, X_{\le k}) \mid \theta, X_{<k} \sim \mathcal{N}(0,1)\). By
-(R2\(^\mathrm{auto}\)), as a function of \(X_k\) this map is monotone;
-by Theorem A applied in \(X_k\)-coordinates with conditional law
-\(F_k^{(\theta)}(\cdot \mid X_{<k})\) playing the role of the Gaussian
-source, it is uniquely
-\(\Phi^{-1}(1 - F_k^{(\theta)}(X_k \mid X_{<k}))\).
-(R1\(^\mathrm{auto}\)) fixes the sign of the dependence on \(\theta_k\).
-\(\blacksquare\)
+\emph{Inductive step (\(k > 1\)).} Assume
+\(r_1, \ldots, r_{k-1}\) are uniquely identified (so each \(r_j\) for
+\(j < k\) is the KR rearrangement of its level). Consider
+\(r_k(\theta, X_{\le k})\) at fixed \((\theta, X_{<k})\).
+
+\emph{\(\sigma\)-algebra equivalence.} By (R2\(^\mathrm{auto}\)) applied
+at each level \(j < k\), the map \(X_j \mapsto r_j(\theta, X_{\le j})\)
+is a strictly monotone bijection at fixed \((\theta, X_{<j})\).
+Composing autoregressively, the map
+\((\theta, X_{<k}) \mapsto (\theta, r_{<k})\) is a triangular bijection,
+so \(\sigma(\theta, X_{<k}) = \sigma(\theta, r_{<k})\). Conditioning on
+\(r_{<k}\) given \(\theta\) is therefore equivalent to conditioning on
+\(X_{<k}\) given \(\theta\).
+
+\emph{Calibration $\Rightarrow$ conditional Gaussianity.} The full
+calibration constraint \(r(\theta; X) \mid \theta \sim \mathcal{N}(0, I_d)\)
+implies that all components are jointly standard normal. Combined with
+the \(\sigma\)-algebra identity,
+\(r_k \mid \theta, X_{<k} \sim \mathcal{N}(0, 1)\).
+
+\emph{1D rigidity.} By (R2\(^\mathrm{auto}\)),
+\(X_k \mapsto r_k(\theta, X_{\le k})\) is strictly monotone at fixed
+\((\theta, X_{<k})\). Apply the general-source form of Lemma~4.2
+(\S\ref{subsec:4.2} remark) with source the conditional density
+\(F_k^{(\theta)}(\cdot \mid X_{<k})\) (continuous, positive on its
+support by hypothesis) and target \(\mathcal{N}(0,1)\): the unique
+monotone-in-\(X_k\) pushforward is
+\(\Phi^{-1}(1 - F_k^{(\theta)}(X_k \mid X_{<k}))\) for the
+direction-decreasing branch, or its negative for the
+direction-increasing branch. (R1\(^\mathrm{auto}\)) fixes the sign of
+the \(\theta_k\)-dependence: the decreasing-in-\(X_k\),
+increasing-in-\(\theta_k\) branch is the one consistent with the sign
+conventions of (R1\(^\mathrm{auto}\)) and (R2\(^\mathrm{auto}\)), giving
+\(r_k = r_k^{\mathrm{KR}}\). \(\blacksquare\)
 
 \textbf{Corollary (multivariate location-Gaussian).} \emph{For
 \(X \mid \theta \sim \mathcal{N}(\theta, \Sigma)\) with \(\Sigma\)
@@ -1357,61 +1404,91 @@ KR pivot is} \[
 r^\mathrm{KR}(\theta, X) = L^{-1}(\theta - X).
 \]
 
-\emph{Proof.} The conditional \(X_k \mid \theta, X_{<k}\) is Gaussian
-with mean
-\(\mu_k = \theta_k + \sum_{j < k} \alpha_{kj}(X_j - \theta_j)\) and
-variance \(\sigma_k^2 = L_{kk}^2\), where the
-\(\alpha_{kj}, \sigma_k^2\) are the Cholesky regression coefficients.
-Direct computation:
-\(F_k^{(\theta)}(X_k \mid X_{<k}) = \Phi((X_k - \mu_k)/\sigma_k)\), so
-\[
-r_k^\mathrm{KR} = \Phi^{-1}(1 - F_k) = \frac{\mu_k - X_k}{\sigma_k} = \frac{\theta_k - X_k + \sum_{j < k} \alpha_{kj}(X_j - \theta_j)}{L_{kk}} = [L^{-1}(\theta - X)]_k.
-\] The verification on the 2D correlated experiment
+\emph{Proof.} The cleanest route bypasses the Cholesky-regression
+algebra. By definition of the Cholesky factor, \(Z := L^{-1}(X - \theta)\)
+satisfies \(Z \mid \theta \sim \mathcal{N}(0, I_d)\), so
+\(-Z = L^{-1}(\theta - X) \mid \theta \sim \mathcal{N}(0, I_d)\) as well
+(rotational symmetry of the standard Gaussian under sign flip
+coordinatewise). The map \((\theta, X) \mapsto L^{-1}(\theta - X)\) is
+\begin{itemize}
+\tightlist
+\item lower-triangular in both \(\theta\) and \(X\) (since \(L^{-1}\) is
+  lower-triangular, with positive diagonal \(1/L_{kk}\)),
+\item strictly increasing in \(\theta_k\) at each fixed
+  \(\theta_{<k}, X\) (diagonal of \(L^{-1}\) is positive), so it
+  satisfies (R1\(^\mathrm{auto}\)),
+\item strictly decreasing in \(X_k\) at each fixed \(\theta, X_{<k}\)
+  (with negative \(X_k\)-diagonal \(-1/L_{kk}\)), so it satisfies
+  (R2\(^\mathrm{auto}\)) with the sign convention of \S\ref{subsec:6.1}.
+\end{itemize}
+\(L^{-1}(\theta - X)\) is thus a member of the autoregressive
+calibration manifold. By Theorem A-d's uniqueness, it equals
+\(r^{\mathrm{KR}}\). Verification on the 2D correlated experiment
 (\(\Sigma = \bigl(\!\begin{smallmatrix} 1 & 0.5 \\ 0.5 & 1\end{smallmatrix}\!\bigr)\),
 giving
-\(L^{-1} = \bigl(\!\begin{smallmatrix} 1 & 0 \\ -0.577 & 1.155\end{smallmatrix}\!\bigr)\),
-hence
-\(r_2^\mathrm{KR} = 1.155(\theta_2 - X_2) - 0.577(\theta_1 - X_1)\)) is
-reported in \S\ref{subsec:8.3}. \(\blacksquare\)
+\(L = \bigl(\!\begin{smallmatrix} 1 & 0 \\ 0.5 & \sqrt{0.75}\end{smallmatrix}\!\bigr)\)
+and \(L^{-1} = \bigl(\!\begin{smallmatrix} 1 & 0 \\ -0.577 & 1.155\end{smallmatrix}\!\bigr)\),
+hence \(r_2^{\mathrm{KR}} = 1.155(\theta_2 - X_2) - 0.577(\theta_1 - X_1)\))
+is reported in \S\ref{subsec:8.3}. \(\blacksquare\)
 
 \textbf{Remarks.}
 
 \emph{1. KR depends on coordinate ordering.} Different orderings of the
 coordinates of \(X\) (and correspondingly of \(\theta\) at each
 autoregressive level) yield different KR pivots, all valid CD pivots,
-all in their respective calibration manifolds. The architectural choice
-of autoregressive order in the network implicitly selects one. For
-models with a natural ordering (time series; spatial data with a fixed
-sweep), use the data-defined order; for unordered data, any ordering is
-correct, with different choices giving different but inferentially
-equivalent pivots.
+all in their respective calibration manifolds (provided that for each
+ordering the conditional CDFs \(F_{\pi(k)}^{(\theta)}(\cdot \mid X_{\pi(<k)})\)
+satisfy the \(C^1\)-strictly-increasing hypothesis of Theorem A-d ---
+automatic for full-support continuous models like multivariate Gaussian).
+The architectural choice of autoregressive order in the network
+implicitly selects one. For models with a natural ordering (time series;
+spatial data with a fixed sweep), use the data-defined order; for
+unordered data, any ordering is correct, with different choices giving
+different but inferentially equivalent pivots.
 
 \emph{2. ``Calibration manifold is a singleton'' vs.~empirical pointwise
 residuals.} The theorem says the function \(r\) is uniquely determined
 within the class. The architectural decomposition \(r_k = a_k - b_k\)
-(additive form) is \emph{not} uniquely determined --- one can shift mass
-between \(a_k\) and \(b_k\) via any context-dependent function
-\(h(\theta_{<k}, X_{<k})\), since \(a_k\) and \(b_k\) share that
-context. Only the difference \(r_k = a_k - b_k\) is identified. The
-pointwise residuals seen in the 2D correlated experiment (\S\ref{subsec:8.3}) reflect
-finite-network approximation error around a unique target
-\(r^\mathrm{KR}\), not non-uniqueness of the population-level solution.
+(additive form) is \emph{not} uniquely determined --- the simultaneous
+shift \(a_k \mapsto a_k + h(\theta_{<k}, X_{<k})\),
+\(b_k \mapsto b_k + h(\theta_{<k}, X_{<k})\) leaves \(r_k = a_k - b_k\)
+unchanged and preserves the UMNN-monotonicity of each component (since
+\(h\) is constant in the primary argument of both networks, it can be
+absorbed into the UMNN bias term). Only the difference \(r_k = a_k - b_k\)
+is identified. The pointwise residuals seen in the 2D correlated
+experiment (\S\ref{subsec:8.3}) reflect finite-network approximation error
+around the unique target \(r^\mathrm{KR}\), not non-uniqueness of the
+population-level solution.
 
-\emph{3. The role of (R2\(^\mathrm{auto}\)) in multivariate.} Without
-monotonicity in \(X_k\) at fixed \((\theta, X_{<k})\), the 1D inductive
-step fails: \(X_k \mapsto r_k\) could be non-bijective, and the
-conditional pushforward density would no longer be a monotone
-rearrangement. This is the multivariate analogue of the
-autograd-Jacobian failure mode described in \S\ref{subsec:8.4} --- the same
-architectural prescription that fixes the 1D non-additive case is what
-makes the inductive proof go through in \(d > 1\).
+\emph{3. The role of (R2\(^\mathrm{auto}\)) in multivariate.} Both
+clauses of (R2\(^\mathrm{auto}\)) (\S\ref{subsec:6.1}) are needed in the
+induction, but for distinct reasons.
+\begin{itemize}
+\tightlist
+\item Without the \emph{dependence} clause, \(\partial_X r\) fails to be
+  lower-triangular (the Jacobian formula C-6.2-tri-jac breaks) and the
+  \(\sigma\)-algebra identity \(\sigma(\theta, X_{<k}) = \sigma(\theta, r_{<k})\)
+  used in the inductive step also fails.
+\item Without the \emph{monotonicity} clause, Lemma~4.2's preimage-density
+  contradiction at a critical point of \(X_k \mapsto r_k\) no longer
+  rules out non-monotone \(r_k\); the conditional calibration constraint
+  \(r_k \mid \theta, X_{<k} \sim \mathcal{N}(0,1)\) can then be satisfied
+  by multiple distinct \(r_k\). This is the multivariate analogue of the
+  autograd-Jacobian failure mode of \S\ref{subsec:8.4}.
+\end{itemize}
+The same architectural prescription that fixes the 1D non-additive case
+is what makes the inductive proof go through in \(d > 1\).
 
 \subsection{Inference: direct pivot inversion}\label{subsec:6.4}
 
 At an observed \(X_\mathrm{obs}\), the level-\(\alpha\) confidence set
 is \[
 \mathcal{C}_\alpha(X_\mathrm{obs}) := \bigl\{\theta : \|r(\theta; X_\mathrm{obs})\|^2 \leq \chi^2_{d, \alpha}\bigr\}.
-\] Under (C1), \(\|r(\theta_0; X)\|^2 \mid \theta_0 \sim \chi^2_d\), so
+\] Under (C1), \(\|r(\theta_0; X)\|^2 \mid \theta_0 \sim \chi^2_d\) for
+every \(\theta_0 \in \Theta\) (note: the NF-MLE training argument
+delivers calibration only \(\rho\)-a.e.; the lift to every \(\theta_0\)
+uses continuity of \(r\) in \(\theta\) under the architectural class plus
+\(\rho\)'s full support on the inferential region). Thus
 \(\mathcal{C}_\alpha\) has exact frequentist coverage: \[
 \mathbb{P}_{X \sim P_{\theta_0}}\bigl(\theta_0 \in \mathcal{C}_\alpha(X)\bigr) = \alpha.
 \] The set \(\mathcal{C}_\alpha\) is found by numerical root-finding in
