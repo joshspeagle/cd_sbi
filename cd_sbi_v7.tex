@@ -147,10 +147,11 @@ enforcement) and its fix.
 Many scientific models are \emph{implicit}: defined by a stochastic
 simulator \(X \sim P_\theta\) from which one can sample data, but for
 which the likelihood \(p(X \mid \theta)\) is intractable or unavailable
-in closed form. Modern \emph{simulation-based inference} (SBI) trains a
-deep-network surrogate for the quantity of interest --- the Bayesian
-posterior \(p(\theta \mid X)\), the likelihood \(p(X \mid \theta)\), or
-the likelihood ratio --- from simulated pairs \((\theta, X)\).
+in closed form. Modern \emph{simulation-based inference}
+\citep[SBI; for an overview see][]{CranmerEtAl2020} trains a deep-network
+surrogate for the quantity of interest --- the Bayesian posterior
+\(p(\theta \mid X)\), the likelihood \(p(X \mid \theta)\), or the
+likelihood ratio --- from simulated pairs \((\theta, X)\).
 
 The three dominant families are:
 
@@ -201,8 +202,9 @@ data-dependent distribution function \(H(\cdot; X)\) on \(\Theta\) whose
 \(\alpha\)-quantile is the upper endpoint of an exact one-sided
 \(\alpha\)-confidence interval. The modern theory traces back through
 Fisher's fiducial inference \citep{Fisher1930}, \citet{Cox1958}, and
-\citet{Efron1993, Efron1998}, to the synthesis in
-\citet{SchwederHjort2016}. \citet[Def.~3.1]{SchwederHjort2016} require
+\citet{Efron1993, Efron1998}, with subsequent reviews by
+\citet{SinghEtAl2007} and \citet{XieSingh2013}, to the textbook
+synthesis in \citet{SchwederHjort2016}. \citet[Def.~3.1]{SchwederHjort2016} require
 two properties: (i) \(H(\cdot; X)\) is a CDF on \(\Theta\) for each
 \(X\), and (ii) the calibration condition
 \textbf{exact coverage}: \[
@@ -217,7 +219,9 @@ variable via its own CDF --- applied to a correctly chosen
 
 \textbf{Astronomer-friendly comparison.} A CD plays the same role as a
 posterior: a distribution-valued summary of the evidence for \(\theta\).
-The difference is what calibration means.
+The difference is what calibration means. (\citealp{Fraser2011}, "Is
+Bayes posterior just quick and dirty confidence?", gives an extended
+discussion of where the two diverge.)
 
 \begin{itemize}
 \tightlist
@@ -719,7 +723,8 @@ over the \emph{forecast} \(F\) at \(F = G^*\). Here the situation is
 reversed: the reference \(F = \mathcal{N}(0, I_d)\) is fixed and
 \(Y = r(\theta, X)\) is the learned quantity, so we are minimizing over
 the \emph{sample distribution} \(G\) with \(F\) fixed, which is not the
-proper direction. Concretely, using the dual form of CRPS,
+proper direction. Concretely, using the dual ("kernel-score") form of
+CRPS \citep{GneitingRaftery2007},
 \(\mathrm{CRPS}(F, y) = \mathbb{E}_{Z \sim F}|Z - y| - \tfrac{1}{2}\,\mathbb{E}_{Z, Z' \sim F}|Z - Z'|\),
 and taking \(Y \sim G\),
 \[
@@ -818,9 +823,10 @@ forward to \(\mathcal{N}(0,1)\). Then \(\psi(X) = X - \theta_0\) (if
 strictly increasing) or \(\psi(X) = \theta_0 - X\) (if strictly
 decreasing).}
 
-\emph{Proof.} Standard 1D monotone rearrangement: between two atomless
-probability measures on \(\mathbb{R}\), the unique monotone-increasing
-measure-preserving map is the composition of CDF and inverse CDF. For
+\emph{Proof.} Standard 1D monotone rearrangement \citep[ch.~2]{Villani2003}:
+between two atomless probability measures on \(\mathbb{R}\), the unique
+monotone-increasing measure-preserving map is the composition of CDF
+and inverse CDF. For
 strictly increasing \(\psi\): \(\Phi(\psi(X)) = \Phi(X - \theta_0)\)
 a.s. by uniqueness, so \(\psi(X) = X - \theta_0\). For strictly
 decreasing \(\psi\),
@@ -993,7 +999,8 @@ in regular cases.''
 
 \subsection{Setup and canonical pivot}\label{subsec:5.1}
 
-\emph{Background, brief.} A \emph{one-parameter exponential family} is a
+\emph{Background, brief (see \citealp[\S3.4]{LehmannRomano2005} for a
+textbook treatment).} A \emph{one-parameter exponential family} is a
 parametric model whose density takes the canonical form
 \(p(X \mid \theta) = h(X) \exp(\theta \cdot T(X) - A(\theta))\), with
 \(T(X)\) a real-valued \textbf{sufficient statistic} for \(\theta\) ---
@@ -1082,8 +1089,9 @@ pivots (it does, with the right architecture; see \S\ref{subsec:8.4}).
 For discrete sufficient statistics (T(X) countable), no function of
 \(T(X)\) alone can have a continuous distribution, so the strict
 calibration target \(\mathcal{N}(0,1)\) is unattainable. The standard
-fix \citep{Lancaster1961} is auxiliary randomization: smear each atom
-across
+fix --- introduced in the fiducial tradition by
+\citet{Stevens1950} and used in the form below by \citet{Lancaster1961}
+--- is auxiliary randomization: smear each atom across
 an interval of an auxiliary uniform variable, so that the combined
 object is continuous.
 
@@ -1655,7 +1663,8 @@ be correlated --- the Hermans-type failure pattern.
 
 \textbf{Statistical noise floor for KS.} Under the null,
 \(\sqrt{N} \cdot \mathrm{KS}\) has the Kolmogorov limiting distribution
-with \(\Pr(\sqrt{N}\cdot\mathrm{KS} > 1.628) = 0.01\). The relevant
+\citep[\S14.2]{LehmannRomano2005} with
+\(\Pr(\sqrt{N}\cdot\mathrm{KS} > 1.628) = 0.01\). The relevant
 sample size depends on which statistic is being evaluated.
 
 \begin{itemize}
@@ -2411,7 +2420,7 @@ Sequential refinement & Open (\S\ref{subsec:11.6}) & Theory unclear \\
 
 % Background / "see also" entries that appear in the bibliography
 % without inline cites (preserved from the v6 References section).
-\nocite{Fraser2011,SinghEtAl2007,XieSingh2013,CranmerEtAl2020,Lyons2013,SriperumbudurEtAl2011}
+\nocite{Lyons2013,SriperumbudurEtAl2011}
 
 \bibliography{cd_sbi}
 
