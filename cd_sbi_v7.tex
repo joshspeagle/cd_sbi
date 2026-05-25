@@ -2162,10 +2162,26 @@ experiments.
 
 \subsection{UMNN building blocks}\label{subsec:7.1}
 
+\paragraph{The idea, in one sentence.}
+Take any strictly positive function on \(\mathbb{R}\), integrate it
+from a reference point to \(z\), and the result is a strictly
+monotone-increasing function of \(z\). This is the fundamental theorem
+of calculus: a positive integrand gives a strictly increasing
+antiderivative. An \emph{Unconstrained Monotonic Neural Network}
+(UMNN; \citealp{WehenkelLouppe2019}) is just that construction with a
+neural network playing the role of the positive function: the neural
+network itself is unconstrained (any architecture, any signs), but
+its strictly-positive composition (via \(\sigma_+\) below) makes the
+overall integrated function monotone by construction. The Jacobian of
+the deployed function is closed-form (it is the positive integrand
+itself), so no recursive autograd is needed at training time --- which
+is the reason UMNN is the right tool for enforcing (R2)
+architecturally rather than by penalty.
+
 \textbf{Definition (UMNN; \citealp{WehenkelLouppe2019}, with two
-implementation substitutions).} A \emph{Unconstrained Monotonic Neural
-Network} parameterizes a scalar function \(g(z; c)\) that is strictly
-monotone-increasing in \(z\) at fixed context \(c\) by writing \[
+implementation substitutions).} A UMNN parameterizes a scalar function
+\(g(z; c)\) that is strictly monotone-increasing in \(z\) at fixed
+context \(c\) by writing \[
 g(z; c) = \mathrm{bias}(c) + \int_{z_0}^z \sigma_+\bigl(\mathrm{MLP}(t, c)\bigr)\, dt,
 \] where \(\mathrm{MLP}(\cdot, c)\) is an unconstrained neural network
 and \(\sigma_+\) is any strictly positive activation. The original
@@ -2248,6 +2264,43 @@ complementary finite-sample power. Diagnostic~4 (joint Mahalanobis) is
 \(r \mid \theta_0 \sim \mathcal{N}(0, I_d)\) since the components could
 be correlated --- the Hermans-type failure pattern.
 
+\paragraph{Which diagnostic catches which failure mode.}
+The five diagnostics partition cleanly by what failure each is
+sensitive to:
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.20}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.45}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.35}}@{}}
+\toprule\noalign{}
+Diagnostic & Catches & First-line interpretation \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+1. Pivot RMSE vs \(r^*\) & Network is far from the closed-form truth
+where one exists. & High RMSE on a problem with known \(r^*\) means
+training has not converged; on problems without known \(r^*\) it is
+unavailable. \\
+2. Marginal PIT KS & Aggregate calibration failure across the joint
+\((\theta, X)\) training law. & Marginal PIT failure $\Rightarrow$
+something is wrong; marginal PIT pass does \emph{not} imply
+conditional calibration (Hermans-type pattern; see \S\ref{subsec:3.7}
+Class 1 counterexample). \\
+3. Conditional PIT KS at fixed \(\theta_0\) & Per-component calibration
+failure at specific parameter values. & Used to localize miscalibration
+to a region of \(\Theta\); should be compared against the
+\emph{per-bin} KS noise floor, not the marginal one. \\
+4. Joint Mahalanobis KS (\(d > 1\)) & Cross-component correlation that
+component-wise calibration misses. & In \(d > 1\) each \(r_k\) can be
+marginally \(\mathcal{N}(0, 1)\) while the joint \(r\) is not
+\(\mathcal{N}(0, I_d)\); only the joint Mahalanobis test catches this. \\
+5. Coverage at \(\alpha \in \{0.5, 0.68, 0.9, 0.95\}\) & Direct test of
+the property CD-SBI promises. & The inferential ground truth. If
+coverage matches nominal at multiple \(\theta_0\) and \(\alpha\), the
+pivot is valid; if not, work back through 1--4 to localize. \\
+\end{longtable}
+
 \textbf{Statistical noise floor for KS.} Under the null,
 \(\sqrt{N} \cdot \mathrm{KS}\) has the Kolmogorov limiting distribution
 \citep[\S14.2]{LehmannRomano2005} with
@@ -2287,13 +2340,26 @@ in spirit to the LF2I local-coverage check.
 
 \section{Four experiments}\label{sec:8}
 
-Each experiment is supporting evidence for a specific theoretical claim
-from Parts III--IV. They are not validation in the sense of ``checking
-that the method works'' --- the theory already establishes correctness
-in the population limit. They validate that (i) finite-sample
-optimization actually reaches the population optimum at practical
-training budgets, and (ii) the architectural prescriptions matter as the
-theory says they should.
+\paragraph{The structure of the empirical program.}
+Each experiment in this section is targeted: it picks a problem where
+the canonical pivot \(r^*\) is closed-form, trains the CD-SBI machinery
+on it, and asks how close the trained \(r\) gets to \(r^*\) under each
+of the §\ref{subsec:7.3} diagnostics. The four experiments together
+cover the four theorem-statements of Parts III--IV: §\ref{subsec:8.1}
+(1D location-normal) probes Theorem A, §\ref{subsec:8.2} (2D location
+with \(\Sigma = I\)) probes the triangular-flow construction of
+§\ref{subsec:6.1}--§\ref{subsec:6.2}, §\ref{subsec:8.3} (2D location
+with correlated \(\Sigma\)) probes Theorem A-d via the Cholesky
+corollary, and §\ref{subsec:8.4} (exponential rate) probes the
+doubly-monotone architecture for non-additive pivots --- plus a
+controlled ablation in §\ref{subsec:8.4} that deliberately violates
+(R2) to demonstrate the failure mode of §\ref{subsec:3.5}. The
+experiments are not validation in the sense of ``checking that the
+method works'' --- the theory already establishes correctness in the
+population limit. They validate that (i) finite-sample optimization
+actually reaches the population optimum at practical training budgets,
+and (ii) the architectural prescriptions matter as the theory says they
+should.
 
 \begin{longtable}[]{@{}
   >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
@@ -2542,27 +2608,54 @@ Coverage error across \(\theta_0, \alpha\) & \(< 0.015\) & excellent \\
 The doubly-monotone construction recovers \(r^*\) to within batch noise,
 demonstrating that the framework extends beyond the additive class.
 
-\textbf{Architectural ablation: why (R2) must be enforced
-architecturally.} Replacing the doubly-monotone construction with a
-joint UMNN in \(\theta\) that uses autograd to compute \(\partial_T r\)
---- i.e., no architectural enforcement of monotone-in-\(T\) --- yields
-RMSE 1.56, conditional PIT KS 0.045--0.080 (all above the per-bin floor
-\(\approx 0.047\), with several substantially so), coverage error up to
-3.4\%, and final loss 0.56. By the strict-propriety argument of
-\S\ref{subsec:3.2}, any valid (R2)-bijective \(\hat p_r\) satisfies
-\(\mathbb{E}_\rho[-\log \hat p_r] \ge \mathbb{E}_\rho[H(X \mid \theta)]\)
-by Gibbs's inequality. In this model the conditional-entropy lower
-bound is 0.88 (the loss attained by \(r^*\)); the ablation reaches 0.56,
-falsifying the implicit claim that its \(\hat p_r\) is a valid density.
-The mechanism is the one made explicit in \S\ref{subsec:3.5}: when
-\(T \mapsto r\) folds, the surrogate's mass \(Z(\theta) > 1\) and the
-loss is shifted by \(-\log Z(\theta) < 0\); the autograd
-\(|\partial r/\partial T|\) is locally inflated in folded regions,
-inflating \(\log|\partial r/\partial T|\) into the loss without
-\(\hat p_r\) being a normalized density. This is direct empirical
-evidence for (R2): architectural enforcement of monotone-in-\(X\) is
-not a stylistic preference but a correctness requirement for the
-NF-MLE objective.
+\paragraph{Architectural ablation: why (R2) must be enforced
+architecturally.} The doubly-monotone result above demonstrates that
+(R2) \emph{enforced architecturally} succeeds. The complementary
+question is what happens if we drop that enforcement and trust autograd
+to handle the Jacobian. The §\ref{subsec:3.5} theory predicts the loss
+will fall \emph{below} the truth's loss (an event impossible for any
+valid normalized density). The ablation here is the four-step
+demonstration:
+
+\paragraph{Step 1: the ablation setup.}
+Replace the doubly-monotone construction with a generic joint UMNN in
+\(\theta\) only, and use autograd to compute \(\partial_T r\) at each
+gradient step --- so monotonicity-in-\(T\) is unconstrained, the
+Jacobian factor in NF-MLE comes from automatic differentiation rather
+than from an architecturally-positive integrand. Everything else
+(training schedule, sample size, optimizer) is identical.
+
+\paragraph{Step 2: the numbers.}
+The ablation trained model reaches RMSE 1.56 (vs.\ 0.045 for the
+architectural construction), conditional PIT KS 0.045--0.080 (all above
+the per-bin floor \(\approx 0.047\), several substantially so),
+coverage error up to 3.4\% (vs.\ \(< 0.015\) for the architectural
+construction), and \emph{final loss 0.56}.
+
+\paragraph{Step 3: why \(0.56\) is impossible for any valid density.}
+By Theorem~\ref{thm:strictprop} (or directly, Gibbs's inequality), any
+valid normalized \(\hat p_r\) satisfies
+\(\mathbb{E}_\rho[-\log \hat p_r] \ge \mathbb{E}_\rho[H(X \mid \theta)]\):
+the population NF-MLE loss is at least the conditional entropy. In
+this model the conditional-entropy lower bound is \(0.88\), and the
+truth \(r^*\) attains it. The ablation reaches \(0.56\), which is below
+the floor. There is no normalized density that could have produced this
+number --- so the ablation has trained itself into a regime where
+\(\hat p_r\) is not normalized. This is the smoking gun of \S\ref{subsec:2.4}.
+
+\paragraph{Step 4: the mechanism, tying back to §\ref{subsec:3.5}.}
+The mechanism is exactly the one §\ref{subsec:3.5} predicted: when
+\(T \mapsto r\) folds, the surrogate's total mass \(Z(\theta)\) exceeds
+1, and the loss is shifted by \(-\log Z(\theta) < 0\). The gap
+\(0.88 - 0.56 = 0.32\) is empirically attributable to
+\(\mathbb{E}_\rho[\log Z(\theta)] \approx 0.32\), i.e.\ the trained
+ablation has \(Z(\theta) \approx e^{0.32} \approx 1.38\) on average ---
+the local Jacobians from autograd are inflated by roughly that factor.
+Architectural enforcement of monotone-in-\(X\) prevents folding by
+construction, keeps \(Z(\theta) \equiv 1\), and recovers the
+strict-propriety guarantee of Theorem~\ref{thm:strictprop}. This is the
+direct empirical evidence that (R2) is a correctness requirement, not
+a stylistic preference, for NF-MLE.
 
 \subsection{Synthesis}\label{subsec:8.5}
 
