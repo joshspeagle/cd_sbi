@@ -1106,9 +1106,13 @@ new condition:
 \begin{itemize}
 \tightlist
 \item
-  \textbf{(R4) Order-preservation in \(T(X)\):} for fixed
-  \((\theta, U)\), \(r(\theta; X_1, U) \le r(\theta; X_2, U)\) whenever
-  \(T(X_1) < T(X_2)\), with strict inequality somewhere.
+  \textbf{(R4) Order-coherence in \(T(X)\):} for fixed \((\theta, U)\),
+  \(V_\theta(X_1, U) \le V_\theta(X_2, U)\) whenever
+  \(T(X_1) < T(X_2)\) --- equivalently, \(r(\theta; X_1, U) \ge r(\theta; X_2, U)\),
+  with strict inequality somewhere. (Note: the canonical \(r^*_\mathrm{rand} = \Phi^{-1}(1 - V_\theta)\)
+  is \emph{decreasing} in \(T(X)\) under increasing MLR, since \(V^*_\theta\)
+  tiles \([0, 1]\) in increasing \(T\)-order; (R4) is the discrete analogue
+  of this directionality.)
 \end{itemize}
 
 \textbf{Theorem C* (Discrete).} \emph{Under (R1)--(R4), the unique pivot
@@ -1135,53 +1139,90 @@ order is unconstrained; without (R4), a different tiling that
 interleaves \(T\)-atoms across \(U\) gives an alternative calibrated
 pivot. \(\blacksquare\)
 
-\textbf{Explicit counterexample.}
-%
-% TODO(round1-escalation): The Bin(1, θ) construction below does NOT
-% actually separate (R4) from (R3_U) — under any monotone-in-U completion
-% of V'_θ(1, ·), (R4) is preserved; under any completion that violates
-% (R4), (R3_U) breaks via a downward jump at U = 1/2. A genuine
-% separation requires a model with ≥ 3 T-atoms (e.g. Bin(2, θ)) so that
-% a non-trivial T-permutation exists while monotone-in-U is preserved
-% within each atom. See reviews/round1/part3_1d_theory.md, claim
-% C-5.7-counterex. Replacement Bin(2, θ) construction deferred for
-% user review.
-%
-\emph{[Construction below preserved from v6 pending user review; flagged
-as not actually separating (R4) from (R3\(_U\)) --- a Bin(2, \(\theta\))
-replacement is the recommended fix; see }\texttt{reviews/round1/part3\_1d\_theory.md} \emph{claim C-5.7-counterex.]}
-Take \(X \sim \mathrm{Bin}(1, \theta)\), so \(T(X) = X \in \{0,1\}\),
-\(p_\theta(0) = 1-\theta\), \(p_\theta(1) = \theta\). The canonical
-\(V_\theta\) assigns \(X = 0\) to the sub-interval \([0, 1-\theta]\) of
-\((0,1)\) and \(X = 1\) to \([1-\theta, 1]\): \[
-V_\theta^*(0, U) = U(1-\theta), \qquad V_\theta^*(1, U) = (1-\theta) + U\theta.
-\] Both are monotone in \(U\), both have output in \((0,1)\), and the
-mixture \((1-\theta)\,V_\theta^*(0, U) + \theta\,V_\theta^*(1, U)\)
-(sampling \(X\) then \(U\)) is uniform.
+\textbf{Explicit counterexample.} A \(\mathrm{Bin}(1, \theta)\)
+construction is too small to separate (R4) from the other conditions:
+any monotone-in-\(U\) completion of an alternative \(V'_\theta\) on a
+binary support preserves (R4), and any completion that violates (R4)
+breaks (R3\(_U\)) via a downward jump. A \(\mathrm{Bin}(2, \theta)\)
+construction also fails to separate (R4): each of the six permutations
+of \(\{0, 1, 2\}\) other than the canonical one has at least one
+endpoint of the form \(\sum_{t \in S} p_\theta(t)\) for a non-prefix
+subset \(S\), and direct calculation shows none of those endpoint
+functions is non-increasing in \(\theta\) --- so (R1) already rules out
+the swaps before (R4) is even considered.
 
-Now define an alternative \(V'_\theta\) that swaps the lex order ---
-assigning \(X = 0\) to \emph{two} disjoint sub-intervals (one in the
-lower half, one in the upper half) and \(X = 1\) to their complement: \[
-V'_\theta(0, U) = \begin{cases} \tfrac{1-\theta}{2} \cdot 2U & \text{if } U \in [0, \tfrac{1}{2}), \\ \tfrac{1}{2} + \tfrac{1-\theta}{2} \cdot 2(U - \tfrac{1}{2}) & \text{if } U \in [\tfrac{1}{2}, 1], \end{cases}
-\] with \(V'_\theta(1, U)\) defined so that the joint mixture remains
-uniform on \((0,1)\) (by filling the complementary sub-intervals). Both
-\(V_\theta^*\) and \(V'_\theta\) satisfy (R1)--(R3\(_U\)) and both yield
-calibrated pivots via \(r = \Phi^{-1}(1 - V)\). They differ in the
-lex-ordering of \(T\)-values relative to \(U\): \(V_\theta^*\) places
-all of \(X=0\) below all of \(X=1\), while \(V'_\theta\) interleaves
-them. (R4) selects \(V_\theta^*\).
+The smallest model where (R4) is genuinely independent is
+\(\mathrm{Bin}(3, \theta)\), with atoms
+\(\{0, 1, 2, 3\}\) and masses
+\(p_\theta(t) = \binom{3}{t}\theta^t(1-\theta)^{3-t}\). The canonical
+\(V^*_\theta\) tiles \([0, 1]\) in the order \((T = 0, T = 1, T = 2, T = 3)\).
+Consider instead the tiling in the order \((T = 0, T = 2, T = 1, T = 3)\):
+\[
+\begin{aligned}
+V'_\theta(0, U) &= U(1-\theta)^3, \\
+V'_\theta(2, U) &= (1-\theta)^3 + 3 U\,\theta^2(1-\theta), \\
+V'_\theta(1, U) &= (1-\theta)^3 + 3\theta^2(1-\theta) + 3U\,\theta(1-\theta)^2, \\
+V'_\theta(3, U) &= 1 - \theta^3(1 - U),
+\end{aligned}
+\]
+each linear in \(U\) with slope \(p_\theta(t)\). The four image
+intervals \([0, A_1], [A_1, A_2], [A_2, A_3], [A_3, 1]\) (with
+\(A_1 = (1-\theta)^3\), \(A_2 = (1-\theta)(1 - 2\theta + 4\theta^2)\),
+\(A_3 = 1 - \theta^3\)) partition \([0, 1]\) for every
+\(\theta \in (0, 1)\).
 
-\textbf{Why (R4) is automatic in the continuous case.} In the
-continuous case, Theorem C (\S\ref{subsec:5.2}) --- which lifts Theorem A
-to \(t = T(X)\) coordinates via the general-source form of Lemma~4.2
-(remark, \S\ref{subsec:4.2}) --- already concludes that the canonical
-pivot \(\tilde r(\theta; t)\) is monotone-increasing in \(t\) under
-increasing MLR. This is exactly (R4) at the \(t\)-level. (R4) becomes
-a non-redundant assumption only in the discrete setting, where monotone
-rearrangement of an atomic source onto a continuous target leaves a
-permutation freedom across the \(T\)-atoms that the continuous-case
-rigidity (Lemma~4.2 in \(C^1\), or strict-monotonicity-in-\(X\) under
-(R3) in the Lipschitz case) eliminates automatically.
+\emph{Verification of (R1), (R2), (R3\(_U\)):}
+\begin{itemize}
+\tightlist
+\item (R3\(_U\)): each \(V'_\theta(t, \cdot)\) is linear in \(U\) with
+  positive slope \(p_\theta(t)\). ✓
+\item (R2): the four image intervals tile \([0, 1]\); the joint mixture
+  (sample \(X\) then \(U\)) has uniform density on each piece by the
+  slope identity, hence is exactly \(U(0, 1)\). ✓
+\item (R1): direct differentiation gives
+  \(\partial_\theta V'_\theta(t, U)\) non-positive at every
+  \((t, U) \in \{0, 1, 2, 3\} \times [0, 1]\) and every
+  \(\theta \in (0, 1)\). The binding constraints occur at the swap-piece
+  endpoint \(A_2\), where
+  \(\partial_\theta A_2 = -3(2\theta - 1)^2 \le 0\) --- a perfect square
+  with a minus sign, the algebraic accident that lets the non-canonical
+  ordering preserve (R1) for \(\mathrm{Bin}(3, \theta)\) where it fails
+  for \(\mathrm{Bin}(2, \theta)\). The remaining endpoint and
+  slope-driven terms in \(\partial_\theta V'_\theta(t, U)\) are linear
+  in \(U\) with non-positive values at both endpoints \(U = 0, 1\), so
+  non-positive throughout. ✓
+\end{itemize}
+
+\emph{(R4) is violated everywhere:}
+\[
+V'_\theta(1, U) - V'_\theta(2, U) \;=\; 3\theta^2(1-\theta) + 3U\,\theta(1-\theta)(1 - 2\theta).
+\]
+At \(U = 0\) this equals \(3\theta^2(1 - \theta) > 0\) for every
+\(\theta \in (0, 1)\); the expression evaluates to
+\(3\theta(1-\theta)^2 > 0\) at \(U = 1\); linearity in \(U\) (with both
+endpoints strictly positive) gives \(V'_\theta(1, U) > V'_\theta(2, U)\)
+for every \((\theta, U) \in (0, 1) \times [0, 1]\). Since
+\(T(X = 1) < T(X = 2)\) but \(V'_\theta(1, U) > V'_\theta(2, U)\), (R4)
+fails. So \(V^*_\theta\) and \(V'_\theta\) both satisfy (R1)--(R3\(_U\))
+and both yield calibrated pivots via \(r = \Phi^{-1}(1 - V)\); they
+differ only in the lex-ordering of \(T\)-values relative to \(U\), and
+(R4) selects \(V^*_\theta\).
+
+\textbf{Why (R4) is automatic in the continuous case.} In the continuous
+case (\S\ref{subsec:5.2}, \S\ref{subsec:5.1}), \(V_\theta(X) = F_\theta(T(X))\)
+is monotone non-decreasing in \(T(X)\) by definition of the CDF, so the
+canonical pivot \(\tilde r(\theta; t) = \Phi^{-1}(1 - F_\theta(t))\) is
+monotone non-increasing in \(t\) under increasing MLR --- (R4) at the
+\(t\)-level holds automatically. (R4) becomes a non-redundant assumption
+only in the discrete setting, where monotone rearrangement of an atomic
+source onto a continuous target leaves a permutation freedom across the
+\(T\)-atoms. For small atom counts (\(\mathrm{Bin}(1, \theta)\) and
+\(\mathrm{Bin}(2, \theta)\)) the permutation freedom is itself
+constrained out by (R1) + (R3\(_U\)); only at \(\mathrm{Bin}(3, \theta)\)
+and beyond does a non-canonical permutation with all-monotone-in-\(\theta\)
+endpoints become available (the perfect-square accident
+\(-3(2\theta - 1)^2 \le 0\) above), requiring (R4) as an extra
+condition.
 
 \subsubsection{Mid-p alternative}\label{subsubsec:5.7.3}
 
