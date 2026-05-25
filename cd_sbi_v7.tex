@@ -688,59 +688,105 @@ deliver pointwise frequentist calibration as cleanly.
 
 \subsection{What a normalizing flow is, and the statement of the loss}\label{subsec:3.1}
 
-A \emph{normalizing flow} \citep[for an overview,
-see][]{PapamakariosEtAl2021} is a parametric family of diffeomorphisms
-\(r: \mathcal{X} \to \mathbb{R}^d\) that transforms a complicated source
-density \(p(X)\) into a simple base density \(\phi_d\) (we use a
-standard Gaussian throughout). Conditional on \(\theta\), the implied
-density on \(\mathcal{X}\) is the standard change-of-variables
-expression
-\(\hat p_r(X \mid \theta) = \phi_d(r(\theta, X)) \cdot |\det \partial r / \partial X|\).
-\emph{NF-MLE} simply means: train \(r\) by maximum likelihood under this
-implied density.
+\paragraph{What is a normalizing flow?}
+A \emph{normalizing flow} \citep[overview:][]{PapamakariosEtAl2021} is a
+neural-network-parameterized invertible map between a complicated
+density and a simple reference density. Pick a base distribution that is
+easy to evaluate --- for us, the standard Gaussian \(\phi_d\) on
+\(\mathbb{R}^d\). Then a smooth, invertible function
+\(r: \mathcal{X} \to \mathbb{R}^d\) implicitly defines a density on
+\(\mathcal{X}\) via the change-of-variables formula:
+\[
+\hat p_r(X) \;=\; \phi_d\bigl(r(X)\bigr) \cdot \bigl|\det \partial r / \partial X\bigr|.
+\]
+The \(\phi_d(r(X))\) factor says ``how dense is the base distribution
+at the image of \(X\)''; the \(|\det \partial r / \partial X|\) factor
+is the local volume rescaling, which corrects for the fact that
+\(r\) compresses some regions of \(\mathcal{X}\) and stretches others.
+Together they make \(\hat p_r\) a properly normalized density on
+\(\mathcal{X}\). Training a normalizing flow on data
+\(\{X_i\}\) means choosing the parameters of \(r\) to maximize
+\(\sum_i \log \hat p_r(X_i)\) --- equivalently, fitting \(r\) so that
+\(r(X_i)\) looks like a sample from \(\phi_d\).
 
-For a pivot \(r\) satisfying (R1) and (R2), define \[
+\paragraph{From flow to conditional flow to NF-MLE.}
+For inference we need a \emph{conditional} flow: a family of maps
+\(r(\theta, \cdot)\) parameterized by \(\theta\), one map for each
+parameter value, so that
+\(r(\theta, X) \mid X \sim P_\theta\) is distributed like \(\phi_d\).
+The implied conditional density is
+\(\hat p_r(X \mid \theta) = \phi_d(r(\theta, X)) \cdot |\det \partial r / \partial X|\),
+and \emph{NF-MLE} means training the conditional flow by maximum
+likelihood on simulated pairs \((\theta, X)\). Concretely, for a pivot
+\(r\) satisfying (R1) and (R2), define
+\[
 \boxed{\;L(r) \;:=\; \mathbb{E}_{(\theta, X) \sim \rho \otimes P_\theta}\!\left[ \tfrac{1}{2}\|r(\theta, X)\|^2 \;-\; \log\bigl|\det \tfrac{\partial r}{\partial X}\bigr| \right].\;}
-\] This is the negative log-likelihood under \(\hat p_r\) with the
-irrelevant constant \(\tfrac{d}{2}\log(2\pi)\) dropped.
+\]
+This is just the negative log-likelihood of \(X \mid \theta\) under
+\(\hat p_r\) with the irrelevant additive constant
+\(\tfrac{d}{2}\log(2\pi)\) dropped: the \(\tfrac{1}{2}\|r\|^2\) term
+penalizes \(r(\theta, X)\) far from the origin of \(\mathbb{R}^d\) (large
+deviations from the Gaussian base), and the \(-\log|\det \partial r/\partial X|\)
+term penalizes \(r\) for over-stretching the local geometry of
+\(\mathcal{X}\).
 
 \subsection{Why it works: strict propriety via KL non-negativity}\label{subsec:3.2}
 
-Write the model density implied by \(r\) as
-\(\hat p_r(X \mid \theta) := \phi_d(r(\theta, X)) \cdot |\det \partial r / \partial X|\).
-\textbf{Under (R2)}, \(\hat p_r(\cdot \mid \theta)\) is a normalized
-probability density on \(\mathcal{X}\) at every fixed \(\theta\) (the
-change-of-variables formula pushes \(\mathcal{N}(0, I_d)\) forward via
-\(r^{-1}\), preserving total mass). The standard identity
-\(\mathbb{E}_{X \mid \theta}[-\log \hat p_r] = H(X \mid \theta) + \mathrm{KL}(p \,\|\, \hat p_r)\)
-therefore holds, and averaging over \(\rho\) gives \[
-L(r) \;=\; \mathbb{E}_\rho\bigl[\mathbb{E}_{X \mid \theta}[-\log \hat p_r(X \mid \theta)]\bigr] \;=\; \mathbb{E}_\rho\bigl[\mathrm{KL}\bigl(p(\cdot \mid \theta) \,\|\, \hat p_r(\cdot \mid \theta)\bigr)\bigr] + \mathrm{const},
-\] where the constant
-\(\mathbb{E}_\rho[H(X \mid \theta)]\) is the conditional entropy of
-\(X \mid \theta\) averaged over \(\rho\) and is independent of \(r\).
-Since \(\mathrm{KL} \ge 0\) with equality iff the two densities agree
-a.e., \(L(r)\) is minimized iff
-\(\hat p_r(\cdot \mid \theta) = p(\cdot \mid \theta)\) for \(\rho\)-a.e.
-\(\theta\). Equivalently,
-\(r(\theta_0; X) \mid \theta_0 \sim \mathcal{N}(0, I_d)\) for
-\(\rho\)-a.e. \(\theta_0\). So: \[
-\arg\min_{r \in \mathcal{F}} L(r) \;=\; \mathcal{M}_\mathcal{F},
-\] where \(\mathcal{F}\) is any architectural class whose every element
-satisfies (R2) --- in particular, the autoregressive class of \S\ref{sec:6}
-(since (R2\(^{\mathrm{auto}}\)) \(\Rightarrow\) (R2); see \S\ref{subsec:6.1}).
-Without (R2), \(\hat p_r\) is not a probability density, the KL identity
-above fails, and the loss is unbounded below; see \S\ref{subsec:3.5}.
+\paragraph{What we are about to prove.}
+The central claim of Part II is that NF-MLE on \(\mathcal{F}\)
+\emph{exactly} recovers the calibration manifold: the population-level
+minimizers of \(L\) are precisely the calibrated pivots in
+\(\mathcal{F}\), nothing else.
 
-This is what is meant by \textbf{strict propriety}: a loss is
+\textbf{Theorem 3.2 (Strict propriety of NF-MLE).}\label{thm:strictprop}
+\emph{Let \(\mathcal{F}\) be a class of measurable functions
+\(r: \Theta \times \mathcal{X} \to \mathbb{R}^d\) every element of which
+satisfies the invertibility condition (R2) of \S\ref{subsec:2.2} (or
+its autoregressive analogue (R2\(^{\mathrm{auto}}\)) of \S\ref{subsec:6.1};
+the two are equivalent for our purposes). Then}
+\[
+\arg\min_{r \in \mathcal{F}} L(r) \;=\; \mathcal{M}_\mathcal{F},
+\]
+\emph{where \(\mathcal{M}_\mathcal{F}\) is the calibration manifold
+(\S\ref{subsec:2.2}). The minimum value is the
+\(\rho\)-averaged conditional entropy \(\mathbb{E}_\rho[H(X \mid \theta)]\),
+attained by any element of \(\mathcal{M}_\mathcal{F}\) and only by such
+elements.}
+
+\emph{Proof.}
+The argument is short and turns on the KL identity. Under (R2),
+\(\hat p_r(\cdot \mid \theta) = \phi_d(r(\theta, \cdot)) \cdot |\det \partial r/\partial X|\)
+is a normalized probability density on \(\mathcal{X}\) for every fixed
+\(\theta\): the change-of-variables formula pushes \(\mathcal{N}(0, I_d)\)
+forward via \(r^{-1}\) and preserves total mass. Once \(\hat p_r\) is a
+proper density, the standard decomposition
+\(\mathbb{E}_{X \mid \theta}[-\log \hat p_r] = H(X \mid \theta) + \mathrm{KL}(p \,\|\, \hat p_r)\)
+applies. Averaging over \(\rho\) gives
+\[
+L(r) \;=\; \mathbb{E}_\rho\bigl[\mathrm{KL}\bigl(p(\cdot \mid \theta) \,\|\, \hat p_r(\cdot \mid \theta)\bigr)\bigr] \;+\; \mathbb{E}_\rho\bigl[H(X \mid \theta)\bigr],
+\]
+where the second term --- the average conditional entropy --- is
+independent of \(r\). The KL term is nonnegative and vanishes iff
+\(\hat p_r(\cdot \mid \theta) = p(\cdot \mid \theta)\) for
+\(\rho\)-a.e.\ \(\theta\). Under (R2), that equality is in turn
+equivalent to \(r(\theta_0; X) \mid \theta_0 \sim \mathcal{N}(0, I_d)\)
+for \(\rho\)-a.e.\ \(\theta_0\) (the calibration condition (C1)).
+Putting these together: \(L(r)\) is minimized exactly on
+\(\mathcal{M}_\mathcal{F}\). \(\blacksquare\)
+
+Two things are worth flagging. First, (R2) is essential: without it,
+\(\hat p_r\) is not a probability density, the KL identity in the proof
+fails, and the loss becomes unbounded below; the formal version is in
+\S\ref{subsec:3.5} and the empirical realization in \S\ref{subsec:8.4}.
+Second, this is what is meant by \textbf{strict propriety}: a loss is
 \emph{strictly proper} for a target \(\mathcal{M}\) if its
-population-level minimum, over the class of admissible \(r\), is
-attained exactly on \(\mathcal{M}\) and nowhere else. (The term comes
-from the scoring-rule literature; \citealp{GneitingRaftery2007} is the
-standard reference.) NF-MLE is strictly proper for the calibration
-manifold within the architectural class. No auxiliary independence or
-sharpness penalties are needed --- the per-sample log-density already
-encodes both calibration \emph{and} the implied sharpness of
-\(\hat p_r\).
+population-level minimum over the class of admissible \(r\) is attained
+exactly on \(\mathcal{M}\) and nowhere else. The term comes from the
+scoring-rule literature \citep{GneitingRaftery2007}; strict propriety
+for the calibration manifold means we do not need auxiliary
+independence or sharpness penalties, because the per-sample log-density
+target already encodes both calibration \emph{and} the implied sharpness
+of \(\hat p_r\) at every \(\theta\).
 
 \subsection{The role of architectural constraints in selecting from \(\mathcal{M}\)}\label{subsec:3.3}
 
@@ -823,36 +869,88 @@ scalability, and tooling.
 
 \subsection{Why architectural monotonicity in \(X\) is essential}\label{subsec:3.5}
 
-If \(r\) is not bijective in \(X\) at fixed \(\theta\), the
-change-of-variables formula does not apply, and \(\hat p_r\) is not a
-valid density. NF-MLE then becomes ill-posed. In practice --- using
-autograd to compute the Jacobian during training --- the model can find
-regions of \(X\)-space where \(r\) folds and the local
-\(|\partial r / \partial X|\) becomes very large; this gives an
-artificially low loss while \(\hat p_r\) is not actually matching \(p\).
-Concretely: let
-\(Z(\theta) := \int_\mathcal{X} \hat p_r(X \mid \theta)\,dX\) be the
-total mass of the surrogate density. Under folding the change-of-variables
-formula under-counts (it keeps only one of multiple preimages), driving
-\(Z(\theta) > 1\). Substituting the normalized density
-\(\hat p_r / Z(\theta)\) into the KL identity gives
-\[
-\mathbb{E}_{X \mid \theta}[-\log \hat p_r] = \mathrm{KL}\!\bigl(p \,\big\|\, \hat p_r / Z(\theta)\bigr) + H(X \mid \theta) - \log Z(\theta),
-\]
-where the KL term remains nonnegative but the \(-\log Z(\theta) < 0\)
-shift breaks the conditional-entropy lower bound that ordinarily would
-hold by Gibbs's inequality. Hence \(L(r)\) can fall \emph{below} the
-loss attained by the true \(r^*\) by exactly \(\mathbb{E}_\rho[\log Z(\theta)]\).
-The empirical demonstration is in \S\ref{subsec:8.4}, where the
-autograd-Jacobian ablation attains loss \(0.56 < 0.88\) (the truth's loss).
+The previous subsection assumed (R2). What goes wrong without it?
+The failure mode has four steps; the goal of this subsection is to
+walk through them and explain why the fix has to be architectural
+rather than a soft penalty.
 
-The clean fix is to enforce strict monotonicity in \(X\) architecturally
---- either via \emph{Unconstrained Monotonic Neural Networks} (UMNNs;
+\paragraph{Step 1: the setup.}
+Theorem~\ref{thm:strictprop} got its propriety guarantee from a KL
+identity that required \(\hat p_r(\cdot \mid \theta)\) to be a valid
+normalized density on \(\mathcal{X}\). That normalization in turn came
+from the change-of-variables formula, which requires
+\(X \mapsto r(\theta; X)\) to be a bijection: each value \(y\) in the
+image is reached from exactly one \(X\), so the volume rescaling
+\(|\det \partial r / \partial X|\) reads off cleanly. (R2) is what
+guarantees this. The whole NF-MLE machinery sits on top of this
+bijectivity.
+
+\paragraph{Step 2: what folding does.}
+Now suppose \(r\) is not bijective in \(X\) at some fixed \(\theta\) ---
+the simplest example is that two distinct \(X_1, X_2\) get mapped to
+the same value \(r(\theta, X_1) = r(\theta, X_2)\). The
+change-of-variables formula then \emph{under-counts}: the correct push-
+forward at the image point would sum the contribution from each
+preimage, but the surrogate \(\hat p_r\) above keeps only one. The
+surrogate is not a probability density on \(\mathcal{X}\) at fixed
+\(\theta\); concretely, if we define
+\(Z(\theta) := \int_\mathcal{X} \hat p_r(X \mid \theta)\,dX\), folding
+drives \(Z(\theta)\) above \(1\). In practice the regions of
+\(X\)-space where \(r\) folds are precisely where
+\(|\det \partial r / \partial X|\) is large (the local volume rescaling
+goes up to compensate for the under-counting), which the autograd
+Jacobian during training picks up as ``high local likelihood'' --- the
+loss locally drops, even though the model isn't actually matching \(p\).
+
+\paragraph{Step 3: the mechanism for loss-below-truth.}
+The \(\hat p_r\) we are computing is not normalized, but the normalized
+version \(\hat p_r / Z(\theta)\) \emph{is} a probability density to which
+the KL identity applies. Substituting:
+\[
+\mathbb{E}_{X \mid \theta}\bigl[-\log \hat p_r\bigr]
+\;=\;
+\mathrm{KL}\!\bigl(p \,\big\|\, \hat p_r / Z(\theta)\bigr)
+\;+\; H(X \mid \theta)
+\;-\; \log Z(\theta).
+\]
+The KL term is still nonnegative. But the \(-\log Z(\theta)\) term is
+negative whenever \(Z(\theta) > 1\), and it acts as a free downward
+shift on the loss. Concretely, the population NF-MLE objective
+satisfies
+\(L(r) = \mathbb{E}_\rho[\mathrm{KL}(p \,\|\, \hat p_r/Z)] + \mathbb{E}_\rho[H(X \mid \theta)] - \mathbb{E}_\rho[\log Z(\theta)]\).
+For a normalized density (\(Z \equiv 1\)) the last term is zero and we
+recover Theorem~\ref{thm:strictprop}; for a folded \(r\) with
+\(\mathbb{E}_\rho[\log Z(\theta)] > 0\), the loss falls below the
+average conditional entropy --- by exactly that gap.
+
+\paragraph{Step 4: the consequence and the empirical realization.}
+This is not a small effect. \S\ref{subsec:8.4} runs the ablation
+referenced in \S\ref{subsec:2.4}: same exponential-rate model, trained
+with and without architectural (R2). The truth achieves the population
+entropy lower bound, \(0.88\); the ablation reaches \(0.56\). The gap
+\(0.32\) is empirically attributable to the
+\(-\mathbb{E}_\rho[\log Z(\theta)]\) shift, i.e.\ the trained network
+has discovered an architecture configuration where \(Z(\theta) \approx e^{0.32} \approx 1.38\)
+on average. There is no penalty term that would dissuade gradient descent
+from doing this: from the loss's perspective, lower is better.
+
+\paragraph{The fix has to be architectural.}
+A regularizer that penalizes deviation of \(Z(\theta)\) from \(1\) would
+require estimating \(Z(\theta)\) by Monte Carlo on \(X\)-space at each
+gradient step, which is expensive and noisy. The clean fix is to make
+folding impossible by construction: arrange the architecture so that
+\(X \mapsto r(\theta; X)\) is provably injective for every \(\theta\)
+the network can express. Two parameterizations achieve this:
+\emph{Unconstrained Monotonic Neural Networks} (UMNNs;
 \citealp{WehenkelLouppe2019}), which represent a scalar monotone
-function as the integral of a positive function from a free neural net,
-or via
-autoregressive triangular structure. In both cases the Jacobian is
-closed-form and positive by construction.
+function as the integral of a strictly positive function from a free
+neural net; and \emph{autoregressive triangular flows}, where each
+\(r_k\) depends only on coordinates with index \(\le k\) and is monotone
+in its own coordinate. In both cases the Jacobian is closed-form and
+positive by construction, so \(\hat p_r\) is a normalized density and
+the strict-propriety guarantee of Theorem~\ref{thm:strictprop} applies.
+The architectural choices are developed in detail in \S\ref{sec:6}
+(triangular flows) and \S\ref{subsec:7.1} (UMNNs).
 
 \medskip\hrule\medskip
 
@@ -864,6 +962,28 @@ over a suitable class, are exactly the calibration manifold
 \(\mathcal{M}\) --- admits multiple families of candidate losses. This
 subsection situates NF-MLE within that design space and contrasts with
 the choices made by other SBI methods.
+
+\paragraph{Five classes, briefly previewed.}
+A natural reader might ask: why this particular loss? What about all
+the other ways to make the empirical distribution of \(\Phi(r(\theta, X))\)
+look like \(U(0, 1)^d\)? We consider five candidate classes of
+objective and show that exactly one delivers strict propriety for the
+calibration manifold without auxiliary penalties. \textbf{Class 1}
+(two-sample distance on the marginal pushforward) is strictly proper
+for marginal calibration only --- it cannot tell the difference between
+conditional calibration and a mixture of miscalibrated conditionals
+that happen to average to uniform marginally. \textbf{Class 2}
+(marginal calibration + an independence penalty) fixes Class 1 in the
+population limit but is finite-sample fragile, because the independence
+estimator has weak gradients and an unprincipled balance with the
+marginal term. \textbf{Class 3} (stratified per-\(\theta\)-bin matching)
+is strictly proper but requires \(K^d\) bins, defeating the point of
+amortized inference. \textbf{Class 4} (scoring rules like CRPS or
+pinball applied to the residual against \(\mathcal{N}(0, I_d)\)) gets
+the propriety direction backwards and collapses \(r\) to a constant.
+\textbf{Class 5} is NF-MLE (the choice of this paper), strictly proper
+on the calibration manifold by Theorem~\ref{thm:strictprop}. The
+subsections below unpack each class.
 
 \emph{Brief glossary for what follows.} The \textbf{Cramér--von Mises
 (CvM)} distance is \(\int (F_n(z) - F_0(z))^2\, dF_0(z)\), a strictly
@@ -918,14 +1038,28 @@ the entire motivation for amortized inference.
 \textbf{Class 4: Scoring rules on standardized residuals.} Apply a
 strictly proper scoring rule --- CRPS, pinball --- to \(r(\theta, X)\)
 against the reference \(\mathcal{N}(0, I_d)\). \textbf{Directional
-propriety error.} Recall the standard form: a scoring rule \(S(F, y)\)
-is strictly proper if for any \(G^*\), the expectation
-\(\mathbb{E}_{Y \sim G^*}[S(F, Y)]\) over the \emph{sample} is minimized
-over the \emph{forecast} \(F\) at \(F = G^*\). Here the situation is
-reversed: the reference \(F = \mathcal{N}(0, I_d)\) is fixed and
-\(Y = r(\theta, X)\) is the learned quantity, so we are minimizing over
-the \emph{sample distribution} \(G\) with \(F\) fixed, which is not the
-proper direction. Concretely, using the dual ("kernel-score") form of
+propriety error.} The intuition: a proper scoring rule \(S(F, y)\)
+rewards a \emph{forecast} \(F\) for being close to the distribution
+that produced the observed sample \(y\). It is proper in the
+forecast direction: fix where the data are coming from, vary the
+forecast. Here we are doing the opposite --- we have fixed the
+forecast (the standard Gaussian we want \(r\) to look like) and are
+varying what the data look like (the law of \(r\) under the network's
+parameters). That sign flip turns ``strictly proper'' into ``actively
+incentivized to collapse'': the scoring rule, applied this way,
+rewards the network for producing a sample distribution close to the
+\emph{median} of the reference --- which for a symmetric distribution
+like \(\mathcal{N}(0, I_d)\) is a single point. We sketch the
+calculation.
+
+Recall the standard form: a scoring rule \(S(F, y)\) is strictly proper
+if for any \(G^*\), the expectation \(\mathbb{E}_{Y \sim G^*}[S(F, Y)]\)
+over the \emph{sample} is minimized over the \emph{forecast} \(F\) at
+\(F = G^*\). Here the situation is reversed: the reference
+\(F = \mathcal{N}(0, I_d)\) is fixed and \(Y = r(\theta, X)\) is the
+learned quantity, so we are minimizing over the \emph{sample
+distribution} \(G\) with \(F\) fixed, which is not the proper
+direction. Concretely, using the dual ("kernel-score") form of
 CRPS \citep{GneitingRaftery2007},
 \(\mathrm{CRPS}(F, y) = \mathbb{E}_{Z \sim F}|Z - y| - \tfrac{1}{2}\,\mathbb{E}_{Z, Z' \sim F}|Z - Z'|\),
 and taking \(Y \sim G\),
