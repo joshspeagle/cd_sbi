@@ -482,7 +482,8 @@ true model's 0.88). Enforcing (R2) architecturally fixes this.
 
 \subsection{What a normalizing flow is, and the statement of the loss}\label{subsec:3.1}
 
-A \emph{normalizing flow} is a parametric family of diffeomorphisms
+A \emph{normalizing flow} \citep[for an overview,
+see][]{PapamakariosEtAl2021} is a parametric family of diffeomorphisms
 \(r: \mathcal{X} \to \mathbb{R}^d\) that transforms a complicated source
 density \(p(X)\) into a simple base density \(\phi_d\) (we use a
 standard Gaussian throughout). Conditional on \(\theta\), the implied
@@ -1267,7 +1268,9 @@ matrix is lower-triangular and its determinant is the product of
 diagonal entries. This is the multivariate generalization of (R1) + (R2)
 into a structure that scales linearly in \(d\) and admits closed-form
 Jacobians. Standard references on this architectural pattern include
-\citet{PapamakariosEtAl2021} and \citet{DurkanEtAl2019}.
+the masked autoregressive flow of \citet{PapamakariosEtAl2017}, the
+survey of \citet{PapamakariosEtAl2021}, and the neural spline flow of
+\citet{DurkanEtAl2019}.
 
 \subsection{The architectural class}\label{subsec:6.1}
 
