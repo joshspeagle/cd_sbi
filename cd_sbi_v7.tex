@@ -2991,6 +2991,14 @@ implementation challenge (efficient \(C_\alpha\) computation in
 
 \section{Open problems}\label{sec:11}
 
+The eight open problems below group naturally by theme. We mark each
+group with a small heading; the §11.X subsection numbering is preserved
+for cross-referencing.
+
+\medskip
+\noindent\textit{Theoretical extensions.}
+\medskip
+
 \subsection{Uniqueness beyond the autoregressive triangular class}\label{subsec:11.1}
 Theorem A-d (\S\ref{subsec:6.3}) establishes uniqueness within autoregressive
 triangular flows: the calibration manifold is the singleton
@@ -3039,28 +3047,55 @@ Lemma~4.2's generalization (\S\ref{subsec:4.2} remark) covers the
 architectural enforcement of strict \(X\)-monotonicity (UMNN /
 triangular flows) makes the question moot.
 
+\medskip
+\noindent\textit{Robustness.}
+\medskip
+
 \subsection{Misspecification}\label{subsec:11.4}
-When the simulator does not exactly
-generate the data, the calibration target \(\mathcal{N}(0, I_d)\)
-becomes wrong. Under misspecification, the population minimizer of
-NF-MLE is the \emph{forward-KL projection} (the
+When the simulator does not exactly generate the data, the calibration
+target \(\mathcal{N}(0, I_d)\) becomes wrong. Under misspecification,
+the population minimizer of NF-MLE is the \emph{forward-KL projection}
+(the
 \(\mathrm{argmin}_{r \in \mathcal{F}} \mathbb{E}_\rho[\mathrm{KL}(p(\cdot \mid \theta) \,\|\, \hat p_r(\cdot \mid \theta))]\)
 direction, called the \(M\)-projection in the modern Bregman-geometry
 sense) of the true conditional \(p(\cdot \mid \theta)\) onto the
 architectural class. What this object's coverage properties are ---
 and whether CD-SBI inherits a degraded but still useful guarantee ---
-is open. \citet{WehenkelEtAl2025} study a related question via
-\emph{RoPE}, an optimal-transport calibration method that uses a small
-real-world calibration set of \((\theta, X)\) pairs to learn the
-simulator-vs-real misspecification gap; this is a different mechanism
-from the projection question above, and a direct coverage-degradation
-analysis of the forward-KL projection of \(p\) onto \(\mathcal{F}\) is,
-to our knowledge, still missing. Other robust-SBI ideas should also integrate with CD-SBI but the right
-framework is unclear: \citet{SchmonEtAl2020} introduce generalized
-posteriors / power-posterior reweighting in the ABC setting, while
-\citet{DellaportaEtAl2022} use an MMD posterior bootstrap. Both target
-robustness to misspecification but via mechanisms distinct from the
-forward-KL projection at issue here and from RoPE.
+is open.
+
+Three nearby threads in the SBI literature work on related problems
+via mechanisms distinct from the forward-KL projection above:
+\begin{itemize}
+\tightlist
+\item
+  \citet{WehenkelEtAl2025} introduce \emph{RoPE} (Robust Posterior
+  Estimation), an optimal-transport calibration method that uses a
+  small real-world calibration set of \((\theta, X)\) pairs to learn
+  the simulator-vs-real misspecification gap. RoPE is a separate
+  calibration stage layered on top of any SBI training, rather than a
+  modification of the training objective itself.
+\item
+  \citet{SchmonEtAl2020} introduce \emph{generalized posteriors} in the
+  ABC setting --- a family of power-posterior reweightings
+  \(\pi(\theta) \propto p(\theta) \cdot \mathcal{L}(\theta)^\eta\) for
+  \(\eta \in (0, 1)\), which tempers the influence of a misspecified
+  likelihood. The downweighting parameter \(\eta\) trades off bias
+  versus robustness.
+\item
+  \citet{DellaportaEtAl2022} use the \emph{MMD posterior bootstrap}: an
+  approximate Bayesian update built on the maximum-mean-discrepancy
+  loss between simulated and observed data, which is robust to model
+  misspecification by virtue of MMD's continuity in the data-generating
+  distribution.
+\end{itemize}
+A direct coverage-degradation analysis of the forward-KL projection of
+\(p\) onto \(\mathcal{F}\) --- the projection that NF-MLE actually
+delivers in the misspecified setting --- is, to our knowledge, still
+missing.
+
+\medskip
+\noindent\textit{Scaling and practice.}
+\medskip
 
 \subsection{Higher-dimensional scaling}\label{subsec:11.5}
 The triangular flow scales linearly in \(d\) for the Jacobian, but
@@ -3110,6 +3145,10 @@ sufficient in general, the atom probabilities \(p_\theta(t)\) become
 feature-extractor-dependent, and the (R4) order-preservation condition
 loses its architectural cleanness because the ordering of \(T\)-values
 is itself learned.
+
+\medskip
+\noindent\textit{Engineering.}
+\medskip
 
 \subsection{Efficient computation of \(\mathcal{C}_\alpha\) for
 multivariate (implementation challenge, not a research problem)}\label{subsec:11.8}
@@ -3170,16 +3209,17 @@ Empirical: 2D location, \(\Sigma\) correlated, recovers \(L^{-1}\) &
 Validated (\S\ref{subsec:8.3}) & Jacobian within 1--2\% of KR; coverage exact \\
 Empirical: exponential rate doubly-monotone & Validated (\S\ref{subsec:8.4}) & RMSE
 0.045; autograd ablation produces direct evidence for (R2) \\
-Uniqueness outside autoregressive triangular class & Open (\S\ref{subsec:11.1}) &
-Rotational ambiguity in dense flows \\
-KR ordering selection for unordered data & Open (\S\ref{subsec:11.2}) & Multiple valid
+Uniqueness outside autoregressive triangular class & Open --- theoretical extension (\S\ref{subsec:11.1}) &
+Rotational ambiguity in dense flows; architectural enforcement avoids it \\
+KR ordering selection for unordered data & Open --- theoretical extension (\S\ref{subsec:11.2}) & Multiple valid
 pivots; finite-sample comparison unclear \\
-(R3) automatic for Lipschitz & Open (\S\ref{subsec:11.3}) & Architectural enforcement
+(R3) automatic for Lipschitz & Open but practically moot --- theoretical extension (\S\ref{subsec:11.3}) & Architectural enforcement
 sufficient in practice \\
-Misspecification & Open (\S\ref{subsec:11.4}) & Not addressed \\
-Higher-\(d\) scaling & Open (\S\ref{subsec:11.5}) & \(d \leq 2\) validated;
-\(d \leq 10\) next milestone \\
-Sequential refinement & Open (\S\ref{subsec:11.6}) & Theory unclear \\
+Misspecification & Open --- robustness (\S\ref{subsec:11.4}) & Coverage degradation under forward-KL projection unanalyzed \\
+Higher-\(d\) scaling & Open --- scaling milestone (\S\ref{subsec:11.5}) & \(d \le 2\) validated; AR flows known to scale to \(d_\theta \sim 10\) elsewhere \\
+Sequential refinement & Open --- scaling \& practice (\S\ref{subsec:11.6}) & Naive variant loses calibration; corrected variant open \\
+Discrete data without scalar SS & Open --- scaling \& practice (\S\ref{subsec:11.7}) & Learned-feature randomization unstudied \\
+Efficient \(C_\alpha\) computation in \(d \ge 3\) & Open --- engineering (\S\ref{subsec:11.8}) & Three standard approaches exist; visualization in higher \(d\) is the practical bottleneck \\
 \end{longtable}
 
 \medskip\hrule\medskip
