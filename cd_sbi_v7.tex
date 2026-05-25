@@ -936,9 +936,14 @@ a.e.}
 
 \emph{Proof.} By Rademacher's theorem (a Lipschitz function on
 \(\mathbb{R}^n\) is differentiable Lebesgue-a.e.), \(r\) is
-differentiable a.e. By (R3), \(\psi_{\theta_0}(X) := r(\theta_0; X)\) is
-strictly monotone in \(X\). By Lemma 4.3, \(\psi_{\theta_0}\) pushes
-\(\mathcal{N}(\theta_0, 1)\) to \(\mathcal{N}(0,1)\). By Lemma 4.1 (1D
+differentiable a.e. The Lipschitz form of (R2) plus (R3) makes
+\(X \mapsto r(\theta_0; X)\) a bi-Lipschitz homeomorphism onto its
+image, so the change-of-variables formula applies a.e.\ and Lemma~4.3
+extends to this class (see the Lipschitz / autoregressive remark
+following Lemma~4.3 in \S\ref{subsec:4.2}). Thus
+\(\psi_{\theta_0}(X) := r(\theta_0; X)\) pushes
+\(\mathcal{N}(\theta_0, 1)\) to \(\mathcal{N}(0,1)\). By (R3),
+\(\psi_{\theta_0}\) is strictly monotone in \(X\). By Lemma 4.1 (1D
 monotone rearrangement, valid for any pair of atomless probability
 measures on \(\mathbb{R}\)),
 \(\psi_{\theta_0}(X) \in \{X - \theta_0,\, \theta_0 - X\}\) a.e. Sign
@@ -1014,10 +1019,25 @@ of \S\ref{subsec:5.1}, within the class
 \(\mathcal{F}^T_{C^1} := \{r : t \mapsto r(\theta_0; T^{-1}(t)) \in C^1 \text{ for each } \theta_0\}\),
 we have \(\mathcal{M} \cap \mathcal{F}^T_{C^1} = \{r^*\}\).}
 
-\emph{Proof sketch.} Apply Theorem A in \(t = T(X)\) coordinates. The
-pushforward density of \(T(X) \mid \theta_0\) is continuous and positive
-on its support. The same three-lemma argument applies, with the source
-density playing the role of the Gaussian. Direction is fixed by MLR.
+\emph{Proof.} Work in \(t = T(X)\) coordinates. The pushforward density
+\(g_{T \mid \theta_0}(t)\) is continuous and positive on its support
+(D-EF). The three-lemma argument of Theorem A then applies:
+\begin{itemize}
+\tightlist
+\item Lemma 4.3 (Lipschitz / autoregressive remark, \S\ref{subsec:4.2})
+  gives \(t \mapsto \tilde r(\theta_0; t)\) pushes
+  \(g_{T \mid \theta_0}\) forward to \(\mathcal{N}(0,1)\), for
+  \(\rho\)-a.e.\ \(\theta_0\), under the NF-MLE / (R2) hypotheses.
+\item Lemma 4.2 (general source remark, \S\ref{subsec:4.2}) applies with
+  source \(g_{T \mid \theta_0}\) (continuous positive density on
+  \(\mathrm{supp}(T)\)) and target \(\mathcal{N}(0,1)\) (continuous
+  finite density), yielding strict monotonicity in \(t\).
+\item Lemma 4.1 then identifies \(\tilde r(\theta_0; t)\) as one of two
+  monotone branches mapping \(g_{T \mid \theta_0}\) to
+  \(\mathcal{N}(0,1)\); the increasing branch under increasing MLR is
+  \(\Phi^{-1}(1 - F_{\theta_0}(t))\), giving \(r^*\). Direction is fixed
+  by MLR.
+\end{itemize}
 \(\blacksquare\)
 
 \subsection{Worked examples}\label{subsec:5.3}
@@ -1094,14 +1114,43 @@ new condition:
 \textbf{Theorem C* (Discrete).} \emph{Under (R1)--(R4), the unique pivot
 in the randomized calibration manifold is \(r^*_\mathrm{rand}\).}
 
-The proof is a ``lex-order monotone rearrangement'': the source measure
-\(P_\theta \otimes U(0,1)\) on \(\mathrm{supp}(T) \times [0,1]\) has, in
-lexicographic order \((T, U)\), a unique monotone measure-preserving map
-to \(U(0,1)\), namely \(V^*_\theta\). (R4) is what fixes the lex order
-across \(T\)-values; without it, ``interleaving'' counterexamples exist.
+\emph{Proof.} For each fixed \((\theta, t)\) with \(t \in \mathrm{supp}(T)\),
+(R3\(_U\)) makes \(U \mapsto V_\theta(X(t), U)\) strictly monotone, and
+(R2) makes it a bijection from \([0,1]\) to a sub-interval of \([0,1]\)
+of length \(p_\theta(t)\). (R4) positions this sub-interval immediately
+above the corresponding sub-interval for any \(t' < t\) in
+\(\mathrm{supp}(T)\). Stacking these sub-intervals in increasing
+\(t\)-order (the lex order \((T, U)\)) is the unique tiling that
+(i) preserves the marginal mass \(p_\theta(t)\) of each atom, (ii)
+respects the within-atom monotonicity from (R3\(_U\)) and (R4)'s
+cross-atom order, and (iii) covers \([0,1]\) without overlap. That
+tiling is exactly \(V^*_\theta\). The composition
+\(r = \Phi^{-1}(1 - V_\theta)\) is then uniquely \(r^*_\mathrm{rand}\),
+with the sign of \(\Phi^{-1}\)'s composition fixed by (R1).
 
-\textbf{Explicit counterexample.} Take
-\(X \sim \mathrm{Bin}(1, \theta)\), so \(T(X) = X \in \{0,1\}\),
+Dropping any one of (R1)--(R4) breaks uniqueness: without (R1), the
+\(\theta\)-direction is ambiguous; without (R2), \((T, U) \mapsto V\) is
+not a bijection onto \([0,1]\); without (R3\(_U\)), the within-atom
+order is unconstrained; without (R4), a different tiling that
+interleaves \(T\)-atoms across \(U\) gives an alternative calibrated
+pivot. \(\blacksquare\)
+
+\textbf{Explicit counterexample.}
+%
+% TODO(round1-escalation): The Bin(1, θ) construction below does NOT
+% actually separate (R4) from (R3_U) — under any monotone-in-U completion
+% of V'_θ(1, ·), (R4) is preserved; under any completion that violates
+% (R4), (R3_U) breaks via a downward jump at U = 1/2. A genuine
+% separation requires a model with ≥ 3 T-atoms (e.g. Bin(2, θ)) so that
+% a non-trivial T-permutation exists while monotone-in-U is preserved
+% within each atom. See reviews/round1/part3_1d_theory.md, claim
+% C-5.7-counterex. Replacement Bin(2, θ) construction deferred for
+% user review.
+%
+\emph{[Construction below preserved from v6 pending user review; flagged
+as not actually separating (R4) from (R3\(_U\)) --- a Bin(2, \(\theta\))
+replacement is the recommended fix; see }\texttt{reviews/round1/part3\_1d\_theory.md} \emph{claim C-5.7-counterex.]}
+Take \(X \sim \mathrm{Bin}(1, \theta)\), so \(T(X) = X \in \{0,1\}\),
 \(p_\theta(0) = 1-\theta\), \(p_\theta(1) = \theta\). The canonical
 \(V_\theta\) assigns \(X = 0\) to the sub-interval \([0, 1-\theta]\) of
 \((0,1)\) and \(X = 1\) to \([1-\theta, 1]\): \[
@@ -1138,15 +1187,19 @@ rigidity (Lemma~4.2 in \(C^1\), or strict-monotonicity-in-\(X\) under
 
 A deterministic alternative is the ``mid-p'' CD, fixing \(U = 1/2\): \[
 H^\mathrm{mid}_\theta(X) \;:=\; 1 - V_\theta(X, 1/2).
-\] This is approximately calibrated, with total-variation error from
-exact \(U(0,1)\) bounded by
-\(\tfrac{1}{2}\sup_{\theta,t} p_\theta(t) = O(1/\sqrt{n})\) for
-\(\mathrm{Bin}(n,\theta)\) at moderate \(\theta\). For applications
-where ease of implementation outweighs the small calibration error, the
-mid-p variant trains \(r(\theta; X)\) directly with \(U\) fixed at
-\(1/2\), dropping the auxiliary input. See Hwang \& Yang (2001) for the
-optimality theory of mid-p in the closely related contingency-table
-setting.
+\] This is approximately calibrated: the law of \(V_\theta(X, 1/2)\)
+is purely atomic, so its total variation from \(U(0,1)\) equals
+\(1\); the relevant metric is the \emph{Kolmogorov (uniform CDF)
+distance} \(K(\theta) := \sup_v |P_\theta(V^\mathrm{mid} \le v) - v|\),
+which equals \(\tfrac{1}{2} \sup_{t \in \mathrm{supp}(T)} p_\theta(t)\)
+(achieved at \(v = F_\theta(t_*) - \tfrac{1}{2} p_\theta(t_*)\) for the
+mode \(t_*\)). For \(\mathrm{Bin}(n, \theta)\) at moderate \(\theta\),
+the local CLT gives \(\sup_t p_\theta(t) = \Theta(1/\sqrt{n})\), so
+\(K(\theta) = O(1/\sqrt{n})\). For applications where ease of
+implementation outweighs the small calibration error, the mid-p variant
+trains \(r(\theta; X)\) directly with \(U\) fixed at \(1/2\), dropping
+the auxiliary input. See Hwang \& Yang (2001) for the optimality theory
+of mid-p in the closely related contingency-table setting.
 
 \medskip\hrule\medskip
 
