@@ -50,9 +50,31 @@ intermediate Bin(2, θ) attempt also fails; see
 caught a sign-convention issue in the manuscript's (R4), which has been
 corrected.
 
-Round 2 (literature & citations + BibTeX migration) is the next phase;
-see `/home/joshspeagle/.claude/plans/our-first-task-will-mellow-harbor.md`
-for the workflow plan.
+## Round-2 status (May 2026)
+
+Round 2 of the vetting workflow is **complete**.
+
+- `cd_sbi.bib` at the repo root holds 42 BibTeX entries (the 30 from the
+  v6 References section, two papers cited inline but missing from v6
+  (Lueckmann 2021, MAF 2017), and Knothe 1957 added in round 2).
+- The manuscript is migrated to natbib (`\cite`/`\citet`/`\citep`).
+  Build cycle is `pdflatex → bibtex → pdflatex → pdflatex`.
+- `references/<bibkey>.md` contains a paper note for each cited entry,
+  built by seven parallel lit-review agents (one per Part).
+- `reviews/round2/` holds the citation inventory and the seven
+  per-Part lit-review reports.
+- Integrated attribution corrections: §1.1 Hermans-2022 scope (three
+  families, not four); §7.1 UMNN (W&L use ELU+1 + Clenshaw-Curtis,
+  not softplus + Gauss-Legendre — softplus is our substitution);
+  §6.3 add Knothe 1957 to KR citation; §11.2 drop "entropic/" from
+  Carlier-Galichon-Santambrogio characterization; §11.4 Wehenkel 2025
+  mechanism is RoPE (OT-on-real-data), not generalized Bayes; §11.6
+  Lueckmann 2021 doesn't measure coverage so removed from the
+  sequential-miscalibration citation; PatelEtAl2023 venue upgraded
+  to ICML 2024.
+
+Round 3 (holistic review and cleanup) is the next phase; per the plan,
+the user re-plans round 3's scope after round 2 lands.
 
 ## Conceptual map of the draft
 
