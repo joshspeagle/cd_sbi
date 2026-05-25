@@ -176,10 +176,11 @@ On benchmarks with adequate simulation budgets, these methods are
 accurate.
 
 The problem is \emph{miscalibration}. \citet{HermansEtAl2022} (``A
-Trust Crisis in Simulation-Based Inference?'') documented that all four
-major SBI families systematically produce \emph{overconfident}
-posteriors at realistic budgets --- credible intervals have empirical
-coverage well below nominal. Subsequent work has tried to retrofit
+Trust Crisis in Simulation-Based Inference?'') documented that the
+major neural SBI families benchmarked there (NPE, NRE, and ABC variants)
+systematically produce \emph{overconfident} posteriors at realistic
+budgets --- credible intervals have empirical coverage well below
+nominal. Subsequent work has tried to retrofit
 calibration via conservative regularization \citep{DelaunoyEtAl2022},
 differentiable coverage probabilities \citep{FalkiewiczEtAl2023},
 Neyman-construction wrappers (LF2I: \citealp{DalmassoEtAl2024}; WALDO:
@@ -1374,8 +1375,8 @@ sample, vs.~\(O(d^3)\) for a general dense Jacobian.
 
 \emph{Optimal-transport context, briefly.} Between two probability
 measures on \(\mathbb{R}^d\), the \textbf{Knothe--Rosenblatt
-rearrangement} \citep{Rosenblatt1952} is the unique transport map of
-triangular form: each coordinate transformation conditions on
+rearrangement} \citep{Knothe1957, Rosenblatt1952} is the unique transport
+map of triangular form: each coordinate transformation conditions on
 previously-transformed coordinates. It differs from the \textbf{Brenier
 map} \citep{Brenier1991}, which is the unique transport map that is the
 gradient of a convex function (the \(L^2\)-optimal transport plan). KR
@@ -1563,24 +1564,26 @@ gives
 
 \subsection{UMNN building blocks}\label{subsec:7.1}
 
-\textbf{Definition (UMNN; \citealp{WehenkelLouppe2019}).} A
-\emph{Unconstrained Monotonic Neural Network} parameterizes a scalar
-function \(g(z; c)\) that is strictly monotone-increasing in \(z\) at
-fixed context \(c\) by writing \[
-g(z; c) = \mathrm{bias}(c) + \int_{z_0}^z \mathrm{softplus}\bigl(\mathrm{MLP}(t, c)\bigr)\, dt,
-\] where \(\mathrm{MLP}(\cdot, c)\) is an unconstrained neural network.
-The integrand is positive everywhere (softplus is positive), so the
-exact \(g\) is strictly monotone in \(z\) by construction. The exact
-derivative is \(\partial_z g(z; c) = \mathrm{softplus}(\mathrm{MLP}(z, c))\)
---- the Jacobian factor needed for NF-MLE is available without recursive
-autograd. We use Gauss--Legendre quadrature (\(n = 12\) nodes by
-default) to evaluate the integral. The deployed \(g\) is then a positive
-linear combination of softplus values evaluated at the nodes, so it
+\textbf{Definition (UMNN; \citealp{WehenkelLouppe2019}, with two
+implementation substitutions).} A \emph{Unconstrained Monotonic Neural
+Network} parameterizes a scalar function \(g(z; c)\) that is strictly
+monotone-increasing in \(z\) at fixed context \(c\) by writing \[
+g(z; c) = \mathrm{bias}(c) + \int_{z_0}^z \sigma_+\bigl(\mathrm{MLP}(t, c)\bigr)\, dt,
+\] where \(\mathrm{MLP}(\cdot, c)\) is an unconstrained neural network
+and \(\sigma_+\) is any strictly positive activation. The original
+formulation \citep{WehenkelLouppe2019} uses
+\(\sigma_+(x) = \mathrm{ELU}(x) + 1\) with Clenshaw--Curtis quadrature;
+in this paper we substitute \(\sigma_+ = \mathrm{softplus}\) with
+\(n = 12\)-node Gauss--Legendre quadrature, which is more standard in
+modern UMNN implementations and which simplifies the closed-form
+derivative \(\partial_z g(z; c) = \sigma_+(\mathrm{MLP}(z, c))\) used
+as the Jacobian factor in NF-MLE without recursive autograd. The deployed \(g\) under quadrature is a positive
+linear combination of \(\sigma_+\) values evaluated at the nodes, so it
 inherits strict monotonicity from the integrand; we use the analytical
-\(\mathrm{softplus}(\mathrm{MLP}(z, c))\) as the Jacobian factor in
-NF-MLE rather than the exact derivative of the quadrature polynomial, a
-discrepancy that is negligible at \(n = 12\) on the smooth
-\(\mathrm{softplus}(\mathrm{MLP})\) integrand class used here.
+\(\sigma_+(\mathrm{MLP}(z, c))\) as the Jacobian factor rather than the
+exact derivative of the quadrature polynomial, a discrepancy that is
+negligible at \(n = 12\) on the smooth \(\sigma_+ \circ \mathrm{MLP}\)
+integrand class used here.
 
 Hidden width 32 throughout. Final-layer weights initialized to zero so
 the bias dominates at init and the model starts near a near-identity
@@ -2236,7 +2239,9 @@ have better finite-sample optimization behavior --- easier-to-learn
 conditionals, lower variance gradients --- is an empirical question
 worth investigating. The optimal-transport literature
 \citep{CarlierEtAl2010} connects KR maps to Brenier maps through an
-entropic/diagonal-scaling continuation, raising the
+anisotropic-quadratic-cost continuation (taking the cost weights
+\(\lambda_1 \gg \cdots \gg \lambda_d\) as the limit recovers KR), raising
+the
 \emph{conjecture} that a more isotropic transport target might give
 better-behaved finite-sample training; this is unexplored in the CD-SBI
 context. We are not aware of any published study comparing KR orderings
@@ -2266,20 +2271,28 @@ direction, called the \(M\)-projection in the modern Bregman-geometry
 sense) of the true conditional \(p(\cdot \mid \theta)\) onto the
 architectural class. What this object's coverage properties are ---
 and whether CD-SBI inherits a degraded but still useful guarantee ---
-is open. \citet{WehenkelEtAl2025} study a related question via a
-reweighted / generalized-Bayes robust SBI objective; a direct
-coverage-degradation analysis of the forward-KL projection of \(p\)
-onto \(\mathcal{F}\) is, to our knowledge, still missing.
-Robust-SBI ideas \citep{SchmonEtAl2020, DellaportaEtAl2022} should also
-integrate with CD-SBI but the right framework is unclear.
+is open. \citet{WehenkelEtAl2025} study a related question via
+\emph{RoPE}, an optimal-transport calibration method that uses a small
+real-world calibration set of \((\theta, X)\) pairs to learn the
+simulator-vs-real misspecification gap; this is a different mechanism
+from the projection question above, and a direct coverage-degradation
+analysis of the forward-KL projection of \(p\) onto \(\mathcal{F}\) is,
+to our knowledge, still missing. Other robust-SBI ideas should also integrate with CD-SBI but the right
+framework is unclear: \citet{SchmonEtAl2020} introduce generalized
+posteriors / power-posterior reweighting in the ABC setting, while
+\citet{DellaportaEtAl2022} use an MMD posterior bootstrap. Both target
+robustness to misspecification but via mechanisms distinct from the
+forward-KL projection at issue here and from RoPE.
 
 \subsection{Higher-dimensional scaling}\label{subsec:11.5}
 The triangular flow scales linearly in \(d\) for the Jacobian, but
 conditioning networks for high-\(k\) components carry growing context
-dimension. Autoregressive flows scale routinely to \(d \sim 30\) in the SBI
-literature \citep{LueckmannEtAl2021} and to \(d \sim 100\)+ in general
-normalizing-flow contexts \citep{PapamakariosEtAl2017, DurkanEtAl2019}.
-What is specific to CD-SBI is the requirement
+dimension. Autoregressive flows in the SBI literature have been benchmarked at
+parameter dimensions up to \(d_\theta \sim 10\) and observation
+dimensions up to \(d_X \sim 100\) \citep{LueckmannEtAl2021}, and reach
+\(d \sim 100\)+ in general normalizing-flow contexts
+\citep{PapamakariosEtAl2017, DurkanEtAl2019}. What is specific to CD-SBI
+is the requirement
 that the calibration--monotonicity--Jacobian triple be maintained
 jointly at scale; whether that triple remains tractable past the 2D
 experiments here, and in particular whether sparse autoregressive or
@@ -2296,9 +2309,12 @@ variant splits in two:
 \item \emph{Naive sequential CD-SBI (adapting \(\rho\) to concentrate
   near \(X_\mathrm{obs}\)) almost certainly loses pointwise calibration:}
   the adaptive \(\rho\) violates the \(\rho\)-independence-in-the-population-limit
-  argument of \S\ref{subsec:1.3}, and the broader sequential-SBI
-  literature \citep{HermansEtAl2022, LueckmannEtAl2021} has documented
-  empirical miscalibration of all naive sequential variants.
+  argument of \S\ref{subsec:1.3}, and \citet{HermansEtAl2022}
+  documented empirical miscalibration of all naive sequential variants.
+  (\citealp{LueckmannEtAl2021}'s benchmark reports distributional
+  metrics --- C2ST, MMD, KSD --- but not coverage, so it does not
+  itself document sequential-SBI miscalibration in the frequentist
+  sense.)
 \item \emph{Whether an importance-reweighted or APT-style corrected
   sequential procedure preserves the calibration guarantee is genuinely
   open.} The closest existing work is \citet{FalkiewiczEtAl2023}
