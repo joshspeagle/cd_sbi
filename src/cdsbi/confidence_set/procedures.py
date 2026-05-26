@@ -9,7 +9,7 @@ Each subtype produces a ConfidenceSet via its own mechanism:
 """
 from __future__ import annotations
 
-from typing import Callable, Protocol, runtime_checkable
+from typing import Callable, Protocol, Tuple, runtime_checkable
 
 import torch
 from scipy.stats import chi2
@@ -64,6 +64,94 @@ class PivotBasedProcedure:
             boundary_repr=torch.tensor([left, right]),
             alpha=alpha,
         )
+
+    def contains_batch(
+        self, theta_0_value, x_obs_batch: torch.Tensor, alpha: float
+    ) -> torch.Tensor:
+        """Vectorized containment test: returns a bool tensor of shape (B,)
+        indicating whether `theta_0_value` is inside the α-confidence set
+        for each X_obs in the batch.
+
+        O(1) flow forward (one batched call) — used by Coverage.
+        """
+        thresh = float(chi2.ppf(alpha, df=self.d_theta))
+        B = x_obs_batch.shape[0]
+        theta_t = torch.full(
+            (B, self.d_theta), float(theta_0_value),
+            dtype=x_obs_batch.dtype, device=x_obs_batch.device,
+        )
+        r = self.pivot_fn(theta_t, x_obs_batch)  # (B, d_theta)
+        r_sq = r.pow(2).sum(dim=-1)               # (B,)
+        return r_sq <= thresh
+
+    def confidence_set_batch(
+        self, x_obs_batch: torch.Tensor, alpha: float
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Vectorized chi-square inversion across a batch of X_obs.
+
+        Returns (left, right): each shape (B,). Only implemented for d_theta=1.
+        For each x_obs, the confidence interval is {θ : r(θ, x_obs)² ≤ chi²_{1, α}}.
+
+        Uses three fixed-iteration (40 iters) vectorized bisections in parallel
+        across the batch. At 40 iters over a 40-wide default range, tol ≈ 3.6e-11.
+        """
+        assert self.d_theta == 1, "confidence_set_batch only supports d_theta=1 in v0"
+        thresh = float(chi2.ppf(alpha, df=1))
+        B = x_obs_batch.shape[0]
+        lo, hi = self.theta_range
+        device = x_obs_batch.device
+        dtype = x_obs_batch.dtype
+
+        # Vectorized bisection #1: find center where r=0 for each x_obs.
+        # r is monotone increasing in θ (architectural guarantee), so r(lo)<0<r(hi).
+        # r(m) >= 0  →  root is in [a, m]  →  b = m
+        # r(m) <  0  →  root is in [m, b]  →  a = m
+        a = torch.full((B,), lo, dtype=dtype, device=device)
+        b = torch.full((B,), hi, dtype=dtype, device=device)
+        for _ in range(40):
+            m = 0.5 * (a + b)
+            r_m = self.pivot_fn(m.unsqueeze(-1), x_obs_batch).squeeze(-1)
+            root_le_m = r_m >= 0  # root is at or left of m
+            b = torch.where(root_le_m, m, b)
+            a = torch.where(root_le_m, a, m)
+        center = 0.5 * (a + b)
+
+        # Helper: f(θ) = r(θ)² − thresh for a batch of θ values
+        def f_batch(theta_vec: torch.Tensor) -> torch.Tensor:
+            r = self.pivot_fn(theta_vec.unsqueeze(-1), x_obs_batch).squeeze(-1)
+            return r.pow(2) - thresh
+
+        # Vectorized bisection #2: find left root of f on [lo, center].
+        # On this interval f is decreasing (r goes from large negative → 0):
+        # f(lo) > 0, f(center) ≤ 0.
+        # f(m) > 0  →  root is in [m, center]  →  a = m
+        # f(m) ≤ 0  →  root is in [lo, m]      →  b = m
+        a = torch.full((B,), lo, dtype=dtype, device=device)
+        b = center.clone()
+        for _ in range(40):
+            m = 0.5 * (a + b)
+            f_m = f_batch(m)
+            root_ge_m = f_m > 0  # root is at or right of m (f still positive)
+            a = torch.where(root_ge_m, m, a)
+            b = torch.where(root_ge_m, b, m)
+        left = 0.5 * (a + b)
+
+        # Vectorized bisection #3: find right root of f on [center, hi].
+        # On this interval f is increasing (r goes from 0 → large positive):
+        # f(center) ≤ 0, f(hi) > 0.
+        # f(m) < 0  →  root is in [m, hi]     →  a = m
+        # f(m) ≥ 0  →  root is in [center, m]  →  b = m
+        a = center.clone()
+        b = torch.full((B,), hi, dtype=dtype, device=device)
+        for _ in range(40):
+            m = 0.5 * (a + b)
+            f_m = f_batch(m)
+            root_ge_m = f_m < 0  # f still negative: root is to the right
+            a = torch.where(root_ge_m, m, a)
+            b = torch.where(root_ge_m, b, m)
+        right = 0.5 * (a + b)
+
+        return left, right
 
 
 class CriticalValueProcedure:

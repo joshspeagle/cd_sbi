@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import torch
 
+from cdsbi.confidence_set.procedures import PivotBasedProcedure
 from cdsbi.diagnostics.base import Diagnostic, DiagnosticResult
 from cdsbi.reproducibility.seeding import seed_everything
 
@@ -30,12 +31,19 @@ class Coverage(Diagnostic):
             eps = rng.standard_normal(size=(self.n_per_theta, 1))
             x = theta_t + torch.from_numpy(eps).float()
             for alpha in self.alpha_grid:
-                inside = 0
-                for i in range(self.n_per_theta):
-                    cs = trained.procedure.confidence_set(x[i : i + 1], alpha=alpha)
-                    if cs.contains(theta_0):
-                        inside += 1
-                empirical = inside / self.n_per_theta
+                # Fast path for PivotBasedProcedure: single batched forward
+                if isinstance(trained.procedure, PivotBasedProcedure):
+                    with torch.no_grad():
+                        inside_t = trained.procedure.contains_batch(theta_0, x, alpha)
+                    empirical = float(inside_t.float().mean().item())
+                else:
+                    # Fallback for non-pivot procedures: per-sample confidence_set
+                    inside = 0
+                    for i in range(self.n_per_theta):
+                        cs = trained.procedure.confidence_set(x[i : i + 1], alpha=alpha)
+                        if cs.contains(theta_0):
+                            inside += 1
+                    empirical = inside / self.n_per_theta
                 rows.append({
                     "theta_0_0": float(theta_0),
                     "alpha": float(alpha),
