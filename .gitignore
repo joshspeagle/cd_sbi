@@ -23,6 +23,9 @@ Thumbs.db
 *.swp
 *~
 
+# Local-only working notes / session handoffs (kept on disk, never committed)
+SESSION_HANDOFF.txt
+
 # Python (for any future SBI experiments)
 __pycache__/
 *.py[cod]
