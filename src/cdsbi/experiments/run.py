@@ -31,10 +31,46 @@ def _instantiate(target_path: str, **kwargs) -> Any:
 
 
 def _build_flow(cfg: DictConfig) -> Any:
-    flow_dict = OmegaConf.to_container(cfg.flow, resolve=True)
-    target = flow_dict.pop("_target_")
-    flow_dict.pop("name", None)
-    return _instantiate(target, **flow_dict)
+    """Instantiate the flow requested by cfg.method.flow, resolved against cfg.budget.
+
+    cfg.flow is the Hydra group default (always additive_umnn from config.yaml's
+    defaults list).  Each method config carries a `flow:` string label that names
+    the *intended* flow group.  When method.flow != cfg.flow.name we instantiate
+    directly from cfg.budget rather than relying on the Hydra group — this avoids
+    the Hydra 1.3 limitation where a secondary config cannot override a parent's
+    group default via a nested defaults list.
+    """
+    # lf2i uses `stat_flow` instead of `flow`; fall back so both are handled.
+    method_flow_label = OmegaConf.select(cfg, "method.flow",
+                        default=OmegaConf.select(cfg, "method.stat_flow", default=None))
+    hydra_flow_name = cfg.flow.name
+
+    if method_flow_label is None or method_flow_label == hydra_flow_name:
+        # Fast path: cfg.flow already holds the right config (cd_sbi case).
+        flow_dict = OmegaConf.to_container(cfg.flow, resolve=True)
+        target = flow_dict.pop("_target_")
+        flow_dict.pop("name", None)
+        return _instantiate(target, **flow_dict)
+
+    # Slow path: method requests a different flow than the Hydra group default.
+    # Build from first principles using cfg.budget to resolve hidden-size params.
+    if method_flow_label == "maf":
+        return _instantiate(
+            "cdsbi.flows.maf_adapter.MAFAdapter",
+            features=1,
+            context_features=1,
+            hidden=int(cfg.budget.maf_hidden),
+            num_layers=2,
+        )
+    if method_flow_label == "additive_umnn":
+        return _instantiate(
+            "cdsbi.flows.additive.AdditiveFlow1D",
+            hidden=int(cfg.budget.cdsbi_flow_hidden),
+        )
+    raise ValueError(
+        f"Unknown flow label '{method_flow_label}' in method.flow. "
+        "Expected 'maf' or 'additive_umnn'."
+    )
 
 
 def _build_simulator(cfg: DictConfig) -> Any:
@@ -152,7 +188,7 @@ def _write_index_row(cfg: DictConfig, rd: RunDir, trained, diag_results, config_
         "config_hash": config_hash,
         "experiment": cfg.experiment.name,
         "method": cfg.method.name,
-        "flow": cfg.flow.name,
+        "flow": OmegaConf.select(cfg, "method.flow", default=cfg.flow.name),
         "target": cfg.target.name,
         "budget_name": cfg.budget.name,
         "target_params": int(cfg.budget.target_params),
