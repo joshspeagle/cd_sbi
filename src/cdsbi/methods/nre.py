@@ -109,10 +109,8 @@ class NRERunner(Runner):
             arch_metadata={"method": "NRE_B", "classifier_params_actual": n_class},
         )
 
-    def n_params(self) -> dict:
-        # Build a dummy classifier to count with the correct input_dim for 1D problems
-        # (theta_dim=1, x_dim=1 -> input_dim=2)
-        dummy = build_classifier_mlp(input_dim=2, hidden=self.classifier_hidden, depth=self.classifier_depth)
+    def n_params(self, d_theta: int = 1, d_x: int = 1) -> dict:
+        dummy = build_classifier_mlp(input_dim=d_theta + d_x, hidden=self.classifier_hidden, depth=self.classifier_depth)
         head = sum(p.numel() for p in dummy.parameters())
         return {
             "backbone": 0,

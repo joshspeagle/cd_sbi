@@ -131,14 +131,13 @@ class LF2IRunner(Runner):
             arch_metadata={"method": "LF2I", "theta_ref": theta_ref, "alpha_grid": alpha_grid},
         )
 
-    def n_params(self) -> dict:
+    def n_params(self, alpha_grid_len: int = 4) -> dict:
         backbone = self.stat_flow.n_params()
         dummy = build_classifier_mlp(
             input_dim=1, hidden=self.quantile_hidden, depth=self.quantile_depth
         )
         per_net = sum(p.numel() for p in dummy.parameters())
-        # 4 α-grid points by v0 convention
-        calibration_stage = 4 * per_net
+        calibration_stage = alpha_grid_len * per_net
         return {
             "backbone": backbone,
             "head": 0,

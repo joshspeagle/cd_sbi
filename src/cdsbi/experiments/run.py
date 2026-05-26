@@ -5,22 +5,17 @@ import hashlib
 import importlib
 import json
 import logging
-import os
-import sys
-import time
 import traceback
 from pathlib import Path
 from typing import Any
 
 import hydra
-import numpy as np
 import pandas as pd
 import torch
 import yaml
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf
 
-from cdsbi.device import get_device
 from cdsbi.reproducibility.env import capture_env
 from cdsbi.reproducibility.run_dir import RunDir, RunStatus
 from cdsbi.reproducibility.seeding import seed_everything
@@ -146,7 +141,8 @@ def _run_diagnostics(cfg: DictConfig, trained, simulator, eval_data, rd: RunDir)
     return diag_results
 
 
-def _write_index_row(cfg: DictConfig, rd: RunDir, trained, diag_results, config_hash, env, n_params):
+def _write_index_row(cfg: DictConfig, rd: RunDir, trained, diag_results, config_hash, env, n_params,
+                     budget_status: str, budget_rel_err: float):
     cov_df = pd.read_parquet(rd.path / "diagnostics" / "coverage.parquet")
     coverage_error_max = float((cov_df["empirical"] - cov_df["nominal"]).abs().max())
     marg = diag_results.get("marginal_pit")
@@ -161,6 +157,8 @@ def _write_index_row(cfg: DictConfig, rd: RunDir, trained, diag_results, config_
         "target_params": int(cfg.budget.target_params),
         "actual_params_total": int(n_params["total"]),
         "actual_params_kind": n_params["kind"],
+        "budget_status": budget_status,
+        "budget_rel_err": float(budget_rel_err),
         "seed": int(cfg.seed),
         "device": env["device"],
         "git_sha": env["git_sha"],
@@ -196,9 +194,32 @@ def main(cfg: DictConfig) -> None:
             "seed": int(cfg.seed), "config_hash": config_hash,
         }, indent=2))
 
+        from cdsbi.methods.budget import validate_budget
+
         simulator = _build_simulator(cfg)
         runner = _build_method(cfg, simulator)
-        n_params = runner.n_params()
+        if cfg.method.name == "lf2i":
+            n_params = runner.n_params(alpha_grid_len=len(list(cfg.experiment.alpha_grid)))
+        elif cfg.method.name == "nre":
+            n_params = runner.n_params(d_theta=simulator.d_theta, d_x=simulator.d_x)
+        else:
+            n_params = runner.n_params()
+
+        status, rel_err = validate_budget(n_params["total"], int(cfg.budget.target_params))
+        budget_msg = (
+            f"Budget '{cfg.budget.name}' (target {cfg.budget.target_params}): "
+            f"actual {n_params['total']} (rel_err {rel_err:.1%}, status {status})"
+        )
+        if status == "unreachable":
+            log.warning(
+                f"BUDGET MISMATCH (>15%): {budget_msg} "
+                f"— proceeding but paper-table 'matched-budget' claim weakens"
+            )
+        elif status == "matched_with_warning":
+            log.warning(f"BUDGET DRIFT: {budget_msg}")
+        else:
+            log.info(budget_msg)
+
         fit_cfg = _fit_config(cfg, cfg.method.name)
         trained = runner.fit(simulator=simulator, config=fit_cfg, seed=int(cfg.seed))
 
@@ -206,7 +227,8 @@ def main(cfg: DictConfig) -> None:
         theta_eval, x_eval = simulator.sample(n_eval, rngs.eval)
 
         diag_results = _run_diagnostics(cfg, trained, simulator, (theta_eval, x_eval), rd)
-        _write_index_row(cfg, rd, trained, diag_results, config_hash, env, n_params)
+        _write_index_row(cfg, rd, trained, diag_results, config_hash, env, n_params,
+                         budget_status=status, budget_rel_err=rel_err)
 
         torch.save(
             {"arch_metadata": trained.arch_metadata, "final_loss": trained.final_loss},

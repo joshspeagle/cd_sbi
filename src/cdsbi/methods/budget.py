@@ -7,6 +7,24 @@ from typing import Callable, List, Tuple
 from cdsbi.methods.base import BudgetUnreachableError
 
 
+def validate_budget(actual_params: int, target_params: int) -> tuple[str, float]:
+    """Return (status, rel_err). Status: matched / matched_with_warning / unreachable.
+
+    Tiers:
+    - within ±10%: 'matched'
+    - within ±15%: 'matched_with_warning'
+    - outside ±15%: 'unreachable'
+
+    Caller decides whether to warn / raise based on status.
+    """
+    rel_err = abs(actual_params - target_params) / target_params
+    if rel_err <= 0.10:
+        return "matched", rel_err
+    elif rel_err <= 0.15:
+        return "matched_with_warning", rel_err
+    return "unreachable", rel_err
+
+
 def build_from_budget(
     target_params: int,
     n_params_fn: Callable[[int], int],

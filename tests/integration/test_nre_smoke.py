@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 from cdsbi.methods.nre import NRERunner, build_classifier_mlp
 from cdsbi.reproducibility.seeding import seed_everything
@@ -10,6 +11,8 @@ def test_nre_smoke(seed):
     runner = NRERunner(classifier_hidden=16, classifier_depth=2)
     trained = runner.fit(simulator=sim, config={"n_train": 200, "n_epochs": 5}, seed=seed)
     assert trained.procedure is not None
+    cs = trained.procedure.confidence_set(torch.tensor([[0.0]]), alpha=0.9)
+    assert cs.boundary_repr.shape == (2,)
 
 
 def test_nre_n_params_structured():
