@@ -10,7 +10,7 @@ import pandas as pd
 @dataclass
 class DiagnosticResult:
     name: str
-    value: Union[float, pd.Series]
+    value: Union[float, pd.Series, pd.DataFrame]
     passed: bool
     noise_floor: float
     n_samples: int
