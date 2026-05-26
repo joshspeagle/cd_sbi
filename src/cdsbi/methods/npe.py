@@ -87,8 +87,17 @@ class NPERunner(Runner):
                 (n,), x=x_obs.squeeze(0).to(device), show_progress_bars=False
             )
 
+        def sample_batched_fn(x_obs_batch: torch.Tensor, n: int) -> torch.Tensor:
+            # posterior.sample_batched returns shape (n, B, d_theta); used by
+            # Coverage's contains_batch to skip the per-X_obs sample loop.
+            return posterior.sample_batched(
+                (n,), x=x_obs_batch.to(device), show_progress_bars=False,
+            )
+
         procedure = PosteriorBasedProcedure(
-            sample_fn=sample_fn, d_theta=simulator.d_theta
+            sample_fn=sample_fn,
+            d_theta=simulator.d_theta,
+            sample_batched_fn=sample_batched_fn,
         )
 
         training_loss = inferer.summary.get("training_loss", [])

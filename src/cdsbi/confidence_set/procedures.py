@@ -262,9 +262,18 @@ class PosteriorBasedProcedure:
     the picture — equal-tailed ≠ HPD for asymmetric distributions.
     """
 
-    def __init__(self, sample_fn: Callable, d_theta: int):
+    def __init__(
+        self,
+        sample_fn: Callable,
+        d_theta: int,
+        sample_batched_fn: Callable = None,
+    ):
         self.sample_fn = sample_fn
         self.d_theta = d_theta
+        # Optional vectorized sampler: takes (x_obs_batch (B, d_x), n) and
+        # returns samples shape (n, B, d_theta). Lets contains_batch use a
+        # single batched posterior.sample call instead of B serial ones.
+        self.sample_batched_fn = sample_batched_fn
 
     def posterior_samples(self, x_obs: torch.Tensor, n: int = 10_000) -> torch.Tensor:
         return self.sample_fn(x_obs, n)
@@ -273,6 +282,35 @@ class PosteriorBasedProcedure:
         from cdsbi.confidence_set.equal_tailed import equal_tailed_1d
         samples = self.sample_fn(x_obs, 10_000).flatten()
         return equal_tailed_1d(samples, alpha=alpha)
+
+    def contains_batch(
+        self, theta_0_value, x_obs_batch: torch.Tensor, alpha: float,
+        n_samples: int = 10_000,
+    ) -> torch.Tensor:
+        """Vectorized containment for the equal-tailed posterior interval.
+
+        Requires sample_batched_fn; otherwise falls back to a per-X_obs loop
+        through the scalar sample_fn (no real speedup — Coverage would do
+        this anyway).
+        """
+        assert self.d_theta == 1, "contains_batch only supports d_theta=1 in v0"
+        B = x_obs_batch.shape[0]
+        if self.sample_batched_fn is None:
+            results = []
+            for i in range(B):
+                cs = self.confidence_set(x_obs_batch[i : i + 1], alpha=alpha)
+                results.append(cs.contains(theta_0_value))
+            return torch.tensor(results)
+        samples = self.sample_batched_fn(x_obs_batch, n_samples)  # (n, B, d_θ)
+        if samples.ndim == 2:
+            # (n, B): treat as d_θ=1 with implicit last dim.
+            samples = samples.unsqueeze(-1)
+        # Per-X_obs equal-tailed quantiles along the n axis.
+        tail = (1.0 - alpha) / 2.0
+        lo = torch.quantile(samples, tail, dim=0).squeeze(-1)         # (B,)
+        hi = torch.quantile(samples, 1.0 - tail, dim=0).squeeze(-1)  # (B,)
+        theta_0_t = torch.tensor(float(theta_0_value), device=lo.device, dtype=lo.dtype)
+        return (lo <= theta_0_t) & (theta_0_t <= hi)
 
 
 class LikelihoodBasedProcedure:
