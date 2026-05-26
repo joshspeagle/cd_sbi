@@ -1,0 +1,18 @@
+name: adamw_cosine_warmup
+optimizer: adamw
+lr: 3.0e-3
+batch_size: 512
+n_steps: 4000
+n_epochs: 100
+n_train: 10000
+fresh_batch: true
+
+weight_decay: 1.0e-5
+betas: [0.9, 0.999]
+
+lr_schedule: warmup_cosine
+warmup_steps: 200
+lr_min_ratio: 0.01
+
+batching: shuffle_epoch
+grad_clip_norm: 5.0

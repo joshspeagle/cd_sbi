@@ -14,10 +14,12 @@ from cdsbi.flows.umnn import UMNNBlock
 class AdditiveFlow1D(nn.Module, Flow):
     monotonicity_guarantees = frozenset({Guarantee.R1, Guarantee.R2})
 
-    def __init__(self, hidden: int = 32):
+    def __init__(self, hidden: int = 32, dropout: float = 0.0, layer_norm: bool = False):
         super().__init__()
-        self.a = UMNNBlock(context_dim=0, hidden=hidden, bias_trainable=True)
-        self.b = UMNNBlock(context_dim=0, hidden=hidden, bias_trainable=False)
+        self.a = UMNNBlock(context_dim=0, hidden=hidden, bias_trainable=True,
+                           dropout=dropout, layer_norm=layer_norm)
+        self.b = UMNNBlock(context_dim=0, hidden=hidden, bias_trainable=False,
+                           dropout=dropout, layer_norm=layer_norm)
         # log-parameterize so effective alpha = exp(log_alpha) > 0 always
         # init: effective alpha ≈ 0.72 ⇒ slope 0.5 so optimization moves
         init_log_alpha = math.log(0.5 / math.log(2.0))

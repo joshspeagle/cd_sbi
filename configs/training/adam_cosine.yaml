@@ -1,4 +1,4 @@
-name: adam_3e-3_4k_steps
+name: adam_cosine
 optimizer: adam
 lr: 3.0e-3
 batch_size: 512
@@ -7,17 +7,11 @@ n_epochs: 100
 n_train: 10000
 fresh_batch: true
 
-# Optimizer params
 weight_decay: 0.0
 betas: [0.9, 0.999]
-momentum: 0.9
 
-# LR schedule
-lr_schedule: constant
-warmup_steps: 0
-lr_min_ratio: 0.0
-lr_gamma: 0.999
+lr_schedule: cosine
+lr_min_ratio: 0.01
 
-# Batching (only relevant when fresh_batch=false)
 batching: random_replacement
 grad_clip_norm: 5.0

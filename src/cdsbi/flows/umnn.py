@@ -20,17 +20,35 @@ class UMNNBlock(nn.Module):
     recursive autograd).
     """
 
-    def __init__(self, context_dim: int, hidden: int = 32, bias_trainable: bool = True):
+    def __init__(
+        self,
+        context_dim: int,
+        hidden: int = 32,
+        bias_trainable: bool = True,
+        dropout: float = 0.0,
+        layer_norm: bool = False,
+    ):
         super().__init__()
         self.context_dim = context_dim
         in_dim = 1 + context_dim
-        self.mlp = nn.Sequential(
-            nn.Linear(in_dim, hidden),
-            nn.Tanh(),
-            nn.Linear(hidden, hidden),
-            nn.Tanh(),
-            nn.Linear(hidden, 1),
-        )
+
+        def _make_mlp_layers(in_dim: int, hidden: int, dropout: float, layer_norm: bool) -> nn.Sequential:
+            layers: list = [nn.Linear(in_dim, hidden)]
+            if layer_norm:
+                layers.append(nn.LayerNorm(hidden))
+            layers.append(nn.Tanh())
+            if dropout > 0.0:
+                layers.append(nn.Dropout(dropout))
+            layers.append(nn.Linear(hidden, hidden))
+            if layer_norm:
+                layers.append(nn.LayerNorm(hidden))
+            layers.append(nn.Tanh())
+            if dropout > 0.0:
+                layers.append(nn.Dropout(dropout))
+            layers.append(nn.Linear(hidden, 1))
+            return nn.Sequential(*layers)
+
+        self.mlp = _make_mlp_layers(in_dim, hidden, dropout, layer_norm)
         # Zero-init final layer so g starts near identity-ish at init
         nn.init.zeros_(self.mlp[-1].weight)
         nn.init.zeros_(self.mlp[-1].bias)
