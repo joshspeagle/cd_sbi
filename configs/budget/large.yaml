@@ -1,0 +1,5 @@
+name: large
+target_params: 25000
+flow_hidden: 80
+classifier_hidden: 112
+quantile_hidden: 40

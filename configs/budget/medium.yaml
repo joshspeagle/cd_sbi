@@ -1,0 +1,5 @@
+name: medium
+target_params: 5000
+flow_hidden: 32
+classifier_hidden: 50
+quantile_hidden: 16

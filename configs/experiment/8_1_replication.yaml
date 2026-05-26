@@ -1,0 +1,10 @@
+name: 8_1_replication
+n_eval: 5000
+eval_thetas_interior: [-5.0, -3.0, 0.0, 3.0, 5.0]
+eval_thetas_edge: [-7.0, 7.0]
+alpha_grid: [0.5, 0.68, 0.9, 0.95]
+n_eval_per_theta: 2000
+
+defaults:
+  - /method: cd_sbi
+  - /budget: medium

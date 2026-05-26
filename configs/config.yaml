@@ -1,0 +1,21 @@
+defaults:
+  - target: loc_normal_1d
+  - flow: additive_umnn
+  - conditioner: identity
+  - method: cd_sbi
+  - training: adam_3e-3_4k_steps
+  - budget: medium
+  - experiment: 8_1_replication
+  - _self_
+
+device: auto
+seed: 0
+
+run_dir: outputs/${experiment.name}/${now:%Y-%m-%d_%H-%M-%S}/method=${method.name},budget=${budget.name},seed=${seed}
+
+hydra:
+  run:
+    dir: ${run_dir}
+  sweep:
+    dir: outputs/${experiment.name}/${now:%Y-%m-%d_%H-%M-%S}
+    subdir: method=${method.name},budget=${budget.name},seed=${seed}

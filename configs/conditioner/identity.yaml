@@ -1,0 +1,2 @@
+name: identity
+_target_: cdsbi.conditioners.identity.Identity

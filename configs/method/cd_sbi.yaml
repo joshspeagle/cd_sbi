@@ -1,0 +1,4 @@
+name: cd_sbi
+runner_class: cdsbi.methods.cd_sbi.CDSBIRunner
+flow: additive_umnn
+allow_ablation: false

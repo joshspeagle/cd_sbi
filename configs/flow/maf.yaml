@@ -1,0 +1,6 @@
+name: maf
+_target_: cdsbi.flows.maf_adapter.MAFAdapter
+features: 1
+context_features: 1
+hidden: ${budget.flow_hidden}
+num_layers: 2

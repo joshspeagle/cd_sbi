@@ -1,0 +1,3 @@
+name: npe
+runner_class: cdsbi.methods.npe.NPERunner
+flow: maf

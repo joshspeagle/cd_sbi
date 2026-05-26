@@ -1,0 +1,5 @@
+name: small
+target_params: 1000
+flow_hidden: 16
+classifier_hidden: 24
+quantile_hidden: 8

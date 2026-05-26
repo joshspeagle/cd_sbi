@@ -1,0 +1,5 @@
+name: xlarge
+target_params: 100000
+flow_hidden: 168
+classifier_hidden: 224
+quantile_hidden: 80

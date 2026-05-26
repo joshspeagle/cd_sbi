@@ -1,0 +1,4 @@
+name: nre
+runner_class: cdsbi.methods.nre.NRERunner
+classifier_hidden: ${budget.classifier_hidden}
+classifier_depth: 2
