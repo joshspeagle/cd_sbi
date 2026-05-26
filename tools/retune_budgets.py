@@ -22,9 +22,14 @@ Domains
 - cdsbi_flow_hidden : AdditiveFlow1D backbone (two UMNNBlock MLPs; excludes the
   two log_alpha scalar parameters which add <4 params total).
 - maf_hidden        : MAFAdapter(features=1, context_features=1, hidden=H, num_layers=2).
+                      Shared by NPE / NLE / LF2I-stage-1.
 - classifier_hidden : build_classifier_mlp(input_dim=2, hidden=H, depth=2) — used by NRE.
-- quantile_hidden   : 4 × build_classifier_mlp(input_dim=1, hidden=H, depth=2) — used by
-  LF2I's calibration stage (v0 alpha_grid has 4 values).
+- quantile_hidden   : MultiQuantileMLP(input_dim=1, hidden=H, depth=2, n_quantiles=4)
+                      — used by LF2I's calibration stage. Tuned against the residual
+                      (target − maf_params(maf_hidden)); for budgets where the
+                      backbone already exceeds target, the head is shrunk to the
+                      minimum candidate H and the overall LF2I budget is reported
+                      as matched_with_warning.
 
 Candidates
 ----------
@@ -41,6 +46,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from cdsbi.flows.additive import AdditiveFlow1D
 from cdsbi.flows.maf_adapter import MAFAdapter
+from cdsbi.methods.lf2i import MultiQuantileMLP
 from cdsbi.methods.nre import build_classifier_mlp
 
 CANDIDATES: list[int] = list(range(4, 513, 2))
@@ -50,6 +56,10 @@ TARGETS: dict[str, int] = {
     "large": 25000,
     "xlarge": 100000,
 }
+# Canonical alpha_grid_len for budget bookkeeping. The multi-quantile head's
+# parameter count varies only weakly with this (~n_q × (H+1)), so picking 4
+# matches the manuscript's §8.1 default and stays close for any reasonable len.
+CANONICAL_ALPHA_GRID_LEN: int = 4
 
 
 def cdsbi_flow_params(H: int) -> int:
@@ -67,17 +77,16 @@ def classifier_params(H: int) -> int:
     return sum(p.numel() for p in net.parameters())
 
 
-def quantile_params(H: int, alpha_grid_len: int = 4) -> int:
-    net = build_classifier_mlp(input_dim=1, hidden=H, depth=2)
-    per_net = sum(p.numel() for p in net.parameters())
-    return alpha_grid_len * per_net
+def multi_quantile_params(H: int, n_q: int = CANONICAL_ALPHA_GRID_LEN) -> int:
+    net = MultiQuantileMLP(input_dim=1, hidden=H, depth=2, n_quantiles=n_q)
+    return sum(p.numel() for p in net.parameters())
 
 
-DOMAINS: dict[str, object] = {
+# Standalone-tunable domains (each fills the full budget alone).
+STANDALONE_DOMAINS: dict[str, object] = {
     "cdsbi_flow_hidden": cdsbi_flow_params,
     "maf_hidden": maf_params,
     "classifier_hidden": classifier_params,
-    "quantile_hidden": quantile_params,
 }
 
 
@@ -89,6 +98,27 @@ def pick_best(target: int, fn, candidates: list[int]) -> tuple[int, int, float]:
     return best_H, best_n, rel_err
 
 
+def pick_quantile_residual(
+    target: int, maf_H: int, candidates: list[int]
+) -> tuple[int, int, int, float]:
+    """Tune the LF2I multi-quantile head against the residual budget.
+
+    Returns (q_H, q_params, lf2i_total, lf2i_rel_err).
+    """
+    backbone = maf_params(maf_H)
+    residual = target - backbone
+    if residual <= 0:
+        # Backbone already saturates target; use smallest candidate for the head.
+        q_H = candidates[0]
+        q_params = multi_quantile_params(q_H)
+        total = backbone + q_params
+        return q_H, q_params, total, abs(total - target) / target
+    # Pick the head H closest to the residual.
+    q_H, q_params, _ = pick_best(residual, multi_quantile_params, candidates)
+    total = backbone + q_params
+    return q_H, q_params, total, abs(total - target) / target
+
+
 def status_label(rel_err: float) -> str:
     if rel_err <= 0.10:
         return "matched"
@@ -98,17 +128,25 @@ def status_label(rel_err: float) -> str:
 
 
 def main() -> None:
-    print(f"{'budget':<8}  {'domain':<20}  {'H':>5}  {'actual':>8}  {'target':>8}  {'rel_err':>8}  status")
-    print("-" * 75)
+    print(f"{'budget':<8}  {'domain':<24}  {'H':>5}  {'actual':>8}  {'target':>8}  {'rel_err':>8}  status")
+    print("-" * 79)
 
     for budget_name, target in TARGETS.items():
         first = True
-        for domain_key, fn in DOMAINS.items():
+        for domain_key, fn in STANDALONE_DOMAINS.items():
             H, n, err = pick_best(target, fn, CANDIDATES)
             label = status_label(err)
             prefix = f"{budget_name:<8}" if first else " " * 8
             first = False
-            print(f"{prefix}  {domain_key:<20}  {H:>5}  {n:>8}  {target:>8}  {err:>7.1%}  {label}")
+            print(f"{prefix}  {domain_key:<24}  {H:>5}  {n:>8}  {target:>8}  {err:>7.1%}  {label}")
+        # LF2I composite: shares maf_hidden with NPE/NLE, plus quantile head on residual.
+        maf_H = pick_best(target, maf_params, CANDIDATES)[0]
+        q_H, q_n, lf2i_total, lf2i_err = pick_quantile_residual(target, maf_H, CANDIDATES)
+        print(f"{'':<8}  {'quantile_hidden (LF2I)':<24}  {q_H:>5}  {q_n:>8}  "
+              f"{max(target - maf_params(maf_H), 0):>8}  {'':>7}  "
+              f"head-only fits residual")
+        print(f"{'':<8}  {'  └ LF2I total':<24}  {'':>5}  {lf2i_total:>8}  {target:>8}  "
+              f"{lf2i_err:>7.1%}  {status_label(lf2i_err)}")
         print()
 
     print("\nYAML snippet (paste into configs/budget/<name>.yaml):")
@@ -116,9 +154,13 @@ def main() -> None:
         print(f"\n  # {budget_name}.yaml")
         print(f"  name: {budget_name}")
         print(f"  target_params: {target}")
-        for domain_key, fn in DOMAINS.items():
+        for domain_key, fn in STANDALONE_DOMAINS.items():
             H, n, err = pick_best(target, fn, CANDIDATES)
             print(f"  {domain_key}: {H}  # actual={n} ({err:.1%})")
+        maf_H = pick_best(target, maf_params, CANDIDATES)[0]
+        q_H, q_n, lf2i_total, lf2i_err = pick_quantile_residual(target, maf_H, CANDIDATES)
+        print(f"  quantile_hidden: {q_H}  # LF2I multi-quantile head actual={q_n}; "
+              f"LF2I total={lf2i_total} ({lf2i_err:.1%}, {status_label(lf2i_err)})")
 
 
 if __name__ == "__main__":
