@@ -53,10 +53,12 @@ class LF2IRunner(Runner):
             low=torch.tensor([a], device=self.device),
             high=torch.tensor([b], device=self.device),
         )
+        # NOTE: don't pre-move stat_flow / training tensors — see npe.py for the
+        # sbi 0.26 CPU-probe rationale. sbi will move the net to self._device.
         inferer = SNLE_A(
             prior=prior,
             density_estimator=_likelihood_estimator_builder(
-                self.stat_flow.to(self.device),
+                self.stat_flow,
                 features=simulator.d_x,
                 context_features=simulator.d_theta,
             ),
@@ -64,7 +66,6 @@ class LF2IRunner(Runner):
             show_progress_bars=False,
         )
         theta, x = simulator.sample(config["n_train_stat"], rngs.train)
-        theta, x = theta.to(self.device), x.to(self.device)
         inferer.append_simulations(theta, x)
 
         t0 = time.time()

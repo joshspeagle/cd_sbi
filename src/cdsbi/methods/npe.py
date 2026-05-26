@@ -49,10 +49,16 @@ class NPERunner(Runner):
             high=torch.tensor([b], device=self.device),
         )
 
+        # NOTE: sbi 0.26's npe_base builds the net and runs
+        # test_posterior_net_for_multi_d_x with CPU tensors before moving the net
+        # to the training device (in base.py:969). Pre-moving self.flow to GPU
+        # makes that probe fail; instead, pass the CPU flow and let sbi handle
+        # device transfers. Similarly, pass CPU training data so sbi only moves
+        # things once (avoiding "device 'cuda:0' vs 'cuda'" warnings).
         inferer = SNPE_C(
             prior=prior,
             density_estimator=_density_estimator_builder(
-                self.flow.to(self.device),
+                self.flow,
                 features=simulator.d_theta,
                 context_features=simulator.d_x,
             ),
@@ -62,7 +68,6 @@ class NPERunner(Runner):
 
         rngs = seed_everything(seed)
         theta, x = simulator.sample(config["n_train"], rngs.train)
-        theta, x = theta.to(self.device), x.to(self.device)
         inferer.append_simulations(theta, x)
 
         t0 = time.time()
@@ -72,9 +77,15 @@ class NPERunner(Runner):
         wall = time.time() - t0
 
         posterior = inferer.build_posterior(density_estimator)
+        device = self.device
 
         def sample_fn(x_obs: torch.Tensor, n: int) -> torch.Tensor:
-            return posterior.sample((n,), x=x_obs.squeeze(0), show_progress_bars=False)
+            # sbi's DirectPosterior.sample doesn't move x to the estimator's
+            # device; the underlying nflows layers will error if x_obs is CPU
+            # while the flow is on cuda. Move x_obs explicitly.
+            return posterior.sample(
+                (n,), x=x_obs.squeeze(0).to(device), show_progress_bars=False
+            )
 
         procedure = PosteriorBasedProcedure(
             sample_fn=sample_fn, d_theta=simulator.d_theta

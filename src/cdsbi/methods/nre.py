@@ -69,6 +69,7 @@ class NRERunner(Runner):
             high=torch.tensor([b], device=self.device),
         )
 
+        # NOTE: don't pre-move training tensors — sbi places them itself.
         inferer = SNRE_B(
             prior=prior,
             classifier=_classifier_builder(self.classifier_hidden, self.classifier_depth),
@@ -78,17 +79,20 @@ class NRERunner(Runner):
 
         rngs = seed_everything(seed)
         theta, x = simulator.sample(config["n_train"], rngs.train)
-        theta, x = theta.to(self.device), x.to(self.device)
         inferer.append_simulations(theta, x)
 
         t0 = time.time()
         ratio_estimator = inferer.train(max_num_epochs=config["n_epochs"], show_train_summary=False)
         wall = time.time() - t0
 
+        device = self.device
+
         # ratio_estimator is a RatioEstimator; its forward / unnormalized_log_ratio
         # takes separate theta and x tensors (not pre-concatenated).
         # Shape contract: theta (n_theta, d_theta), x_obs (1, d_x) broadcast to (n_theta, d_x).
         def log_ratio_fn(theta: torch.Tensor, x_obs: torch.Tensor) -> torch.Tensor:
+            theta = theta.to(device)
+            x_obs = x_obs.to(device)
             n_th = theta.shape[0]
             x_rep = x_obs.expand(n_th, -1)
             return ratio_estimator.unnormalized_log_ratio(theta, x_rep).squeeze(-1)

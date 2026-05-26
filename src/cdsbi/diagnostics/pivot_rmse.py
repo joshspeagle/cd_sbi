@@ -32,7 +32,7 @@ class PivotRMSE(Diagnostic):
         theta, x = eval_data
         with torch.no_grad():
             r_hat = trained.procedure.pivot(theta, x)
-            r_star = simulator.r_star(theta, x)
+            r_star = simulator.r_star(theta, x).to(r_hat.device)
         rmse = (r_hat - r_star).pow(2).mean().sqrt().item()
         return DiagnosticResult(
             name=self.name,

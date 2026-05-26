@@ -48,11 +48,15 @@ class NLERunner(Runner):
             high=torch.tensor([b], device=self.device),
         )
 
-        # For NLE: input=x, condition=theta → features=d_x, context_features=d_theta
+        # For NLE: input=x, condition=theta → features=d_x, context_features=d_theta.
+        # NOTE: don't pre-move flow / training tensors — see npe.py for the
+        # sbi 0.26 CPU-probe rationale. sbi moves the net to self._device
+        # (base.py:969) before training proper, so after fit() the flow's
+        # parameters live on self.device.
         inferer = SNLE_A(
             prior=prior,
             density_estimator=_likelihood_estimator_builder(
-                self.flow.to(self.device),
+                self.flow,
                 features=simulator.d_x,
                 context_features=simulator.d_theta,
             ),
@@ -62,7 +66,6 @@ class NLERunner(Runner):
 
         rngs = seed_everything(seed)
         theta, x = simulator.sample(config["n_train"], rngs.train)
-        theta, x = theta.to(self.device), x.to(self.device)
         inferer.append_simulations(theta, x)
 
         t0 = time.time()
@@ -70,9 +73,10 @@ class NLERunner(Runner):
         wall = time.time() - t0
 
         flow = self.flow
+        device = self.device
 
         def log_likelihood_fn(theta: torch.Tensor, x_obs: torch.Tensor) -> torch.Tensor:
-            return flow.log_prob(x=x_obs, context=theta)
+            return flow.log_prob(x=x_obs.to(device), context=theta.to(device))
 
         procedure = LikelihoodBasedProcedure(
             log_likelihood_fn=log_likelihood_fn,
