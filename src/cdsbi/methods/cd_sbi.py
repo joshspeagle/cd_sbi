@@ -30,12 +30,25 @@ class CDSBIRunner(Runner):
 
         bs = config["batch_size"]
         n_steps = config["n_steps"]
+        fresh_batch = config.get("fresh_batch", True)
+
+        if not fresh_batch:
+            # Finite-sample regime: pre-sample n_train once, SGD with replacement
+            theta_all, x_all = simulator.sample(config["n_train"], rngs.train)
+            theta_all, x_all = theta_all.to(self.device), x_all.to(self.device)
+            n_train = theta_all.shape[0]
+
         losses = []
         t0 = time.time()
         for step in range(n_steps):
-            # Fresh batch from the population every step (no pre-sample / replacement)
-            theta_b, x_b = simulator.sample(bs, rngs.train)
-            theta_b, x_b = theta_b.to(self.device), x_b.to(self.device)
+            if fresh_batch:
+                # Fresh batch from the population every step (no pre-sample / replacement)
+                theta_b, x_b = simulator.sample(bs, rngs.train)
+                theta_b, x_b = theta_b.to(self.device), x_b.to(self.device)
+            else:
+                idx = torch.randint(0, n_train, (bs,), generator=torch.Generator(device="cpu"))
+                theta_b, x_b = theta_all[idx], x_all[idx]
+
             context, log_det_contrib = self.conditioner.encode(x_b)
             r, log_det_flow = self.flow.forward(theta_b, context=context)
             log_det_total = log_det_flow + log_det_contrib
@@ -71,6 +84,7 @@ class CDSBIRunner(Runner):
                 "flow_class": type(self.flow).__name__,
                 "loss_class": type(self.loss).__name__,
                 "loss_history_tail": losses[-min(100, len(losses)) :],
+                "fresh_batch": fresh_batch,
             },
         )
 

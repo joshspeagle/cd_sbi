@@ -1,5 +1,6 @@
 name: small
 target_params: 1000
-flow_hidden: 16
-classifier_hidden: 24
-quantile_hidden: 8
+cdsbi_flow_hidden: 20  # AdditiveFlow1D backbone actual=964 (3.6%)
+maf_hidden: 14         # MAFAdapter actual=1068 (6.8%)
+classifier_hidden: 30  # NRE MLP actual=1051 (5.1%)
+quantile_hidden: 14    # LF2I calibration 4×MLP actual=1012 (1.2%)

@@ -91,6 +91,7 @@ def _fit_config(cfg: DictConfig, method_name: str) -> dict:
             "batch_size": int(t.batch_size),
             "n_steps": int(t.n_steps),
             "n_train": int(t.n_train),
+            "fresh_batch": bool(OmegaConf.select(t, "fresh_batch", default=True)),
         }
     if method_name in ("npe", "nle", "nre"):
         return {"n_train": int(t.n_train), "n_epochs": int(t.n_epochs)}

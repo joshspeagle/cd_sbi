@@ -4,3 +4,4 @@ batch_size: 512
 n_steps: 4000
 n_epochs: 100
 n_train: 10000
+fresh_batch: true
