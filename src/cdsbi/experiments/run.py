@@ -157,8 +157,16 @@ def _run_diagnostics(cfg: DictConfig, trained, simulator, eval_data, rd: RunDir)
     from cdsbi.diagnostics.coverage import Coverage
     from cdsbi.diagnostics.marginal_pit import MarginalPIT
     from cdsbi.diagnostics.pivot_rmse import PivotRMSE
+    from cdsbi.diagnostics.set_size import SetSize
 
     n_bins = max(2, len(list(cfg.experiment.eval_thetas_interior)))
+    # SetSize is intentionally cheaper (~1/5 the X_obs of Coverage) — width
+    # distribution converges much faster than coverage rate. Override via
+    # cfg.experiment.set_size_n_per_theta if needed.
+    set_size_n = int(OmegaConf.select(
+        cfg, "experiment.set_size_n_per_theta",
+        default=max(100, int(cfg.experiment.n_eval_per_theta) // 5),
+    ))
     diagnostics = [
         ("pivot_rmse", PivotRMSE()),
         ("marginal_pit", MarginalPIT()),
@@ -167,6 +175,11 @@ def _run_diagnostics(cfg: DictConfig, trained, simulator, eval_data, rd: RunDir)
             theta_0_grid=list(cfg.experiment.eval_thetas_interior),
             alpha_grid=list(cfg.experiment.alpha_grid),
             n_per_theta=int(cfg.experiment.n_eval_per_theta),
+        )),
+        ("set_size", SetSize(
+            theta_0_grid=list(cfg.experiment.eval_thetas_interior),
+            alpha_grid=list(cfg.experiment.alpha_grid),
+            n_per_theta=set_size_n,
         )),
     ]
     diag_results = {}

@@ -99,8 +99,19 @@ class PivotBasedProcedure:
         thresh = float(chi2.ppf(alpha, df=1))
         B = x_obs_batch.shape[0]
         lo, hi = self.theta_range
-        device = x_obs_batch.device
         dtype = x_obs_batch.dtype
+
+        # Probe pivot_fn once to learn the model's device — the closure may move
+        # inputs to a device other than x_obs_batch.device, and all working
+        # tensors (a, b, m, center) below need to live on the same device as the
+        # probe output for the torch.where reductions to work.
+        probe = self.pivot_fn(
+            torch.zeros(1, 1, dtype=dtype, device=x_obs_batch.device),
+            x_obs_batch[:1],
+        )
+        device = probe.device
+        if x_obs_batch.device != device:
+            x_obs_batch = x_obs_batch.to(device)
 
         # Vectorized bisection #1: find center where r=0 for each x_obs.
         # r is monotone increasing in θ (architectural guarantee), so r(lo)<0<r(hi).
