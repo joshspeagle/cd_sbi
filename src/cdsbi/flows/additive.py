@@ -16,8 +16,8 @@ class AdditiveFlow1D(nn.Module, Flow):
 
     def __init__(self, hidden: int = 32):
         super().__init__()
-        self.a = UMNNBlock(context_dim=0, hidden=hidden)
-        self.b = UMNNBlock(context_dim=0, hidden=hidden)
+        self.a = UMNNBlock(context_dim=0, hidden=hidden, bias_trainable=True)
+        self.b = UMNNBlock(context_dim=0, hidden=hidden, bias_trainable=False)
         # log-parameterize so effective alpha = exp(log_alpha) > 0 always
         # init: effective alpha ≈ 0.72 ⇒ slope 0.5 so optimization moves
         init_log_alpha = math.log(0.5 / math.log(2.0))

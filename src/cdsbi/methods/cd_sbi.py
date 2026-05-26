@@ -28,18 +28,14 @@ class CDSBIRunner(Runner):
         self.flow.to(self.device)
         opt = torch.optim.Adam(self.flow.parameters(), lr=config["lr"])
 
-        # Pre-sample full training set
-        theta_all, x_all = simulator.sample(config["n_train"], rngs.train)
-        theta_all, x_all = theta_all.to(self.device), x_all.to(self.device)
-
         bs = config["batch_size"]
         n_steps = config["n_steps"]
-        n_train = theta_all.shape[0]
         losses = []
         t0 = time.time()
         for step in range(n_steps):
-            idx = torch.randint(0, n_train, (bs,), generator=torch.Generator(device="cpu"))
-            theta_b, x_b = theta_all[idx], x_all[idx]
+            # Fresh batch from the population every step (no pre-sample / replacement)
+            theta_b, x_b = simulator.sample(bs, rngs.train)
+            theta_b, x_b = theta_b.to(self.device), x_b.to(self.device)
             context, log_det_contrib = self.conditioner.encode(x_b)
             r, log_det_flow = self.flow.forward(theta_b, context=context)
             log_det_total = log_det_flow + log_det_contrib

@@ -20,15 +20,15 @@ class UMNNBlock(nn.Module):
     recursive autograd).
     """
 
-    def __init__(self, context_dim: int, hidden: int = 32):
+    def __init__(self, context_dim: int, hidden: int = 32, bias_trainable: bool = True):
         super().__init__()
         self.context_dim = context_dim
         in_dim = 1 + context_dim
         self.mlp = nn.Sequential(
             nn.Linear(in_dim, hidden),
-            nn.ELU(),
+            nn.Tanh(),
             nn.Linear(hidden, hidden),
-            nn.ELU(),
+            nn.Tanh(),
             nn.Linear(hidden, 1),
         )
         # Zero-init final layer so g starts near identity-ish at init
@@ -36,7 +36,7 @@ class UMNNBlock(nn.Module):
         nn.init.zeros_(self.mlp[-1].bias)
         # Bias network on context (or scalar bias if context_dim == 0)
         if context_dim == 0:
-            self.bias_param = nn.Parameter(torch.zeros(1))
+            self.bias_param = nn.Parameter(torch.zeros(1), requires_grad=bias_trainable)
             self.bias_net = None
         else:
             self.bias_param = None
@@ -58,7 +58,7 @@ class UMNNBlock(nn.Module):
             # t: (n, K, 1); context: (n, C) -> broadcast to (n, K, C)
             ctx = context.unsqueeze(1).expand(-1, t.size(1), -1)
             inputs = torch.cat([t, ctx], dim=-1)
-        return F.softplus(self.mlp(inputs))
+        return F.softplus(self.mlp(inputs)) + 1e-3
 
     def forward(self, z: torch.Tensor, context: Optional[torch.Tensor] = None) -> torch.Tensor:
         """g(z; c). z has shape (n, 1); returns (n, 1)."""
@@ -81,7 +81,7 @@ class UMNNBlock(nn.Module):
             inputs = z
         else:
             inputs = torch.cat([z, context], dim=-1)
-        return F.softplus(self.mlp(inputs))
+        return F.softplus(self.mlp(inputs)) + 1e-3
 
     def n_params(self) -> int:
         return sum(p.numel() for p in self.parameters())
