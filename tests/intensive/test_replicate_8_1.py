@@ -14,9 +14,11 @@ def test_replicate_8_1_cdsbi_matches_tolerance(tmp_path):
     """Run CDSBI at medium budget across 5 seeds; seed-averaged metrics within tolerance."""
     out_dir = tmp_path / "sweep"
     for seed in range(5):
+        # subdir uses 'run_seed_N' (not 'seed=N') so Hydra's key=value override
+        # parser doesn't see a stray '=' inside the path argument
         cmd = [
             "python", "-m", "cdsbi.experiments.run",
-            f"hydra.run.dir={out_dir}/seed={seed}",
+            f"hydra.run.dir={out_dir}/run_seed_{seed}",
             "method=cd_sbi", "budget=medium",
             f"seed={seed}",
         ]

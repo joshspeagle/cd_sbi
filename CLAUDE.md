@@ -33,7 +33,7 @@ scaling beyond the toy validation experiments currently in the draft.
 pdflatex cd_sbi_v7 && bibtex cd_sbi_v7 && pdflatex cd_sbi_v7 && pdflatex cd_sbi_v7
 ```
 
-**Python codebase** (available once Task 1 of the v0 plan lands):
+**Python codebase** (v0 + v0.1 + v0.2 landed; 70 fast tests passing):
 
 ```bash
 pip install -e ".[dev]"               # install cdsbi package + dev deps
@@ -51,7 +51,9 @@ python -m cdsbi.experiments.run -m experiment=8_1_baseline_sweep    # full sweep
 - `reviews/round{1,2,3}/` — per-round critic reports and audit trail.
 - `docs/superpowers/specs/` — design specs (v0 infrastructure spec lives here).
 - `docs/superpowers/plans/` — implementation plans (v0 implementation plan lives here).
-- `src/cdsbi/` — Python package (planned; v0 implementation in progress).
+- `src/cdsbi/` — Python package (v0 + v0.1 + v0.2 landed; 70 fast tests + 1 intensive replication test).
+- `configs/` — Hydra config groups (target / flow / conditioner / method / training / budget / experiment).
+- `tests/` — `unit/`, `integration/`, `diagnostics/`, opt-in `intensive/`.
 - `LICENSE`, `README.md`, `.gitignore` — repo setup.
 
 ## Specs and plans
@@ -149,15 +151,51 @@ per the round-3 fresh-reader verdicts.
 ## v0 codebase status
 
 The v0 experiment infrastructure (replicating manuscript §8.1 + matched-
-budget baselines against NPE / NLE / NRE / LF2I) is **fully specced and
-planned**, awaiting implementation:
+budget baselines against NPE / NLE / NRE / LF2I) is **implemented and
+test-passing**:
 
 - Spec: `docs/superpowers/specs/2026-05-25-cd-sbi-experiment-infrastructure-design.md`
-  (revised twice via dual self-review)
 - Plan: `docs/superpowers/plans/2026-05-25-cd-sbi-v0-experiment-infrastructure.md`
-  (25 TDD-style tasks, every step has full code)
+- Package: `src/cdsbi/` — 6 core layers + `confidence_set/`,
+  `experiments/`, `analysis/`, `reproducibility/`.
+- 25 implementation commits + 3 cleanup commits (`.gitignore` dedupe,
+  seeding refactor, equal_tailed_1d rename) + 1 v0.1 cleanup commit
+  (alpha_b log-parameterization, budget-validation warning, dead imports
+  removed, LF2I/NRE n_params dynamism, NPE/NLE/NRE smoke tests exercise
+  procedure.confidence_set) + 1 v0.2 alignment commit (UMNN MLP
+  activation Tanh, integrand `+ 1e-3` floor, `b.bias_trainable=False`
+  in AdditiveFlow1D to break the redundant-bias degeneracy, fresh-batch-
+  per-step training).
+- 70 fast tests pass in ~30 s.
+- Single-seed §8.1 validation at medium budget now lands inside the
+  spec's tolerance bands (pivot_rmse=0.043, marginal_ks=0.012,
+  coverage_error_max=0.018 vs bands 0.05 / 0.023 / 0.02).
 
-Once v0 lands, the natural next milestones (per the spec's roadmap) are
-v1 (§8.2 multivariate Σ=I), v2 (§8.3 correlated Σ), v3 (§8.4 exponential
-rate + (R2) ablation), then real-data targets (SBI benchmark suite,
-astronomy inference, image observations).
+**Known caveats** (documented; not blockers for the §8.1 sweep):
+- v0.2 hard-coded the fresh-batch-per-step training regime. The
+  finite-sample regime (pre-sample N points, SGD with replacement) is
+  the real research scenario for expensive simulators and should
+  return as a configurable option in v0.3 — added to the experimental
+  matrix as its own axis. **Don't conflate "fresh-vs-finite-sample
+  training regime" with other architecture comparisons.**
+- YAML widths at most budgets are off target (validation warns but
+  doesn't raise). Paper-table consumers should check
+  `actual_params_total` / `budget_status` columns, not `target_params`.
+  The widths in `configs/budget/*.yaml` need re-tuning per method.
+- `model.pt` saves only `arch_metadata + final_loss`, not the actual
+  state_dict — no restart/resume in v0.
+- Coverage diagnostic hardcodes `X = θ + N(0, 1)` (LocationNormal1D-only);
+  v1+ simulators will need a `sample_x_given_theta` hook.
+- `JointMahalanobis` diagnostic and (R2) ablation tests deferred to v1
+  and v3 respectively, per spec.
+
+**Scheduled v0.3 follow-ups** (before publishing §8.1 numbers):
+- Restore finite-sample training regime as a `training/`-config flag
+  (`fresh_batch: true | false`); add to the experimental matrix.
+- Retune `configs/budget/*.yaml` widths per method so the budget
+  validator reports `matched` at every (method, budget) combination.
+
+Next milestones per the spec's roadmap: v1 (§8.2 multivariate Σ=I),
+v2 (§8.3 correlated Σ), v3 (§8.4 exponential rate + (R2) ablation),
+then real-data targets (SBI benchmark suite, astronomy inference,
+image observations).

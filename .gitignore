@@ -39,6 +39,9 @@ env/
 # CD-SBI experiment outputs
 outputs/
 
+# sbi package run-time logs (per-train tensorboard / metrics dirs)
+sbi-logs/
+
 # Python build artifacts
 .pytest_cache/
 .coverage
