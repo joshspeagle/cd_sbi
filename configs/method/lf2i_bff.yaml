@@ -1,0 +1,7 @@
+name: lf2i_bff
+runner_class: cdsbi.methods.lf2i_bff.LF2IBFFRunner
+classifier_hidden: ${budget.classifier_hidden}
+classifier_depth: 2
+quantile_hidden: ${budget.quantile_hidden}
+quantile_depth: 2
+marginal_grid_n: 64

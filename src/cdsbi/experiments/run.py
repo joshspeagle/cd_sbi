@@ -116,6 +116,16 @@ def _build_method(cfg: DictConfig, simulator) -> Any:
             theta_ref=m.theta_ref,
             device=cfg.device,
         )
+    if m.name == "lf2i_bff":
+        return _instantiate(
+            runner_class,
+            classifier_hidden=m.classifier_hidden,
+            classifier_depth=m.classifier_depth,
+            quantile_hidden=m.quantile_hidden,
+            quantile_depth=m.quantile_depth,
+            marginal_grid_n=int(OmegaConf.select(m, "marginal_grid_n", default=64)),
+            device=cfg.device,
+        )
     raise ValueError(f"Unknown method: {m.name}")
 
 
@@ -141,7 +151,7 @@ def _fit_config(cfg: DictConfig, method_name: str) -> dict:
         }
     if method_name in ("npe", "nle", "nre"):
         return {"n_train": int(t.n_train), "n_epochs": int(t.n_epochs)}
-    if method_name == "lf2i":
+    if method_name in ("lf2i", "lf2i_bff"):
         return {
             "n_train_stat": int(t.n_train),
             "n_train_quantile": int(t.n_train) // 2,
@@ -260,6 +270,12 @@ def main(cfg: DictConfig) -> None:
         runner = _build_method(cfg, simulator)
         if cfg.method.name == "lf2i":
             n_params = runner.n_params(alpha_grid_len=len(list(cfg.experiment.alpha_grid)))
+        elif cfg.method.name == "lf2i_bff":
+            n_params = runner.n_params(
+                d_theta=simulator.d_theta,
+                d_x=simulator.d_x,
+                alpha_grid_len=len(list(cfg.experiment.alpha_grid)),
+            )
         elif cfg.method.name == "nre":
             n_params = runner.n_params(d_theta=simulator.d_theta, d_x=simulator.d_x)
         else:
