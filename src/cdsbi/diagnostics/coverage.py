@@ -7,9 +7,7 @@ import numpy as np
 import pandas as pd
 import torch
 
-from cdsbi.confidence_set.procedures import PivotBasedProcedure
 from cdsbi.diagnostics.base import Diagnostic, DiagnosticResult
-from cdsbi.reproducibility.seeding import seed_everything
 
 
 class Coverage(Diagnostic):
@@ -23,6 +21,7 @@ class Coverage(Diagnostic):
     def __call__(self, trained, simulator, eval_data=None) -> DiagnosticResult:
         rng = np.random.default_rng(0)
         rows = []
+        has_fast_path = hasattr(trained.procedure, "contains_batch")
         for theta_0 in self.theta_0_grid:
             # Draw n_per_theta X | θ_0 (fix θ; vary X) for LocationNormal1D-style models.
             # NOTE: this hardcodes X = θ + N(0, 1). For v1+ simulators, the Simulator
@@ -31,13 +30,14 @@ class Coverage(Diagnostic):
             eps = rng.standard_normal(size=(self.n_per_theta, 1))
             x = theta_t + torch.from_numpy(eps).float()
             for alpha in self.alpha_grid:
-                # Fast path for PivotBasedProcedure: single batched forward
-                if isinstance(trained.procedure, PivotBasedProcedure):
+                if has_fast_path:
+                    # Single batched forward — any procedure that exposes
+                    # contains_batch picks up this fast path automatically.
                     with torch.no_grad():
                         inside_t = trained.procedure.contains_batch(theta_0, x, alpha)
                     empirical = float(inside_t.float().mean().item())
                 else:
-                    # Fallback for non-pivot procedures: per-sample confidence_set
+                    # Fallback: per-sample confidence_set construction.
                     inside = 0
                     for i in range(self.n_per_theta):
                         cs = trained.procedure.confidence_set(x[i : i + 1], alpha=alpha)

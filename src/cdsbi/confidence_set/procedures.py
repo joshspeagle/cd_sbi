@@ -186,6 +186,43 @@ class CriticalValueProcedure:
     def critical_value(self, theta: torch.Tensor, alpha: float) -> torch.Tensor:
         return self.critical_value_fn(theta, alpha)
 
+    def contains_batch(
+        self, theta_0_value, x_obs_batch: torch.Tensor, alpha: float
+    ) -> torch.Tensor:
+        """Vectorized containment test: returns a bool tensor of shape (B,)
+        indicating whether `theta_0_value` is inside the α-confidence set
+        for each X_obs in the batch.
+
+        For CriticalValueProcedure the set is {θ : T(θ; X_obs) ≤ c_α(θ)};
+        containing θ_0 reduces to T(θ_0; X_obs_i) ≤ c_α(θ_0) for each i,
+        and c_α(θ_0) is the same scalar for every element of the batch
+        (we evaluate the critical-value MLP once).
+        """
+        B = x_obs_batch.shape[0]
+        # Probe the test stat to learn the device the closures operate on.
+        theta_probe = torch.tensor(
+            [[float(theta_0_value)]], dtype=x_obs_batch.dtype, device=x_obs_batch.device,
+        )
+        probe = self.test_stat_fn(theta_probe, x_obs_batch[:1])
+        device = probe.device
+        if x_obs_batch.device != device:
+            x_obs_batch = x_obs_batch.to(device)
+        theta_t = torch.full(
+            (B, self.d_theta), float(theta_0_value),
+            dtype=x_obs_batch.dtype, device=device,
+        )
+        # One batched forward through the test statistic across the X_obs batch:
+        t_obs = self.test_stat_fn(theta_t, x_obs_batch)
+        if t_obs.ndim > 1:
+            t_obs = t_obs.squeeze(-1)
+        # Critical value at the (single) θ_0 — scalar across the batch.
+        c_val = self.critical_value_fn(theta_t[:1], alpha)
+        if c_val.ndim == 0:
+            c_scalar = c_val
+        else:
+            c_scalar = c_val[0]
+        return t_obs <= c_scalar
+
     def confidence_set(self, x_obs: torch.Tensor, alpha: float) -> ConfidenceSet:
         assert self.d_theta == 1
 
