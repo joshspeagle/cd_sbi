@@ -286,6 +286,53 @@ class LikelihoodBasedProcedure:
     def log_likelihood(self, theta: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
         return self.log_likelihood_fn(theta, x)
 
+    def contains_batch(
+        self, theta_0_value, x_obs_batch: torch.Tensor, alpha: float,
+        n_grid: int = 200,
+    ) -> torch.Tensor:
+        """Vectorized containment for the Wilks LR set:
+        {θ : 2(ll_max(X_obs) − ll(θ; X_obs)) ≤ χ²_{1, α}}.
+
+        One batched log_likelihood call over (B × n_grid) (θ, X) pairs gives
+        ll_max(X_obs) per element; one more batched call at (θ_0, X_obs_i) gives
+        ll(θ_0; X_obs_i). Containment is the elementwise comparison.
+
+        Matches the slow path's grid resolution exactly; bisect refinement of
+        the *endpoints* (in `confidence_set`) doesn't affect containment of
+        an interior point, only the boundary value.
+        """
+        assert self.d_theta == 1, "contains_batch only supports d_theta=1 in v0"
+        thresh = float(chi2.ppf(alpha, df=1))
+        # Probe device.
+        probe = self.log_likelihood_fn(
+            torch.tensor([[float(theta_0_value)]], dtype=x_obs_batch.dtype, device=x_obs_batch.device),
+            x_obs_batch[:1],
+        )
+        device = probe.device
+        if x_obs_batch.device != device:
+            x_obs_batch = x_obs_batch.to(device)
+        B = x_obs_batch.shape[0]
+        lo, hi = self.theta_range
+        theta_grid = torch.linspace(
+            lo, hi, n_grid, device=device, dtype=x_obs_batch.dtype,
+        ).view(-1, self.d_theta)
+        # All (i, j) pairs: θ_grid_j with X_obs_i. Build (B*G, ·) flat tensors.
+        theta_grid_exp = theta_grid.unsqueeze(0).expand(B, -1, -1).reshape(-1, self.d_theta)
+        x_obs_exp = (
+            x_obs_batch.unsqueeze(1).expand(-1, n_grid, -1).reshape(-1, x_obs_batch.shape[-1])
+        )
+        ll_grid = self.log_likelihood_fn(theta_grid_exp, x_obs_exp).view(B, n_grid)
+        ll_max = ll_grid.max(dim=1).values  # (B,)
+        # ll at the candidate θ_0, batched over X_obs:
+        theta_0_t = torch.full(
+            (B, self.d_theta), float(theta_0_value),
+            dtype=x_obs_batch.dtype, device=device,
+        )
+        ll_at_0 = self.log_likelihood_fn(theta_0_t, x_obs_batch)
+        if ll_at_0.ndim > 1:
+            ll_at_0 = ll_at_0.squeeze(-1)
+        return 2.0 * (ll_max - ll_at_0) <= thresh
+
     def confidence_set(self, x_obs: torch.Tensor, alpha: float) -> ConfidenceSet:
         assert self.d_theta == 1
         thresh = float(chi2.ppf(alpha, df=1))
@@ -337,3 +384,9 @@ class RatioBasedProcedure:
     def confidence_set(self, x_obs: torch.Tensor, alpha: float) -> ConfidenceSet:
         wrapper = LikelihoodBasedProcedure(self.log_ratio_fn, self.d_theta, self.theta_range)
         return wrapper.confidence_set(x_obs, alpha)
+
+    def contains_batch(
+        self, theta_0_value, x_obs_batch: torch.Tensor, alpha: float
+    ) -> torch.Tensor:
+        wrapper = LikelihoodBasedProcedure(self.log_ratio_fn, self.d_theta, self.theta_range)
+        return wrapper.contains_batch(theta_0_value, x_obs_batch, alpha)
