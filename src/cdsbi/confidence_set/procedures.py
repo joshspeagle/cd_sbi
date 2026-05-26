@@ -3,13 +3,13 @@
 Each subtype produces a ConfidenceSet via its own mechanism:
 - PivotBased: chi-square inversion of ‖r‖² ≤ χ²_{d, α}
 - CriticalValue: {θ : T(θ, X) ≤ c_α(θ)} (LF2I)
-- PosteriorBased: highest-posterior-density region on sampled posterior (NPE)
+- PosteriorBased: equal-tailed credible interval on sampled posterior (NPE)
 - LikelihoodBased: Wilks-style likelihood-ratio inversion (NLE)
 - RatioBased: ratio thresholding (NRE)
 """
 from __future__ import annotations
 
-from typing import Callable, Optional, Protocol, runtime_checkable
+from typing import Callable, Protocol, runtime_checkable
 
 import torch
 from scipy.stats import chi2
@@ -120,7 +120,11 @@ class CriticalValueProcedure:
 
 
 class PosteriorBasedProcedure:
-    """NPE: highest-posterior-density region via posterior samples."""
+    """NPE: equal-tailed credible interval via posterior samples.
+
+    TODO(v1+): switch to a true kernel-based HPD when skewed posteriors enter
+    the picture — equal-tailed ≠ HPD for asymmetric distributions.
+    """
 
     def __init__(self, sample_fn: Callable, d_theta: int):
         self.sample_fn = sample_fn
@@ -130,9 +134,9 @@ class PosteriorBasedProcedure:
         return self.sample_fn(x_obs, n)
 
     def confidence_set(self, x_obs: torch.Tensor, alpha: float) -> ConfidenceSet:
-        from cdsbi.confidence_set.hpd import hpd_1d
+        from cdsbi.confidence_set.equal_tailed import equal_tailed_1d
         samples = self.sample_fn(x_obs, 10_000).flatten()
-        return hpd_1d(samples, alpha=alpha)
+        return equal_tailed_1d(samples, alpha=alpha)
 
 
 class LikelihoodBasedProcedure:
