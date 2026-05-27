@@ -59,6 +59,12 @@ class UMNNBlock(nn.Module):
         else:
             self.bias_param = None
             self.bias_net = nn.Linear(context_dim, 1)
+            if not bias_trainable:
+                # Freeze the bias to match the bias_trainable=False semantics
+                # the scalar-context branch already enforces (and which the
+                # v0.2 redundant-bias degeneracy fix relies on). Weights stay
+                # trainable; the bias term is the only redundant direction.
+                self.bias_net.bias.requires_grad_(False)
 
         self.register_buffer("_nodes", torch.tensor(_NODES_NP, dtype=torch.float32))
         self.register_buffer("_weights", torch.tensor(_WEIGHTS_NP, dtype=torch.float32))

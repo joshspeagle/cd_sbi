@@ -56,7 +56,6 @@ class TriangularAdditiveFlow(nn.Module, Flow):
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         # context is the conditioner-encoded X (Identity ⇒ context == X)
         x = context
-        n = theta.shape[0]
         r_cols = []
         log_det_terms = []
         alpha_a = torch.exp(self.log_alpha_a)  # (d,)
