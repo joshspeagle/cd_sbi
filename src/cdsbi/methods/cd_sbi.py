@@ -166,7 +166,15 @@ class CDSBIRunner(Runner):
         )
 
     def n_params(self) -> dict:
-        backbone = self.flow.a.n_params() + self.flow.b.n_params()
+        # AdditiveFlow1D exposes .a / .b UMNNBlocks; TriangularAdditiveFlow
+        # exposes .a_blocks / .b_blocks ModuleLists of UMNNBlocks. Either way,
+        # backbone = sum over the UMNNBlocks; head = α scalars (flow total - backbone).
+        if hasattr(self.flow, "a_blocks"):
+            backbone = sum(b.n_params() for b in self.flow.a_blocks) + sum(
+                b.n_params() for b in self.flow.b_blocks
+            )
+        else:
+            backbone = self.flow.a.n_params() + self.flow.b.n_params()
         head = self.flow.n_params() - backbone  # the α scalars
         return {
             "backbone": backbone,

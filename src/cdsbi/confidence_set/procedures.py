@@ -168,6 +168,11 @@ class PivotBasedProcedure:
             m = 0.5 * (t_lo + t_hi)
             theta_m = center.unsqueeze(0) + m.unsqueeze(-1) * u
             r = self.pivot_fn(theta_m, x_batch)
+            # pivot_fn may live on a different device than x_obs (e.g. a CUDA
+            # flow being queried with a CPU x_obs from a numpy-rng simulator).
+            # Bring r back to the procedure's device so torch.where works.
+            if r.device != device:
+                r = r.to(device)
             f = r.pow(2).sum(dim=-1) - thresh
             outside = f > 0
             t_hi = torch.where(outside, m, t_hi)
