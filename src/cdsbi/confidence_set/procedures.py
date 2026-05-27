@@ -69,6 +69,37 @@ def _vectorized_bisect_1d(
     return 0.5 * (a + b)
 
 
+class _BatchCache:
+    """Identity-keyed cache for α-invariant intermediates.
+
+    Coverage / SetSize iterate (θ_0, α) with x_obs_batch fixed across the α
+    inner loop. Many procedure-level intermediates (posterior samples, grid
+    log-likelihoods, test-statistic evaluations) depend only on x_obs_batch
+    (and sometimes θ_0), not α — so caching them per (θ_0, x_obs_batch) gives
+    a 4× speedup over the 4 default α values.
+
+    Cache invalidation: on key mismatch, the new value replaces the old. No
+    LRU, no manual flush — caller passes a fresh `key` each time and the
+    cache automatically tracks the most recent (θ_0, x_obs_batch).
+    """
+
+    def __init__(self):
+        self._key = None
+        self._value = None
+
+    def get_or_compute(self, key, compute_fn):
+        if self._key == key:
+            return self._value
+        v = compute_fn()
+        self._key = key
+        self._value = v
+        return v
+
+    def reset(self):
+        self._key = None
+        self._value = None
+
+
 def _ray_sample_set_boundary(
     x_obs: torch.Tensor,
     inside_fn,
@@ -425,6 +456,9 @@ class CriticalValueProcedure:
         self.critical_value_fn = critical_value_fn
         self.d_theta = d_theta
         self.theta_range = theta_range
+        self._t_obs_cache = _BatchCache()
+        self._t_grid_cache = _BatchCache()
+        self._probed_device = None
 
     def test_statistic(self, theta: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
         return self.test_stat_fn(theta, x)
@@ -445,21 +479,36 @@ class CriticalValueProcedure:
         (we evaluate the critical-value MLP once).
         """
         B = x_obs_batch.shape[0]
-        # Probe the test stat to learn the device the closures operate on.
-        theta_probe = _theta_to_row_tensor(
-            theta_0_value, x_obs_batch.dtype, x_obs_batch.device, self.d_theta,
-        )
-        probe = self.test_stat_fn(theta_probe, x_obs_batch[:1])
-        device = probe.device
+        # Probe the test stat once to learn the device the closures operate on;
+        # cache the result so subsequent Coverage α-loop calls skip the extra
+        # forward (matters when test_stat_fn is expensive, e.g. BFF marginal).
+        if self._probed_device is None:
+            theta_probe = _theta_to_row_tensor(
+                theta_0_value, x_obs_batch.dtype, x_obs_batch.device, self.d_theta,
+            )
+            probe = self.test_stat_fn(theta_probe, x_obs_batch[:1])
+            self._probed_device = probe.device
+        device = self._probed_device
         if x_obs_batch.device != device:
             x_obs_batch = x_obs_batch.to(device)
         theta_t = _theta_to_row_tensor(
             theta_0_value, x_obs_batch.dtype, device, self.d_theta,
         ).expand(B, -1)
-        # One batched forward through the test statistic across the X_obs batch:
-        t_obs = self.test_stat_fn(theta_t, x_obs_batch)
-        if t_obs.ndim > 1:
-            t_obs = t_obs.squeeze(-1)
+        # t_obs depends on (θ_0, X_obs); α only enters via c_α(θ_0).
+        # Cache by (id(x_obs_batch), θ_0 repr) so Coverage's α loop hits.
+        theta_0_repr = tuple(np.atleast_1d(
+            np.asarray(theta_0_value if not isinstance(theta_0_value, torch.Tensor)
+                       else theta_0_value.detach().cpu(), dtype=np.float64)
+        ).reshape(-1).tolist())
+        cache_key = ("t_obs", id(x_obs_batch), theta_0_repr)
+
+        def _compute_t_obs():
+            t = self.test_stat_fn(theta_t, x_obs_batch)
+            if t.ndim > 1:
+                t = t.squeeze(-1)
+            return t
+
+        t_obs = self._t_obs_cache.get_or_compute(cache_key, _compute_t_obs)
         # Critical value at the (single) θ_0 — scalar across the batch.
         c_val = self.critical_value_fn(theta_t[:1], alpha)
         if c_val.ndim == 0:
@@ -524,25 +573,35 @@ class CriticalValueProcedure:
         Returns (left, right), each shape (B,). 1D only in v1.
         """
         assert self.d_theta == 1, "confidence_set_batch is 1D only in v1"
-        # Probe device.
-        probe = self.test_stat_fn(
-            torch.zeros((1, 1), dtype=x_obs_batch.dtype, device=x_obs_batch.device),
-            x_obs_batch[:1],
-        )
-        device = probe.device
+        # Probe device once and cache (shared with contains_batch's probe).
+        if self._probed_device is None:
+            probe = self.test_stat_fn(
+                torch.zeros((1, 1), dtype=x_obs_batch.dtype, device=x_obs_batch.device),
+                x_obs_batch[:1],
+            )
+            self._probed_device = probe.device
+        device = self._probed_device
         if x_obs_batch.device != device:
             x_obs_batch = x_obs_batch.to(device)
         B = x_obs_batch.shape[0]
         lo, hi = self.theta_range
-        # Coarse-grid eval of T - c.
-        theta_grid = torch.linspace(
-            lo, hi, n_grid, device=device, dtype=x_obs_batch.dtype,
-        ).view(-1, 1)
-        theta_grid_exp = theta_grid.unsqueeze(0).expand(B, -1, -1).reshape(-1, 1)
-        x_obs_exp = x_obs_batch.unsqueeze(1).expand(-1, n_grid, -1).reshape(
-            -1, x_obs_batch.shape[-1]
+
+        # Coarse-grid eval of T — α-invariant, cache it.
+        def _compute_t_grid():
+            theta_grid_ = torch.linspace(
+                lo, hi, n_grid, device=device, dtype=x_obs_batch.dtype,
+            ).view(-1, 1)
+            theta_grid_exp = theta_grid_.unsqueeze(0).expand(B, -1, -1).reshape(-1, 1)
+            x_obs_exp = x_obs_batch.unsqueeze(1).expand(-1, n_grid, -1).reshape(
+                -1, x_obs_batch.shape[-1]
+            )
+            t_g = self.test_stat_fn(theta_grid_exp, x_obs_exp).view(B, n_grid)
+            return theta_grid_, t_g
+
+        cache_key = ("t_grid", id(x_obs_batch), int(n_grid))
+        theta_grid, t_grid = self._t_grid_cache.get_or_compute(
+            cache_key, _compute_t_grid,
         )
-        t_grid = self.test_stat_fn(theta_grid_exp, x_obs_exp).view(B, n_grid)
         # c_α(θ) only depends on θ → evaluate once, broadcast.
         c_grid = self.critical_value_fn(theta_grid, alpha)
         if c_grid.ndim == 2:
@@ -587,6 +646,7 @@ class PosteriorBasedProcedure:
         # returns samples shape (n, B, d_theta). Lets contains_batch use a
         # single batched posterior.sample call instead of B serial ones.
         self.sample_batched_fn = sample_batched_fn
+        self._sample_cache = _BatchCache()
 
     def posterior_samples(self, x_obs: torch.Tensor, n: int = 10_000) -> torch.Tensor:
         return self.sample_fn(x_obs, n)
@@ -666,7 +726,11 @@ class PosteriorBasedProcedure:
                 cs = self.confidence_set(x_obs_batch[i : i + 1], alpha=alpha)
                 results.append(cs.contains(theta_0_value))
             return torch.tensor(results)
-        samples = self.sample_batched_fn(x_obs_batch, n_samples)  # (n, B, d_θ)
+        cache_key = ("samples", id(x_obs_batch), int(n_samples))
+        samples = self._sample_cache.get_or_compute(
+            cache_key,
+            lambda: self.sample_batched_fn(x_obs_batch, n_samples),
+        )  # (n, B, d_θ)
         if samples.ndim == 2:
             # (n, B): treat as d_θ=1 with implicit last dim.
             samples = samples.unsqueeze(-1)
@@ -696,7 +760,11 @@ class PosteriorBasedProcedure:
                 lo_list[i] = torch.quantile(samples, tail)
                 hi_list[i] = torch.quantile(samples, 1.0 - tail)
             return lo_list, hi_list
-        samples = self.sample_batched_fn(x_obs_batch, n_samples)  # (n, B, d_theta)
+        cache_key = ("samples", id(x_obs_batch), int(n_samples))
+        samples = self._sample_cache.get_or_compute(
+            cache_key,
+            lambda: self.sample_batched_fn(x_obs_batch, n_samples),
+        )  # (n, B, d_theta)
         if samples.ndim == 2:
             samples = samples.unsqueeze(-1)
         # Per-X_obs quantiles along the sample axis.
@@ -712,6 +780,7 @@ class LikelihoodBasedProcedure:
         self.log_likelihood_fn = log_likelihood_fn
         self.d_theta = d_theta
         self.theta_range = theta_range
+        self._ll_grid_cache = _BatchCache()
 
     def log_likelihood(self, theta: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
         return self.log_likelihood_fn(theta, x)
@@ -742,22 +811,28 @@ class LikelihoodBasedProcedure:
             x_obs_batch = x_obs_batch.to(device)
         B = x_obs_batch.shape[0]
         lo, hi = self.theta_range
-        if self.d_theta == 1:
-            theta_grid = torch.linspace(
-                lo, hi, n_grid, device=device, dtype=x_obs_batch.dtype,
-            ).view(-1, 1)
-        else:
-            grid_np = np.random.default_rng(0).uniform(lo, hi, size=(n_grid, self.d_theta))
-            theta_grid = torch.from_numpy(grid_np).to(
-                dtype=x_obs_batch.dtype, device=device,
+
+        def _compute_ll_grid_and_max():
+            if self.d_theta == 1:
+                theta_grid = torch.linspace(
+                    lo, hi, n_grid, device=device, dtype=x_obs_batch.dtype,
+                ).view(-1, 1)
+            else:
+                grid_np = np.random.default_rng(0).uniform(lo, hi, size=(n_grid, self.d_theta))
+                theta_grid = torch.from_numpy(grid_np).to(
+                    dtype=x_obs_batch.dtype, device=device,
+                )
+            theta_grid_exp = theta_grid.unsqueeze(0).expand(B, -1, -1).reshape(-1, self.d_theta)
+            x_obs_exp = (
+                x_obs_batch.unsqueeze(1).expand(-1, n_grid, -1).reshape(-1, x_obs_batch.shape[-1])
             )
-        # All (i, j) pairs: θ_grid_j with X_obs_i. Build (B*G, ·) flat tensors.
-        theta_grid_exp = theta_grid.unsqueeze(0).expand(B, -1, -1).reshape(-1, self.d_theta)
-        x_obs_exp = (
-            x_obs_batch.unsqueeze(1).expand(-1, n_grid, -1).reshape(-1, x_obs_batch.shape[-1])
+            ll_g = self.log_likelihood_fn(theta_grid_exp, x_obs_exp).view(B, n_grid)
+            return theta_grid, ll_g, ll_g.max(dim=1).values
+
+        cache_key = ("ll_grid", id(x_obs_batch), int(n_grid))
+        theta_grid, ll_grid, ll_max = self._ll_grid_cache.get_or_compute(
+            cache_key, _compute_ll_grid_and_max,
         )
-        ll_grid = self.log_likelihood_fn(theta_grid_exp, x_obs_exp).view(B, n_grid)
-        ll_max = ll_grid.max(dim=1).values  # (B,)
         # ll at the candidate θ_0, batched over X_obs:
         theta_0_t = _theta_to_row_tensor(
             theta_0_value, x_obs_batch.dtype, device, self.d_theta,
@@ -851,16 +926,23 @@ class LikelihoodBasedProcedure:
             x_obs_batch = x_obs_batch.to(device)
         B = x_obs_batch.shape[0]
         lo, hi = self.theta_range
-        # 1) Coarse-grid ll evaluation, B × n_grid.
-        theta_grid = torch.linspace(
-            lo, hi, n_grid, device=device, dtype=x_obs_batch.dtype,
-        ).view(-1, 1)
-        theta_grid_exp = theta_grid.unsqueeze(0).expand(B, -1, -1).reshape(-1, 1)
-        x_obs_exp = x_obs_batch.unsqueeze(1).expand(-1, n_grid, -1).reshape(
-            -1, x_obs_batch.shape[-1]
+
+        # 1) Coarse-grid ll evaluation, B × n_grid — α-invariant, so cache it.
+        def _compute_ll_grid_and_max():
+            theta_grid_ = torch.linspace(
+                lo, hi, n_grid, device=device, dtype=x_obs_batch.dtype,
+            ).view(-1, 1)
+            theta_grid_exp = theta_grid_.unsqueeze(0).expand(B, -1, -1).reshape(-1, 1)
+            x_obs_exp = x_obs_batch.unsqueeze(1).expand(-1, n_grid, -1).reshape(
+                -1, x_obs_batch.shape[-1]
+            )
+            ll_g = self.log_likelihood_fn(theta_grid_exp, x_obs_exp).view(B, n_grid)
+            return theta_grid_, ll_g, ll_g.max(dim=1).values
+
+        cache_key = ("ll_grid", id(x_obs_batch), int(n_grid))
+        theta_grid, ll_grid, ll_max_per_row = self._ll_grid_cache.get_or_compute(
+            cache_key, _compute_ll_grid_and_max,
         )
-        ll_grid = self.log_likelihood_fn(theta_grid_exp, x_obs_exp).view(B, n_grid)
-        ll_max_per_row = ll_grid.max(dim=1).values  # (B,)
         center_idx = ll_grid.argmax(dim=1)  # (B,)
         center_theta = theta_grid.squeeze(-1)[center_idx]  # (B,)
 
@@ -888,22 +970,27 @@ class RatioBasedProcedure:
         self.log_ratio_fn = log_ratio_fn
         self.d_theta = d_theta
         self.theta_range = theta_range
+        self._likelihood_wrapper = None
+
+    def _wrapper(self) -> "LikelihoodBasedProcedure":
+        if self._likelihood_wrapper is None:
+            self._likelihood_wrapper = LikelihoodBasedProcedure(
+                self.log_ratio_fn, self.d_theta, self.theta_range,
+            )
+        return self._likelihood_wrapper
 
     def log_ratio(self, theta: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
         return self.log_ratio_fn(theta, x)
 
     def confidence_set(self, x_obs: torch.Tensor, alpha: float) -> ConfidenceSet:
-        wrapper = LikelihoodBasedProcedure(self.log_ratio_fn, self.d_theta, self.theta_range)
-        return wrapper.confidence_set(x_obs, alpha)
+        return self._wrapper().confidence_set(x_obs, alpha)
 
     def contains_batch(
         self, theta_0_value, x_obs_batch: torch.Tensor, alpha: float
     ) -> torch.Tensor:
-        wrapper = LikelihoodBasedProcedure(self.log_ratio_fn, self.d_theta, self.theta_range)
-        return wrapper.contains_batch(theta_0_value, x_obs_batch, alpha)
+        return self._wrapper().contains_batch(theta_0_value, x_obs_batch, alpha)
 
     def confidence_set_batch(
         self, x_obs_batch: torch.Tensor, alpha: float
     ) -> tuple:
-        wrapper = LikelihoodBasedProcedure(self.log_ratio_fn, self.d_theta, self.theta_range)
-        return wrapper.confidence_set_batch(x_obs_batch, alpha)
+        return self._wrapper().confidence_set_batch(x_obs_batch, alpha)
