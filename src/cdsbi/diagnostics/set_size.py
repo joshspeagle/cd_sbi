@@ -39,11 +39,7 @@ class SetSize(Diagnostic):
         rng = np.random.default_rng(0)
         rows = []
         for theta_0 in self.theta_0_grid:
-            # Same X | θ_0 sampling Coverage uses (hardcoded LocationNormal1D form;
-            # v1+ simulators will need a sample_x_given_theta hook).
-            theta_t = torch.full((self.n_per_theta, 1), float(theta_0), dtype=torch.float32)
-            eps = rng.standard_normal(size=(self.n_per_theta, 1))
-            x = theta_t + torch.from_numpy(eps).float()
+            x = simulator.sample_x_given_theta(theta_0, self.n_per_theta, rng)
             for alpha in self.alpha_grid:
                 if isinstance(trained.procedure, PivotBasedProcedure):
                     # Fast path: single vectorized 3-stage bisection across batch.
@@ -54,9 +50,21 @@ class SetSize(Diagnostic):
                     widths = np.empty(self.n_per_theta, dtype=np.float64)
                     for i in range(self.n_per_theta):
                         cs = trained.procedure.confidence_set(x[i : i + 1], alpha=alpha)
-                        widths[i] = float(cs.boundary_repr[1] - cs.boundary_repr[0])
-                rows.append({
-                    "theta_0_0": float(theta_0),
+                        br = cs.boundary_repr
+                        if br.ndim == 1:
+                            # 1D: (lower, upper)
+                            widths[i] = float(br[1] - br[0])
+                        elif br.numel() == 0:
+                            widths[i] = 0.0  # empty set
+                        else:
+                            # d > 1: max distance between any boundary point and
+                            # the boundary centroid — proxy for set diameter.
+                            center = br.mean(dim=0)
+                            dist = (br - center).pow(2).sum(dim=-1).sqrt()
+                            widths[i] = float(dist.max().item())
+                theta_vec = np.atleast_1d(np.asarray(theta_0, dtype=np.float64)).reshape(-1)
+                row = {f"theta_0_{k}": float(theta_vec[k]) for k in range(theta_vec.shape[0])}
+                row.update({
                     "alpha": float(alpha),
                     "mean_width": float(widths.mean()),
                     "median_width": float(np.median(widths)),
@@ -65,6 +73,7 @@ class SetSize(Diagnostic):
                     "max_width": float(widths.max()),
                     "n_eval": int(self.n_per_theta),
                 })
+                rows.append(row)
         df = pd.DataFrame(rows)
         return DiagnosticResult(
             name=self.name,

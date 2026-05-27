@@ -318,17 +318,16 @@ class CriticalValueProcedure:
         """
         B = x_obs_batch.shape[0]
         # Probe the test stat to learn the device the closures operate on.
-        theta_probe = torch.tensor(
-            [[float(theta_0_value)]], dtype=x_obs_batch.dtype, device=x_obs_batch.device,
+        theta_probe = _theta_to_row_tensor(
+            theta_0_value, x_obs_batch.dtype, x_obs_batch.device, self.d_theta,
         )
         probe = self.test_stat_fn(theta_probe, x_obs_batch[:1])
         device = probe.device
         if x_obs_batch.device != device:
             x_obs_batch = x_obs_batch.to(device)
-        theta_t = torch.full(
-            (B, self.d_theta), float(theta_0_value),
-            dtype=x_obs_batch.dtype, device=device,
-        )
+        theta_t = _theta_to_row_tensor(
+            theta_0_value, x_obs_batch.dtype, device, self.d_theta,
+        ).expand(B, -1)
         # One batched forward through the test statistic across the X_obs batch:
         t_obs = self.test_stat_fn(theta_t, x_obs_batch)
         if t_obs.ndim > 1:
@@ -447,7 +446,7 @@ class LikelihoodBasedProcedure:
         n_grid: int = 200,
     ) -> torch.Tensor:
         """Vectorized containment for the Wilks LR set:
-        {θ : 2(ll_max(X_obs) − ll(θ; X_obs)) ≤ χ²_{1, α}}.
+        {θ : 2(ll_max(X_obs) − ll(θ; X_obs)) ≤ χ²_{d, α}}.
 
         One batched log_likelihood call over (B × n_grid) (θ, X) pairs gives
         ll_max(X_obs) per element; one more batched call at (θ_0, X_obs_i) gives
@@ -457,21 +456,26 @@ class LikelihoodBasedProcedure:
         the *endpoints* (in `confidence_set`) doesn't affect containment of
         an interior point, only the boundary value.
         """
-        assert self.d_theta == 1, "contains_batch only supports d_theta=1 in v0"
-        thresh = float(chi2.ppf(alpha, df=1))
+        thresh = float(chi2.ppf(alpha, df=self.d_theta))
         # Probe device.
-        probe = self.log_likelihood_fn(
-            torch.tensor([[float(theta_0_value)]], dtype=x_obs_batch.dtype, device=x_obs_batch.device),
-            x_obs_batch[:1],
+        theta_probe = _theta_to_row_tensor(
+            theta_0_value, x_obs_batch.dtype, x_obs_batch.device, self.d_theta,
         )
+        probe = self.log_likelihood_fn(theta_probe, x_obs_batch[:1])
         device = probe.device
         if x_obs_batch.device != device:
             x_obs_batch = x_obs_batch.to(device)
         B = x_obs_batch.shape[0]
         lo, hi = self.theta_range
-        theta_grid = torch.linspace(
-            lo, hi, n_grid, device=device, dtype=x_obs_batch.dtype,
-        ).view(-1, self.d_theta)
+        if self.d_theta == 1:
+            theta_grid = torch.linspace(
+                lo, hi, n_grid, device=device, dtype=x_obs_batch.dtype,
+            ).view(-1, 1)
+        else:
+            grid_np = np.random.default_rng(0).uniform(lo, hi, size=(n_grid, self.d_theta))
+            theta_grid = torch.from_numpy(grid_np).to(
+                dtype=x_obs_batch.dtype, device=device,
+            )
         # All (i, j) pairs: θ_grid_j with X_obs_i. Build (B*G, ·) flat tensors.
         theta_grid_exp = theta_grid.unsqueeze(0).expand(B, -1, -1).reshape(-1, self.d_theta)
         x_obs_exp = (
@@ -480,10 +484,9 @@ class LikelihoodBasedProcedure:
         ll_grid = self.log_likelihood_fn(theta_grid_exp, x_obs_exp).view(B, n_grid)
         ll_max = ll_grid.max(dim=1).values  # (B,)
         # ll at the candidate θ_0, batched over X_obs:
-        theta_0_t = torch.full(
-            (B, self.d_theta), float(theta_0_value),
-            dtype=x_obs_batch.dtype, device=device,
-        )
+        theta_0_t = _theta_to_row_tensor(
+            theta_0_value, x_obs_batch.dtype, device, self.d_theta,
+        ).expand(B, -1)
         ll_at_0 = self.log_likelihood_fn(theta_0_t, x_obs_batch)
         if ll_at_0.ndim > 1:
             ll_at_0 = ll_at_0.squeeze(-1)

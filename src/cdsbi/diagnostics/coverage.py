@@ -23,12 +23,7 @@ class Coverage(Diagnostic):
         rows = []
         has_fast_path = hasattr(trained.procedure, "contains_batch")
         for theta_0 in self.theta_0_grid:
-            # Draw n_per_theta X | θ_0 (fix θ; vary X) for LocationNormal1D-style models.
-            # NOTE: this hardcodes X = θ + N(0, 1). For v1+ simulators, the Simulator
-            # protocol should add a sample_x_given_theta hook.
-            theta_t = torch.full((self.n_per_theta, 1), theta_0, dtype=torch.float32)
-            eps = rng.standard_normal(size=(self.n_per_theta, 1))
-            x = theta_t + torch.from_numpy(eps).float()
+            x = simulator.sample_x_given_theta(theta_0, self.n_per_theta, rng)
             for alpha in self.alpha_grid:
                 if has_fast_path:
                     # Single batched forward — any procedure that exposes
@@ -44,8 +39,9 @@ class Coverage(Diagnostic):
                         if cs.contains(theta_0):
                             inside += 1
                     empirical = inside / self.n_per_theta
-                rows.append({
-                    "theta_0_0": float(theta_0),
+                theta_vec = np.atleast_1d(np.asarray(theta_0, dtype=np.float64)).reshape(-1)
+                row = {f"theta_0_{k}": float(theta_vec[k]) for k in range(theta_vec.shape[0])}
+                row.update({
                     "alpha": float(alpha),
                     "nominal": float(alpha),
                     "empirical": float(empirical),
@@ -53,6 +49,7 @@ class Coverage(Diagnostic):
                     "passed": abs(empirical - alpha) <= 0.02,
                     "tolerance": 0.02,
                 })
+                rows.append(row)
         df = pd.DataFrame(rows)
         passed = bool(df["passed"].all())
         return DiagnosticResult(
