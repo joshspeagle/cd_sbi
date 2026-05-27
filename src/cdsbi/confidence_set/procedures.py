@@ -38,6 +38,37 @@ def _theta_to_row_tensor(theta_value, dtype, device, d_theta: int) -> torch.Tens
     return t.view(1, d_theta)
 
 
+def _vectorized_bisect_1d(
+    f_batch,
+    a: torch.Tensor,
+    b: torch.Tensor,
+    f_sign_at_a: int,
+    n_iters: int = 40,
+) -> torch.Tensor:
+    """Vectorized 1D bisection across a batch.
+
+    f_batch(theta_vals: (B,)) -> (B,) scalar values of f at theta_vals per
+    batch element. The bisection assumes a sign change on each interval
+    [a[i], b[i]] and that f_sign_at_a is the (constant) sign of f(a) across
+    the batch (+1 if f(a) > 0, -1 if f(a) < 0). Returns the root (B,) tensor.
+
+    Caller is responsible for verifying f really changes sign on the
+    interval; if not, the returned value is the midpoint of the bracket.
+    """
+    for _ in range(n_iters):
+        m = 0.5 * (a + b)
+        f_m = f_batch(m)
+        if f_sign_at_a > 0:
+            # f > 0 at a, f < 0 at b. f(m) > 0 → root is in [m, b].
+            move_a = f_m > 0
+        else:
+            # f < 0 at a, f > 0 at b. f(m) < 0 → root is in [m, b].
+            move_a = f_m < 0
+        a = torch.where(move_a, m, a)
+        b = torch.where(move_a, b, m)
+    return 0.5 * (a + b)
+
+
 @runtime_checkable
 class ConfidenceProcedure(Protocol):
     def confidence_set(self, x_obs: torch.Tensor, alpha: float) -> ConfidenceSet: ...
@@ -376,6 +407,56 @@ class CriticalValueProcedure:
             contains=contains, boundary_repr=torch.tensor([left, right]), alpha=alpha
         )
 
+    def confidence_set_batch(
+        self, x_obs_batch: torch.Tensor, alpha: float, n_grid: int = 200,
+    ) -> tuple:
+        """Vectorized 1D LF2I confidence-set boundaries across a batch of X_obs.
+        Returns (left, right), each shape (B,). 1D only in v1.
+        """
+        assert self.d_theta == 1, "confidence_set_batch is 1D only in v1"
+        # Probe device.
+        probe = self.test_stat_fn(
+            torch.zeros((1, 1), dtype=x_obs_batch.dtype, device=x_obs_batch.device),
+            x_obs_batch[:1],
+        )
+        device = probe.device
+        if x_obs_batch.device != device:
+            x_obs_batch = x_obs_batch.to(device)
+        B = x_obs_batch.shape[0]
+        lo, hi = self.theta_range
+        # Coarse-grid eval of T - c.
+        theta_grid = torch.linspace(
+            lo, hi, n_grid, device=device, dtype=x_obs_batch.dtype,
+        ).view(-1, 1)
+        theta_grid_exp = theta_grid.unsqueeze(0).expand(B, -1, -1).reshape(-1, 1)
+        x_obs_exp = x_obs_batch.unsqueeze(1).expand(-1, n_grid, -1).reshape(
+            -1, x_obs_batch.shape[-1]
+        )
+        t_grid = self.test_stat_fn(theta_grid_exp, x_obs_exp).view(B, n_grid)
+        # c_α(θ) only depends on θ → evaluate once, broadcast.
+        c_grid = self.critical_value_fn(theta_grid, alpha)
+        if c_grid.ndim == 2:
+            c_grid = c_grid.squeeze(-1)
+        f_grid = t_grid - c_grid.unsqueeze(0)  # (B, n_grid)
+        center_idx = f_grid.argmin(dim=1)  # most-inside grid pt
+        center_theta = theta_grid.squeeze(-1)[center_idx]
+
+        def f_batch(theta_vals: torch.Tensor) -> torch.Tensor:
+            theta_b = theta_vals.unsqueeze(-1)
+            t = self.test_stat_fn(theta_b, x_obs_batch).squeeze(-1)
+            c = self.critical_value_fn(theta_b, alpha)
+            if c.ndim > 1:
+                c = c.squeeze(-1)
+            return t - c
+
+        a = torch.full((B,), lo, dtype=x_obs_batch.dtype, device=device)
+        b = center_theta.clone()
+        left = _vectorized_bisect_1d(f_batch, a, b, f_sign_at_a=+1)
+        a = center_theta.clone()
+        b = torch.full((B,), hi, dtype=x_obs_batch.dtype, device=device)
+        right = _vectorized_bisect_1d(f_batch, a, b, f_sign_at_a=-1)
+        return left, right
+
 
 class PosteriorBasedProcedure:
     """NPE: equal-tailed credible interval via posterior samples.
@@ -433,6 +514,33 @@ class PosteriorBasedProcedure:
         hi = torch.quantile(samples, 1.0 - tail, dim=0).squeeze(-1)  # (B,)
         theta_0_t = torch.tensor(float(theta_0_value), device=lo.device, dtype=lo.dtype)
         return (lo <= theta_0_t) & (theta_0_t <= hi)
+
+    def confidence_set_batch(
+        self, x_obs_batch: torch.Tensor, alpha: float, n_samples: int = 10_000,
+    ) -> tuple:
+        """Vectorized 1D equal-tailed posterior interval boundaries across a
+        batch of X_obs. Returns (left, right), each shape (B,). Uses
+        sample_batched_fn when available; falls back to a per-X_obs sample_fn
+        loop otherwise (no real speedup vs the slow path in that case).
+        """
+        assert self.d_theta == 1, "confidence_set_batch is 1D only in v1"
+        B = x_obs_batch.shape[0]
+        tail = (1.0 - alpha) / 2.0
+        if self.sample_batched_fn is None:
+            lo_list = torch.empty(B, dtype=x_obs_batch.dtype)
+            hi_list = torch.empty(B, dtype=x_obs_batch.dtype)
+            for i in range(B):
+                samples = self.sample_fn(x_obs_batch[i : i + 1], n_samples).flatten()
+                lo_list[i] = torch.quantile(samples, tail)
+                hi_list[i] = torch.quantile(samples, 1.0 - tail)
+            return lo_list, hi_list
+        samples = self.sample_batched_fn(x_obs_batch, n_samples)  # (n, B, d_theta)
+        if samples.ndim == 2:
+            samples = samples.unsqueeze(-1)
+        # Per-X_obs quantiles along the sample axis.
+        lo_q = torch.quantile(samples.squeeze(-1), tail, dim=0)
+        hi_q = torch.quantile(samples.squeeze(-1), 1.0 - tail, dim=0)
+        return lo_q, hi_q
 
 
 class LikelihoodBasedProcedure:
@@ -533,6 +641,53 @@ class LikelihoodBasedProcedure:
             contains=contains, boundary_repr=torch.tensor([left, right]), alpha=alpha
         )
 
+    def confidence_set_batch(
+        self, x_obs_batch: torch.Tensor, alpha: float, n_grid: int = 200,
+    ) -> tuple:
+        """Vectorized 1D Wilks-LR confidence interval boundaries across a batch
+        of X_obs. Returns (left, right), each shape (B,). 1D only in v1.
+        """
+        assert self.d_theta == 1, "confidence_set_batch is 1D only in v1"
+        thresh = float(chi2.ppf(alpha, df=1))
+        # Probe device.
+        probe = self.log_likelihood_fn(
+            torch.zeros((1, 1), dtype=x_obs_batch.dtype, device=x_obs_batch.device),
+            x_obs_batch[:1],
+        )
+        device = probe.device
+        if x_obs_batch.device != device:
+            x_obs_batch = x_obs_batch.to(device)
+        B = x_obs_batch.shape[0]
+        lo, hi = self.theta_range
+        # 1) Coarse-grid ll evaluation, B × n_grid.
+        theta_grid = torch.linspace(
+            lo, hi, n_grid, device=device, dtype=x_obs_batch.dtype,
+        ).view(-1, 1)
+        theta_grid_exp = theta_grid.unsqueeze(0).expand(B, -1, -1).reshape(-1, 1)
+        x_obs_exp = x_obs_batch.unsqueeze(1).expand(-1, n_grid, -1).reshape(
+            -1, x_obs_batch.shape[-1]
+        )
+        ll_grid = self.log_likelihood_fn(theta_grid_exp, x_obs_exp).view(B, n_grid)
+        ll_max_per_row = ll_grid.max(dim=1).values  # (B,)
+        center_idx = ll_grid.argmax(dim=1)  # (B,)
+        center_theta = theta_grid.squeeze(-1)[center_idx]  # (B,)
+
+        # 2) f(θ; X) = 2 (ll_max - ll(θ)) - thresh; set = {f ≤ 0}.
+        def f_batch(theta_vals: torch.Tensor) -> torch.Tensor:
+            theta_b = theta_vals.unsqueeze(-1)  # (B, 1)
+            ll = self.log_likelihood_fn(theta_b, x_obs_batch).squeeze(-1)
+            return 2.0 * (ll_max_per_row - ll) - thresh
+
+        # 3) Bisect LEFT root on [lo, center]: f(lo) > 0 (typically), f(center) ≤ 0.
+        a = torch.full((B,), lo, dtype=x_obs_batch.dtype, device=device)
+        b = center_theta.clone()
+        left = _vectorized_bisect_1d(f_batch, a, b, f_sign_at_a=+1)
+        # 4) Bisect RIGHT root on [center, hi]: f(center) ≤ 0, f(hi) > 0.
+        a = center_theta.clone()
+        b = torch.full((B,), hi, dtype=x_obs_batch.dtype, device=device)
+        right = _vectorized_bisect_1d(f_batch, a, b, f_sign_at_a=-1)
+        return left, right
+
 
 class RatioBasedProcedure:
     """NRE: ratio thresholding — same shape as Likelihood but using log-ratio."""
@@ -554,3 +709,9 @@ class RatioBasedProcedure:
     ) -> torch.Tensor:
         wrapper = LikelihoodBasedProcedure(self.log_ratio_fn, self.d_theta, self.theta_range)
         return wrapper.contains_batch(theta_0_value, x_obs_batch, alpha)
+
+    def confidence_set_batch(
+        self, x_obs_batch: torch.Tensor, alpha: float
+    ) -> tuple:
+        wrapper = LikelihoodBasedProcedure(self.log_ratio_fn, self.d_theta, self.theta_range)
+        return wrapper.confidence_set_batch(x_obs_batch, alpha)
