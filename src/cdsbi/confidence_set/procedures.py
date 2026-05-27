@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import Callable, Protocol, Tuple, runtime_checkable
 
+import numpy as np
 import torch
 from scipy.stats import chi2
 
@@ -22,14 +23,19 @@ def _theta_to_row_tensor(theta_value, dtype, device, d_theta: int) -> torch.Tens
     """Normalise a scalar / sequence / tensor θ_0 into a (1, d_theta) row.
 
     Handles Python float / int, numpy scalar / 0-d tensor (np.ndim == 0),
-    Python list / tuple, 1-d ndarray, 1-d torch.Tensor.
+    Python list / tuple, 1-d ndarray, 1-d torch.Tensor (CPU or CUDA), 0-d
+    torch.Tensor.
     """
-    import numpy as np
-    arr = np.atleast_1d(np.asarray(theta_value, dtype=np.float64)).reshape(-1)
-    assert arr.shape == (d_theta,), (
-        f"theta_0 has shape {arr.shape}, expected ({d_theta},)"
+    if isinstance(theta_value, torch.Tensor):
+        # Avoid numpy detour for CUDA tensors (np.asarray raises on them).
+        t = theta_value.detach().to(dtype=dtype, device=device).reshape(-1)
+    else:
+        arr = np.atleast_1d(np.asarray(theta_value, dtype=np.float64)).reshape(-1)
+        t = torch.from_numpy(arr).to(dtype=dtype, device=device)
+    assert t.shape == (d_theta,), (
+        f"theta_0 has shape {tuple(t.shape)}, expected ({d_theta},)"
     )
-    return torch.from_numpy(arr).to(dtype=dtype, device=device).view(1, d_theta)
+    return t.view(1, d_theta)
 
 
 @runtime_checkable
@@ -170,9 +176,9 @@ class PivotBasedProcedure:
         boundary = center.unsqueeze(0) + t.unsqueeze(-1) * u
 
         def contains(theta_val) -> bool:
-            import numpy as np
-            arr = np.atleast_1d(np.asarray(theta_val, dtype=np.float64)).reshape(-1)
-            theta_t = torch.from_numpy(arr).to(dtype=dtype, device=device).view(1, d)
+            # Use the same normalisation helper as the rest of this module so
+            # CUDA-tensor θ inputs don't trip on np.asarray.
+            theta_t = _theta_to_row_tensor(theta_val, dtype, device, d)
             r = self.pivot_fn(theta_t, x_obs)
             return bool((r.pow(2).sum().item() <= thresh))
 
