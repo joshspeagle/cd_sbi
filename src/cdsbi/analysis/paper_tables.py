@@ -36,3 +36,20 @@ def paper_table_8_2(df: pd.DataFrame) -> pd.DataFrame:
     agg = df.groupby(["method", "budget_name"])[metrics].agg(["mean", "std"])
     agg.columns = [f"{m}_{stat}" for m, stat in agg.columns]
     return agg
+
+
+def paper_table_8_3(df: pd.DataFrame) -> pd.DataFrame:
+    """Pivot (method × budget) → seed-averaged §8.3 metrics.
+
+    Extends paper_table_8_2 with jacobian_max_residual (the §8.3-specific
+    KR-uniqueness empirical metric). Non-pivot methods will have NaN in
+    this column; groupby.mean() drops them silently.
+    """
+    metrics = [
+        "coverage_error_max", "marginal_ks", "pivot_rmse",
+        "joint_mahal_ks", "jacobian_max_residual", "actual_params_total",
+    ]
+    metrics = [m for m in metrics if m in df.columns]
+    agg = df.groupby(["method", "budget_name"])[metrics].agg(["mean", "std"])
+    agg.columns = [f"{m}_{stat}" for m, stat in agg.columns]
+    return agg
