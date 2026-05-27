@@ -3,7 +3,7 @@ defaults:
   - flow: additive_umnn
   - conditioner: identity
   - method: cd_sbi
-  - training: adam_3e-3_4k_steps
+  - training: adamw_cosine_warmup
   - budget: medium
   - experiment: 8_1_replication
   - _self_

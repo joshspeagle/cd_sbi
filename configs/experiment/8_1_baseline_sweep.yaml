@@ -12,3 +12,7 @@ hydra:
       method: cd_sbi,npe,nle,nre,lf2i_bff
       budget: small,medium,large,xlarge
       seed: 0,1,2,3,4
+      # Finite-sample regime is the paper-realistic comparison; sbi-wrapped
+      # methods are inherently finite-sample and CDSBI in fresh-batch mode
+      # would otherwise have an unfair simulator-call advantage.
+      training.fresh_batch: "false"
