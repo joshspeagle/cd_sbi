@@ -2583,56 +2583,157 @@ architectural calibration matters more.
 \(\theta \sim U[-7, 7]^2\). Truth \(r^*(\theta, X) = \theta - X\)
 component-wise.
 
-\textbf{Architecture.} Triangular flow as in \S\ref{subsec:6.1} (additive form):
+\textbf{Architecture.} Triangular flow as in \S\ref{subsec:6.1}
+(additive form):
 \[r_1(\theta, X) = a_1(\theta_1) - b_1(X_1), \qquad r_2(\theta, X) = a_2(\theta_2; \theta_1, X_1) - b_2(X_2; \theta_1, X_1).\]
 \(a_1, b_1\) scalar UMNNs; \(a_2, b_2\) contextual UMNNs taking
-\((\theta_1, X_1)\) as context. 5,004 parameters total.
+\((\theta_1, X_1)\) as context.
 
-\textbf{Results.}
+\textbf{Sweep.} Same protocol as \S\ref{subsec:8.1}: five seeds at
+each of four matched-parameter budgets (\(\approx\) 1k, 5k, 25k,
+100k total parameters per method). Diagnostics evaluated on
+\(N = 5000\) draws for marginal PIT and pivot RMSE,
+\(N/\text{bin} = 1000\) for the 5-bin conditional PIT,
+\(N/\theta_0 = 2000\) for the per-\(\theta_0\) joint Mahalanobis at
+5 reference points, and 200 \(\theta_0\) values \(\times\) 50
+\(X \mid \theta\) samples per nominal coverage level.
+
+\textbf{CDSBI calibration diagnostics.} Medium budget
+(\(\approx\) 5k parameters):
 
 \begin{longtable}[]{@{}
-  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}
-  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}
-  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}@{}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.40}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.30}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.30}}@{}}
 \toprule\noalign{}
 \begin{minipage}[b]{\linewidth}\raggedright
 Diagnostic
 \end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-Value
+Value (mean \(\pm\) std)
 \end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-Status
+Noise floor
 \end{minipage} \\
 \midrule\noalign{}
 \endhead
 \bottomrule\noalign{}
 \endlastfoot
-Pivot RMSE (total) & 0.044 & clean \\
-Per-component: \(r_1\) & 0.014 & excellent \\
-Per-component: \(r_2\) & 0.061 & clean (conditioning network learning
-slower) \\
-Marginal PIT KS: \(r_1, r_2\) & 0.007, 0.006 & both PASS
-(\(p > 0.1\)) \\
-Joint Mahalanobis vs \(\chi^2_2\) KS & 0.011 & clean \\
-Conditional PIT at 5 \(\theta_0\): \(r_1\) & KS 0.011--0.018, all PASS &
-clean \\
-Conditional PIT at 5 \(\theta_0\): \(r_2\) & KS 0.007--0.044, all PASS
-at per-bin floor & KS within the per-conditional-bin floor of
-\(\approx 0.052\) (\(N/5 = 1000\) per bin) \\
-Conditional Mahalanobis at 5 \(\theta_0\) & KS 0.008--0.016, all PASS &
-clean \\
-Coverage error across \(\theta_0\), all \(\alpha\) & \(< 0.01\) &
-excellent \\
+Pivot RMSE (total) & \(0.058 \pm 0.008\) & 0.050 \\
+Marginal PIT KS, \(r_1\) & \(0.014 \pm 0.004\) & 0.023 \\
+Marginal PIT KS, \(r_2\) & \(0.013 \pm 0.003\) & 0.023 \\
+Joint Mahalanobis vs \(\chi^2_2\) KS, max over 5
+\(\theta_0\) & \(0.032 \pm 0.006\) & 0.036 \\
+Conditional PIT \(r_1\), bulk \((|\theta_0| \le 4)\) &
+\(0.031 \pm 0.004\) & 0.051 \\
+Conditional PIT \(r_1\), edge \((|\theta_0| > 4)\) &
+\(0.024 \pm 0.004\) & 0.051 \\
+Conditional PIT \(r_2\), bulk \((|\theta_0| \le 4)\) &
+\(0.029 \pm 0.004\) & 0.051 \\
+Conditional PIT \(r_2\), edge \((|\theta_0| > 4)\) &
+\(0.033 \pm 0.013\) & 0.051 \\
+Coverage error \(\max_{\theta_0, \alpha}\) &
+\(0.020 \pm 0.003\) & \(\sim 0.02\) (binomial SE) \\
 \end{longtable}
 
-The clean result. Triangular construction scales naturally, and the
-joint Mahalanobis test (which \(r_1, r_2\) being individually calibrated
-does \emph{not} automatically imply in \(d > 1\); see \S\ref{subsec:7.3})
-passes. Comparing conditional KS values against the per-bin floor
-(\(\approx 0.052\) at \(N/5 = 1000\)) rather than the marginal floor
-(\(\approx 0.023\) at \(N = 5000\)) --- the correct comparison for
-conditional statistics --- shows all conditional PIT values are clean,
-not borderline. The inferentially primary joint Mahalanobis and
-coverage tests are clean by either metric.
+All diagnostics sit at or below their Monte-Carlo noise floors.
+The inferentially primary 2D check is the joint Mahalanobis
+test --- which coordinate-wise marginal PIT being individually
+calibrated does \emph{not} automatically imply at \(d > 1\)
+(\S\ref{subsec:7.3}) --- and the max KS over 5 reference \(\theta_0\)
+lands at the per-\(\theta_0\) noise floor of 0.036, with the
+mean across \(\theta_0\) (\(0.022 \pm 0.002\)) well below it.
+Triangular construction scales naturally: the joint \(r^T r\)
+distribution is calibrated to \(\chi^2_2\), not just each
+\(r_i\) marginally to \(\mathcal{N}(0, 1)\).
+
+\textbf{Budget invariance.} Across the four budgets, all CDSBI
+diagnostics sit at the same level within seed scatter (e.g.\
+coverage error max ranges \(0.020\)--\(0.027\) across small \(\to\)
+xlarge, marginal KS at \(0.013\)--\(0.014\) throughout). The
+additive-form triangular flow saturates well before the smallest
+budget we tested, mirroring the \S\ref{subsec:8.1} pattern.
+
+\paragraph{Comparison with baselines.} We sweep the same budgets
+and seeds for NPE, NLE, NRE, and LF2I-BFF. The headline cross-method
+diagnostic at \(d = 2\) is the worst-case coverage error
+\(\max_{\theta_0, \alpha}\bigl|\hat{C}_\alpha(\theta_0) - \alpha\bigr|\)
+(mean \(\pm\) std across seeds; smaller is better; noise floor
+\(\sim 0.02\)):
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 8\tabcolsep) * \real{0.20}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 8\tabcolsep) * \real{0.20}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 8\tabcolsep) * \real{0.20}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 8\tabcolsep) * \real{0.20}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 8\tabcolsep) * \real{0.20}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Method
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Small (\(\approx\)1k)
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Medium (\(\approx\)5k)
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Large (\(\approx\)25k)
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+XLarge (\(\approx\)100k)
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+CD-SBI & \(0.022 \pm 0.003\) & \(0.020 \pm 0.004\) &
+\(0.026 \pm 0.005\) & \(0.027 \pm 0.003\) \\
+NPE\(^\dagger\) & \(0.097 \pm 0.024\) & \(0.070 \pm 0.022\) &
+\(0.050 \pm 0.009\) & \(0.054 \pm 0.021\) \\
+NLE & \(0.090 \pm 0.004\) & \(0.085 \pm 0.003\) &
+\(0.080 \pm 0.007\) & \(0.073 \pm 0.016\) \\
+LF2I-BFF & \(0.121 \pm 0.041\) & \(0.110 \pm 0.028\) &
+\(0.112 \pm 0.036\) & \(0.108 \pm 0.031\) \\
+NRE & \(0.138 \pm 0.021\) & \(0.173 \pm 0.028\) &
+\(0.159 \pm 0.015\) & \(0.177 \pm 0.034\) \\
+\end{longtable}
+
+\(^\dagger\) NPE's credible region is currently formed by
+intersecting per-coordinate marginal HPD intervals
+(Bonferroni-conservative); a true joint HPD region would tighten
+NPE's coverage further and is deferred to a follow-up.
+
+The \S\ref{subsec:8.1} picture changes materially.
+\emph{(i) CD-SBI uniquely reaches the noise floor at \(d = 2\).}
+Coverage error max sits at \(\approx 0.025\) at every budget,
+indistinguishable from the binomial SE of the diagnostic itself.
+\emph{(ii) The \S\ref{subsec:8.1} NLE = CD-SBI parity has broken.}
+At \(d = 2\), NLE lands at 3--4 \(\times\) the floor (0.07--0.09)
+across all budgets. The two methods still optimize the same NF-MLE
+loss (\S\ref{subsec:3.4}), but the location-Gaussian
+Bayesian--frequentist coincidence that closed the gap in 1D
+(Theorem A, \S\ref{sec:4}) is no longer sharp: the surrogate-likelihood
+posterior region NLE samples via MCMC differs from CD-SBI's
+\(\{\theta : \|r(\theta; X)\|^2 \le \chi^2_{2, \alpha}\}\) by an
+amount small in 1D but visible in 2D. CD-SBI's (R1) +
+triangular structure carries the coverage guarantee through to
+multivariate \(\theta\); NLE's generic conditional flow gets the
+density right and misses the geometry.
+\emph{(iii) NPE, LF2I-BFF, NRE.} NPE varies between 3--5 \(\times\)
+the floor (0.05--0.10), better than NLE at large/xlarge.
+LF2I-BFF holds roughly constant at 5 \(\times\) the floor
+(0.11--0.12) across all budgets --- the retuned multi-quantile
+head (vs the \S\ref{subsec:8.1} schedule) eliminates the 1D
+U-shape, but the two-stage-calibration error remains material in
+2D. NRE is worst at 6--8 \(\times\) the floor.
+
+\textbf{Synthesis.} Two things carry over from \S\ref{subsec:8.1}.
+First, the triangular construction scales naturally: CD-SBI's
+joint Mahalanobis is calibrated at \(d = 2\), and coverage stays
+at the noise floor across all budgets we trained. Second, the 1D
+NLE = CD-SBI parity does not carry to \(d = 2\): CD-SBI is now
+the only method at the noise floor, with NLE/NPE/LF2I-BFF
+clustered at 3--5 \(\times\) the floor and NRE at 6--8 \(\times\).
+This is the first regime where architectural calibration starts
+to materially distinguish the methods. \S\ref{subsec:8.3} and
+\S\ref{subsec:8.4} push further, into correlated \(\Sigma\) and
+non-location-family families, where the architectural
+prescription is expected to be even more load-bearing.
 
 \subsection{2D location-Gaussian, \(\Sigma\) correlated}\label{subsec:8.3}
 
