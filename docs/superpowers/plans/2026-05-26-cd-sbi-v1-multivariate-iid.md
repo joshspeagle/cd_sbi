@@ -2264,8 +2264,159 @@ should match the §8.2 tolerance band committed in Task 11.
 git change required if the user wants this kept ephemeral; mark this task
 as done once the table is reviewed.)
 
-This is the v1 deliverable. Manuscript §8.2 cross-method comparison is now
-backed by a single CLI invocation, the same as §8.1.
+This is the v1 sweep deliverable. Manuscript §8.2 cross-method comparison
+is now backed by a single CLI invocation, the same as §8.1. Task 15
+integrates these numbers into the manuscript text.
+
+---
+
+## Task 15: Integrate v1 results into manuscript §8.2
+
+**Files:**
+- Modify: `cd_sbi_v7.tex` — replace existing §8.2 (single-seed table at
+  lines ~2498–2553) with the sweep-averaged version + cross-method
+  comparison, mirroring the §8.1 restructure already landed.
+- Verify: `/usr/bin/pdflatex cd_sbi_v7 && /usr/bin/bibtex cd_sbi_v7 &&
+  /usr/bin/pdflatex cd_sbi_v7 && /usr/bin/pdflatex cd_sbi_v7` builds
+  cleanly. (Use the absolute path; the conda `pdflatex` on this machine
+  is broken — see CLAUDE.md.)
+
+**Prerequisite:** Task 14 complete and the user has signed off on the
+v1 results. Do not invent or paraphrase numbers; pull them from the
+sweep output via `paper_table_8_2(load_runs(...))`.
+
+**Template:** The §8.1 update at `cd_sbi_v7.tex` already shows the
+target structure (committed to `main`). Reproduce the same five-block
+shape for §8.2:
+
+1. **Setup** — keep the current 2D location-Gaussian setup
+   (\(X \mid \theta \sim \mathcal{N}(\theta, I_2)\), \(\theta \sim U[-7, 7]^2\))
+   and the truth statement \(r^*(\theta, X) = \theta - X\) component-wise.
+2. **Architecture** — keep the current triangular-flow paragraph
+   (\(r_1, r_2\) with contextual UMNNs). Drop the hard-coded
+   "5,004 parameters total" — replace with a pointer to the budget grid
+   used in the sweep.
+3. **Sweep** — same paragraph as §8.1, adapted for 2D: 5 seeds × 4
+   budgets, evaluation-set sample sizes ($N=5000$ marginal, $N/\text{bin}=1000$
+   conditional, 200 \(\theta_0\) × 50 \(X\mid\theta\) coverage), Monte-Carlo
+   noise floors quoted with each diagnostic.
+4. **CDSBI calibration diagnostics (medium budget)** — replace the
+   existing single-run §8.2 table with a sweep-averaged version. Keep
+   the diagnostic rows the current table has: Pivot RMSE (total +
+   per-coord), Marginal PIT KS (\(r_1, r_2\)), Joint Mahalanobis vs
+   \(\chi^2_2\) KS, Conditional PIT KS (bulk + edge per coord),
+   Conditional Mahalanobis KS, Coverage error max. All values as
+   mean ± std across 5 seeds; noise-floor column instead of "Status".
+5. **Budget invariance** — short paragraph if the §8.2 sweep shows
+   the same saturation pattern §8.1 shows. If it doesn't (i.e.,
+   diagnostics genuinely improve with budget at d=2 because the
+   conditioning network needs more capacity), then describe what the
+   data shows; do not assume the §8.1 pattern carries over.
+6. **Comparison with baselines** — new 5-method × 4-budget table.
+   Headline metric is `joint_mahal_ks` for §8.2 (the inferentially
+   primary 2D diagnostic; coverage_error_max can go in a secondary
+   row or supplementary). Cross-reference §10 for the architectural
+   reading and §3.4 for the NLE/CDSBI shared-loss explanation. Be
+   explicit about what NPE's "marginal-product" credible region means
+   in the table — call it out as a known Bonferroni-conservative
+   diagnostic until Task 13c HPD lands (currently in the addendum's
+   acknowledged-but-not-patched list).
+7. **Synthesis** — one paragraph closing §8.2, mirroring §8.1's
+   synthesis tone. The §8.2-specific point worth landing is whether
+   the §8.1 "CDSBI = NLE at the floor" pattern persists into 2D or
+   diverges (the multivariate-prior + MCMC-mixing story I outlined
+   in the chat).
+
+- [ ] **Step 1: Extract the §8.2 numbers**
+
+Run, from the repo root:
+
+```python
+from cdsbi.analysis.loaders import load_runs
+from cdsbi.analysis.paper_tables import paper_table_8_2
+import pandas as pd, glob
+
+# Union all sweep dirs that contributed OK runs (may be 1, may be 2-3 if
+# re-runs were needed). Match the dir-glob used during Task 14.
+dirs = sorted(glob.glob("outputs/8_2_baseline_sweep/<ts1>/*")) + \
+       sorted(glob.glob("outputs/8_2_baseline_sweep/<ts2>/*"))
+rows = [load_runs(d).iloc[0] for d in dirs if "STATUS" in open(...).read()...]
+df = pd.DataFrame(rows)
+
+print(paper_table_8_2(df))   # → table for cross-method block
+
+# For the CDSBI calibration table, pull per-run diagnostic parquets
+# (marginal_pit.parquet, conditional_pit.parquet, joint_mahalanobis.parquet,
+# pivot_rmse.parquet, coverage.parquet) across the 5 CDSBI medium-budget
+# seeds and aggregate mean±std per diagnostic. Use the same per-bin
+# bulk/edge split as §8.1 (bins 1,2,3 vs 0,4 of the 5-bin grid).
+```
+
+Sanity-check the numbers against the manuscript's existing §8.2 values
+(pivot RMSE 0.044, marginal KS 0.007 / 0.006, joint Mahalanobis KS 0.011,
+coverage error < 0.01). The seed-averaged sweep numbers will likely be
+slightly higher (single-run vs 5-seed average) and statistically
+distinguishable from the manuscript's single-run point estimates — that
+is the whole point of doing the sweep.
+
+- [ ] **Step 2: Write the LaTeX edit**
+
+In `cd_sbi_v7.tex`, replace lines ~2498–2553 (current §8.2 block) with
+the seven-block structure above, using the actual numbers from Step 1.
+Mirror the LaTeX patterns of §8.1: `longtable` for both tables (3-col
+for the CDSBI calibration table, 5-col for the cross-method comparison),
+mean ± std in math mode, noise-floor column instead of "Status", cross-
+references via `\S\ref{sec:10}` / `\S\ref{subsec:3.4}` / `\S\ref{sec:4}`
+not unresolved labels.
+
+Drop content the v1 sweep doesn't support: the "conditioning network
+learning slower" parenthetical on \(r_2\) (line ~2530) is single-seed
+narrative — keep only if the 5-seed sweep shows \(r_2\) systematically
+above \(r_1\) by more than the per-seed scatter.
+
+- [ ] **Step 3: Compile the manuscript**
+
+```bash
+/usr/bin/pdflatex -interaction=nonstopmode -halt-on-error cd_sbi_v7 \
+  && /usr/bin/bibtex cd_sbi_v7 \
+  && /usr/bin/pdflatex -interaction=nonstopmode -halt-on-error cd_sbi_v7 \
+  && /usr/bin/pdflatex -interaction=nonstopmode -halt-on-error cd_sbi_v7
+```
+
+Expected: "Output written on cd_sbi_v7.pdf (47–48 pages, ...)". No
+"undefined reference", no "missing $ inserted", no "extra alignment tab".
+If the page count moves more than ±1, the table widths or column counts
+likely don't match the spec — re-run the structural-sanity script from
+the §8.1 commit history before chasing visual fixes.
+
+- [ ] **Step 4: Structural sanity check on the new TeX**
+
+Run the helper from the §8.1 commit history (counts `&` per row,
+checks column-spec match, brace balance, cross-reference resolvability)
+against the §8.2 region. Both new longtables should report all-cells-OK
+and brace-balanced.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add cd_sbi_v7.tex
+git commit -m "$(cat <<'EOF'
+manuscript(8.2): v1 sweep-averaged results + cross-method comparison
+
+Replace single-seed §8.2 numbers with the seed-averaged v1 sweep
+(5 seeds × 4 budgets × 5 methods). Adds a cross-method comparison
+table on joint_mahal_ks (the §8.2-primary diagnostic) parallel to
+the §8.1 structure already in the manuscript.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+EOF
+)"
+```
+
+**Done condition:** PDF builds in 4 passes (pdflatex × 1, bibtex,
+pdflatex × 2) with no warnings beyond the natbib citation pass; §8.2
+in the rendered PDF reads as a parallel structure to §8.1; the user
+has reviewed the substantive empirical claims.
 
 ---
 
