@@ -132,6 +132,12 @@ class CDSBIRunner(Runner):
             losses.append(loss_val.item())
         wall = time.time() - t0
 
+        # Switch to eval mode before exposing the trained flow through pivot_fn.
+        # For JointUMNNFlow/JointUMNN1DFlow this prevents create_graph=self.training
+        # from building autograd graphs during diagnostic forward calls (no-op for
+        # DoublyMonotoneUMNN which doesn't use self.training in its forward).
+        self.flow.eval()
+
         # Build PivotBasedProcedure with a closure over the trained flow + conditioner
         flow = self.flow
         conditioner = self.conditioner
