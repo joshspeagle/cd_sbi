@@ -274,6 +274,11 @@ def _write_index_row(cfg: DictConfig, rd: RunDir, trained, diag_results, config_
         ),
         "pivot_rmse": float(pivot.value) if pivot and isinstance(pivot.value, float) else None,
     }
+    jm_path = rd.path / "diagnostics" / "joint_mahalanobis.parquet"
+    if jm_path.exists():
+        jm_df = pd.read_parquet(jm_path)
+        if "ks" in jm_df.columns and len(jm_df):
+            row["joint_mahal_ks"] = float(jm_df["ks"].mean())
     pd.DataFrame([row]).to_parquet(rd.path / "index_row.parquet")
 
 
