@@ -52,6 +52,47 @@ def multi_pinball_loss(
     return torch.stack(losses).sum()
 
 
+def train_multi_quantile_head(
+    critical_net: nn.Module,
+    theta_cal: torch.Tensor,
+    t_cal: torch.Tensor,
+    alpha_grid: List[float],
+    cfg: dict,
+    device: torch.device,
+) -> List[float]:
+    """Recipe-aware training for the LF2I stage-2 multi-quantile head.
+
+    Stage 2 is inherently finite-sample (t_cal is pre-computed from the
+    stage-1 model on a fixed calibration draw), so we don't go through
+    train_with_recipe's sampler-and-fresh-batch path. We do mirror the
+    optimizer / LR schedule / batching / grad-clip semantics so the
+    quantile head benefits from the same training recipe (e.g.
+    adamw_cosine_warmup) as the stage-1 backbone.
+    """
+    from cdsbi.methods.training_utils import build_optimizer, build_scheduler
+
+    n_steps = int(cfg["n_steps"])
+    opt = build_optimizer(critical_net.parameters(), cfg)
+    scheduler = build_scheduler(opt, cfg, n_steps)
+    bs = int(cfg["batch_size"])
+    grad_clip = float(cfg.get("grad_clip_norm", 5.0))
+    n_data = int(theta_cal.shape[0])
+
+    losses: List[float] = []
+    for _ in range(n_steps):
+        idx = torch.randint(0, n_data, (bs,), device=device)
+        preds = critical_net(theta_cal[idx])
+        loss = multi_pinball_loss(preds, t_cal[idx], alpha_grid)
+        opt.zero_grad()
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(critical_net.parameters(), max_norm=grad_clip)
+        opt.step()
+        if scheduler is not None:
+            scheduler.step()
+        losses.append(loss.item())
+    return losses
+
+
 class LF2IRunner(Runner):
     def __init__(
         self,
@@ -123,13 +164,9 @@ class LF2IRunner(Runner):
             depth=self.quantile_depth,
             n_quantiles=len(alpha_grid),
         ).to(self.device)
-        opt = torch.optim.Adam(critical_net.parameters(), lr=1e-3)
-        for _ in range(config["n_epochs_quantile"]):
-            preds = critical_net(theta_cal)  # (B, n_quantiles)
-            loss = multi_pinball_loss(preds, t_cal, alpha_grid)
-            opt.zero_grad()
-            loss.backward()
-            opt.step()
+        stage2_losses = train_multi_quantile_head(
+            critical_net, theta_cal, t_cal, alpha_grid, config, self.device,
+        )
         wall = time.time() - t0
 
         alpha_to_head_idx = {a: k for k, a in enumerate(alpha_grid)}
@@ -152,7 +189,7 @@ class LF2IRunner(Runner):
                 "critical_net": critical_net.state_dict(),
             },
             final_loss=0.0,
-            n_steps=int(config["n_steps"]) + int(config["n_epochs_quantile"]),
+            n_steps=int(config["n_steps"]) * 2,  # stage-1 + stage-2 share the recipe's n_steps
             wall_clock_sec=wall,
             arch_metadata={
                 "method": "LF2I",
@@ -161,6 +198,7 @@ class LF2IRunner(Runner):
                 "alpha_grid": alpha_grid,
                 "critical_net_class": "MultiQuantileMLP",
                 "stage1_loss_tail": stage1_losses[-min(100, len(stage1_losses)):],
+                "stage2_loss_tail": stage2_losses[-min(100, len(stage2_losses)):],
                 "optimizer": str(config.get("optimizer", "adam")),
                 "lr_schedule": str(config.get("lr_schedule", "constant")),
                 "fresh_batch": bool(config.get("fresh_batch", True)),

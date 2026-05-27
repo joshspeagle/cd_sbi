@@ -27,7 +27,7 @@ import torch
 from cdsbi.confidence_set.procedures import CriticalValueProcedure
 from cdsbi.device import get_device
 from cdsbi.methods.base import Runner, TrainedModel
-from cdsbi.methods.lf2i import MultiQuantileMLP, multi_pinball_loss
+from cdsbi.methods.lf2i import MultiQuantileMLP, train_multi_quantile_head
 from cdsbi.methods.nre import _nre_bce_loss, build_classifier_mlp
 from cdsbi.methods.training_utils import train_with_recipe
 from cdsbi.reproducibility.seeding import seed_everything
@@ -116,13 +116,9 @@ class LF2IBFFRunner(Runner):
             depth=self.quantile_depth,
             n_quantiles=len(alpha_grid),
         ).to(self.device)
-        opt = torch.optim.Adam(critical_net.parameters(), lr=1e-3)
-        for _ in range(config["n_epochs_quantile"]):
-            preds = critical_net(theta_cal)
-            loss = multi_pinball_loss(preds, t_cal, alpha_grid)
-            opt.zero_grad()
-            loss.backward()
-            opt.step()
+        stage2_losses = train_multi_quantile_head(
+            critical_net, theta_cal, t_cal, alpha_grid, config, self.device,
+        )
         wall = time.time() - t0
 
         alpha_to_head_idx = {a_: k for k, a_ in enumerate(alpha_grid)}
@@ -146,7 +142,7 @@ class LF2IBFFRunner(Runner):
                 "critical_net": critical_net.state_dict(),
             },
             final_loss=float(stage1_losses[-1]),
-            n_steps=int(config["n_steps"]) + int(config["n_epochs_quantile"]),
+            n_steps=int(config["n_steps"]) * 2,  # stage-1 + stage-2 share the recipe's n_steps
             wall_clock_sec=wall,
             arch_metadata={
                 "method": "LF2I_BFF",
@@ -156,6 +152,7 @@ class LF2IBFFRunner(Runner):
                 "critical_net_class": "MultiQuantileMLP",
                 "classifier_params_actual": n_class,
                 "stage1_loss_tail": stage1_losses[-min(100, len(stage1_losses)):],
+                "stage2_loss_tail": stage2_losses[-min(100, len(stage2_losses)):],
                 "optimizer": str(config.get("optimizer", "adam")),
                 "lr_schedule": str(config.get("lr_schedule", "constant")),
                 "fresh_batch": bool(config.get("fresh_batch", True)),
