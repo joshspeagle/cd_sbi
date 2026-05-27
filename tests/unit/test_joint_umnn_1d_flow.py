@@ -35,3 +35,17 @@ def test_joint_umnn_1d_partial_theta_positive(seed):
     r, _ = flow(theta, context=x)
     grad_theta = torch.autograd.grad(r.sum(), theta, create_graph=False)[0]
     assert (grad_theta > 0).all(), grad_theta
+
+
+def test_joint_umnn_1d_log_det_uses_autograd_through_x(seed):
+    """The returned log_det should equal log|∂r/∂x| computed via autograd."""
+    from cdsbi.flows.joint_umnn_1d import JointUMNN1DFlow
+    torch.manual_seed(seed)
+    flow = JointUMNN1DFlow(hidden=8)
+    theta = torch.rand(8, 1) * 5.0 - 2.5
+    x = (torch.rand(8, 1) * 4.0 - 2.0).requires_grad_(True)
+    r, log_det = flow(theta, context=x)
+    # Independent autograd of r w.r.t. x
+    grad_x = torch.autograd.grad(r.sum(), x, create_graph=False)[0]
+    expected_log_det = torch.log(grad_x.abs().clamp_min(1e-12)).squeeze(-1)
+    torch.testing.assert_close(log_det, expected_log_det, atol=1e-4, rtol=1e-4)
