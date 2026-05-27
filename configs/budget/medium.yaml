@@ -5,3 +5,4 @@ cdsbi_flow_hidden_d2: 32  # TriangularAdditiveFlow(d=2) actual=4752 (5.0%)
 maf_hidden: 32         # MAFAdapter actual=4740 (5.2%) — shared by NPE/NLE/LF2I-stage-1
 classifier_hidden: 68  # NRE MLP actual=4965 (0.7%)
 quantile_hidden: 16    # LF2I MultiQuantileMLP head actual=372; LF2I total=5337 (+6.7%, matched). Aligned with the small-budget head so the calibration stage doesn't dip in capacity at the bottom of the budget grid.
+doubly_monotone_hidden: 47  # v3 DoublyMonotoneUMNN actual=4940 (+1.2%, matched). §8.4 main flow.
