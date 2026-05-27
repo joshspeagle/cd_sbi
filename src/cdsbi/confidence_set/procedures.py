@@ -593,8 +593,60 @@ class PosteriorBasedProcedure:
 
     def confidence_set(self, x_obs: torch.Tensor, alpha: float) -> ConfidenceSet:
         from cdsbi.confidence_set.equal_tailed import equal_tailed_1d
-        samples = self.sample_fn(x_obs, 10_000).flatten()
-        return equal_tailed_1d(samples, alpha=alpha)
+        n_samples = 10_000
+        samples = self.sample_fn(x_obs, n_samples)
+        if self.d_theta == 1:
+            return equal_tailed_1d(samples.flatten(), alpha=alpha)
+        return self._confidence_set_mahalanobis(samples, alpha)
+
+    def _confidence_set_mahalanobis(
+        self, samples: torch.Tensor, alpha: float, n_boundary: int = 200,
+    ) -> ConfidenceSet:
+        """Empirical Mahalanobis credible region from posterior samples.
+
+        Returns a ConfidenceSet whose contains() uses the Mahalanobis
+        inequality and whose boundary_repr is n_boundary points sampled
+        uniformly on the ellipsoid surface in whitened space.
+
+        Caveat: this approximates the α-HPD as a Mahalanobis ellipse — exact
+        for Gaussian posteriors (matches the analytic HPD), correlation-aware
+        for moderately non-Gaussian ones, but biased for strongly skewed or
+        multi-modal posteriors. A true KDE-based HPD lands in v1+ if/when a
+        non-Gaussian target arrives.
+        """
+        if samples.ndim != 2:
+            samples = samples.view(-1, self.d_theta)
+        device = samples.device
+        dtype = samples.dtype
+        d = self.d_theta
+
+        # Empirical moments. torch.cov expects (d, N) input.
+        mu = samples.mean(dim=0)  # (d,)
+        # Cov-stabilize with a small ridge to keep Cholesky well-conditioned.
+        cov = torch.cov(samples.T) + 1e-6 * torch.eye(d, dtype=dtype, device=device)
+        L = torch.linalg.cholesky(cov)
+        L_inv = torch.linalg.inv(L)
+
+        # Mahalanobis-squared per sample: ||L^{-1} (θ - μ)||².
+        delta = samples - mu
+        z = delta @ L_inv.T
+        sq = z.pow(2).sum(dim=-1)
+        thresh = float(torch.quantile(sq, alpha).item())
+
+        # Boundary: K points on the ellipsoid surface in whitened space, mapped
+        # back via L. {μ + √thresh · L u_i : u_i ∈ S^{d-1}}.
+        u = torch.randn(n_boundary, d, dtype=dtype, device=device)
+        u = u / u.norm(dim=-1, keepdim=True).clamp_min(1e-12)
+        radius = thresh ** 0.5
+        boundary = mu + (radius * u) @ L.T
+
+        def contains(theta_val) -> bool:
+            theta_t = _theta_to_row_tensor(theta_val, dtype, device, d)
+            delta = (theta_t - mu).view(-1)
+            z_val = L_inv @ delta
+            return bool(float(z_val.pow(2).sum().item()) <= thresh)
+
+        return ConfidenceSet(contains=contains, boundary_repr=boundary, alpha=alpha)
 
     def contains_batch(
         self, theta_0_value, x_obs_batch: torch.Tensor, alpha: float,
