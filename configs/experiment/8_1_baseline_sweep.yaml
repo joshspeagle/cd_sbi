@@ -9,6 +9,6 @@ hydra:
   mode: MULTIRUN
   sweeper:
     params:
-      method: cd_sbi,npe,nle,nre,lf2i
+      method: cd_sbi,npe,nle,nre,lf2i_bff
       budget: small,medium,large,xlarge
       seed: 0,1,2,3,4
