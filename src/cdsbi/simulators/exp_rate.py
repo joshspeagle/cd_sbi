@@ -45,15 +45,32 @@ class ExponentialRate:
         x_np = rng.exponential(scale=1.0 / float(theta_vec[0]), size=(n, self.n_iid))
         return torch.from_numpy(x_np).float()
 
-    def r_star(self, theta: torch.Tensor, T: torch.Tensor) -> torch.Tensor:
-        """Truth pivot on the (θ, T) sufficient-statistic space.
+    def r_star(self, theta: torch.Tensor, x_or_T: torch.Tensor) -> torch.Tensor:
+        """Truth pivot. Accepts raw X (shape (n, n_iid)) and reduces internally,
+        OR an already-reduced T (shape (n, 1)) for callers that have it.
 
-        r*(θ, T) = Φ⁻¹(F_{χ²_{2n}}(2θT)).
+        r*(θ, T) = Φ⁻¹(F_{χ²_{2n}}(2θT)) where T = Σ X_i.
+
+        The dual interface is so PivotRMSE (which sees raw eval X from
+        `simulator.sample`) can call this directly without knowing about
+        the conditioner's X→T reduction; while internal callers
+        (`entropy_lower_bound` etc.) that already hold T can pass it through
+        unchanged. Disambiguated by the last-axis size: shape[-1] == n_iid
+        means raw X; shape[-1] == 1 means T.
+
         Inputs:
-          theta: (n, 1) — parameter samples
-          T:     (n, 1) — sufficient statistic Σ X_i
+          theta:  (n, 1) — parameter samples
+          x_or_T: (n, n_iid) raw X to reduce, OR (n, 1) sufficient statistic
         Returns: (n, 1)
         """
+        if x_or_T.shape[-1] == self.n_iid:
+            T = x_or_T.sum(dim=-1, keepdim=True)
+        else:
+            assert x_or_T.shape[-1] == 1, (
+                f"r_star: x_or_T has shape {x_or_T.shape}; "
+                f"expected last axis {self.n_iid} (raw X) or 1 (T)"
+            )
+            T = x_or_T
         df = 2 * self.n_iid
         # Compute via scipy on CPU then move to theta's device. The truth pivot
         # is only used by PivotRMSE and diagnostics, never inside autograd loops.
