@@ -838,12 +838,12 @@ class PosteriorBasedProcedure:
         self.sample_batched_fn = sample_batched_fn
         self._sample_cache = _BatchCache()
 
-    def posterior_samples(self, x_obs: torch.Tensor, n: int = 10_000) -> torch.Tensor:
+    def posterior_samples(self, x_obs: torch.Tensor, n: int = 2_000) -> torch.Tensor:
         return self.sample_fn(x_obs, n)
 
     def confidence_set(self, x_obs: torch.Tensor, alpha: float) -> ConfidenceSet:
         from cdsbi.confidence_set.equal_tailed import equal_tailed_1d
-        n_samples = 10_000
+        n_samples = 2_000
         samples = self.sample_fn(x_obs, n_samples)
         if self.d_theta == 1:
             return equal_tailed_1d(samples.flatten(), alpha=alpha)
@@ -900,7 +900,7 @@ class PosteriorBasedProcedure:
 
     def contains_batch(
         self, theta_0_value, x_obs_batch: torch.Tensor, alpha: float,
-        n_samples: int = 10_000,
+        n_samples: int = 2_000,
     ) -> torch.Tensor:
         """Vectorized containment test. 1D uses equal-tailed quantile; d > 1
         uses empirical Mahalanobis credible region (matches the
@@ -975,7 +975,7 @@ class PosteriorBasedProcedure:
         return theta_sq <= thresh_per_row
 
     def confidence_set_batch(
-        self, x_obs_batch: torch.Tensor, alpha: float, n_samples: int = 10_000,
+        self, x_obs_batch: torch.Tensor, alpha: float, n_samples: int = 2_000,
     ) -> tuple:
         """Vectorized posterior credible-set boundaries across a batch of X_obs.
 
@@ -992,7 +992,7 @@ class PosteriorBasedProcedure:
         return self._confidence_set_batch_d_gt_1(x_obs_batch, alpha, n_samples=n_samples)
 
     def _confidence_set_batch_1d(
-        self, x_obs_batch: torch.Tensor, alpha: float, n_samples: int = 10_000,
+        self, x_obs_batch: torch.Tensor, alpha: float, n_samples: int = 2_000,
     ) -> tuple:
         B = x_obs_batch.shape[0]
         tail = (1.0 - alpha) / 2.0
@@ -1017,7 +1017,7 @@ class PosteriorBasedProcedure:
         return lo_q, hi_q
 
     def _confidence_set_batch_d_gt_1(
-        self, x_obs_batch: torch.Tensor, alpha: float, n_samples: int = 10_000,
+        self, x_obs_batch: torch.Tensor, alpha: float, n_samples: int = 2_000,
     ) -> tuple:
         """d > 1 path: per-X_obs empirical Mahalanobis ellipsoid.
 
