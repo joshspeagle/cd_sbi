@@ -26,11 +26,16 @@ class ConditionalPIT(Diagnostic):
                 name=self.name, value=float("nan"), passed=True, noise_floor=0.0,
                 n_samples=0, meta={"reason": "not a pivot-based procedure"},
             )
-        theta, x = eval_data
+        # F6: accept either 2-tuple (theta, x) or 3-tuple (theta, x, r).
+        if len(eval_data) == 3 and eval_data[2] is not None:
+            theta, x, r_t = eval_data
+            r = r_t.detach().cpu().numpy()
+        else:
+            theta, x = eval_data[:2]
+            with torch.no_grad():
+                r = trained.procedure.pivot(theta, x).cpu().numpy()  # (N, d)
         N = theta.shape[0]
         floor = self._per_bin_floor(N)
-        with torch.no_grad():
-            r = trained.procedure.pivot(theta, x).cpu().numpy()  # (N, d)
         theta_np = theta.cpu().numpy()
         d = theta_np.shape[-1] if theta_np.ndim > 1 else 1
         rows = []

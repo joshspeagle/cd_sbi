@@ -36,11 +36,19 @@ class SetSize(Diagnostic):
         self.alpha_grid = alpha_grid
         self.n_per_theta = n_per_theta
 
-    def __call__(self, trained, simulator, eval_data=None) -> DiagnosticResult:
+    def __call__(self, trained, simulator, eval_data=None, x_per_theta=None) -> DiagnosticResult:
+        # F7: shared X|θ_0 dict (see Coverage docstring) — slice to n_per_theta.
         rng = np.random.default_rng(0)
         rows = []
         for theta_0 in self.theta_0_grid:
-            x = simulator.sample_x_given_theta(theta_0, self.n_per_theta, rng)
+            theta_repr = str(list(map(
+                float,
+                list(theta_0) if hasattr(theta_0, "__iter__") else [theta_0],
+            )))
+            if x_per_theta is not None and theta_repr in x_per_theta:
+                x = x_per_theta[theta_repr][: self.n_per_theta]
+            else:
+                x = simulator.sample_x_given_theta(theta_0, self.n_per_theta, rng)
             for alpha in self.alpha_grid:
                 has_fast = (
                     hasattr(trained.procedure, "confidence_set_batch")

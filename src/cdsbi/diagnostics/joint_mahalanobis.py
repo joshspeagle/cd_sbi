@@ -26,7 +26,7 @@ class JointMahalanobis(Diagnostic):
         self.theta_0_grid = theta_0_grid
         self.n_per_theta = n_per_theta
 
-    def __call__(self, trained, simulator, eval_data=None) -> DiagnosticResult:
+    def __call__(self, trained, simulator, eval_data=None, x_per_theta=None) -> DiagnosticResult:
         # Diagnostic only applies to pivot-based procedures.
         if not isinstance(trained.procedure, PivotBasedProcedure):
             return DiagnosticResult(
@@ -39,12 +39,20 @@ class JointMahalanobis(Diagnostic):
                 name=self.name, value=float("nan"), passed=True, noise_floor=0.0,
                 n_samples=0, meta={"reason": "degenerate in d=1; use marginal PIT"},
             )
+        # F7: shared X|θ_0 dict (see Coverage docstring) — slice to n_per_theta.
         floor = ks_noise_floor(N=self.n_per_theta, n_bins=1)
         rng = np.random.default_rng(0)
         rows = []
         chi2_cdf = chi2(df=d).cdf
         for theta_0 in self.theta_0_grid:
-            x = simulator.sample_x_given_theta(theta_0, self.n_per_theta, rng)
+            theta_repr = str(list(map(
+                float,
+                list(theta_0) if hasattr(theta_0, "__iter__") else [theta_0],
+            )))
+            if x_per_theta is not None and theta_repr in x_per_theta:
+                x = x_per_theta[theta_repr][: self.n_per_theta]
+            else:
+                x = simulator.sample_x_given_theta(theta_0, self.n_per_theta, rng)
             theta_vec = torch.tensor(list(theta_0), dtype=x.dtype).view(1, -1)
             theta_t = theta_vec.expand_as(x)
             with torch.no_grad():

@@ -18,12 +18,22 @@ class Coverage(Diagnostic):
         self.alpha_grid = alpha_grid
         self.n_per_theta = n_per_theta
 
-    def __call__(self, trained, simulator, eval_data=None) -> DiagnosticResult:
+    def __call__(self, trained, simulator, eval_data=None, x_per_theta=None) -> DiagnosticResult:
+        # F7: x_per_theta is an optional dict {theta_0_repr: x_tensor} pre-drawn
+        # at the dispatcher level so Coverage / SetSize / JointMahalanobis share
+        # a single X|θ_0 draw per θ_0 (slicing to each diagnostic's n_per_theta).
         rng = np.random.default_rng(0)
         rows = []
         has_fast_path = hasattr(trained.procedure, "contains_batch")
         for theta_0 in self.theta_0_grid:
-            x = simulator.sample_x_given_theta(theta_0, self.n_per_theta, rng)
+            theta_repr = str(list(map(
+                float,
+                list(theta_0) if hasattr(theta_0, "__iter__") else [theta_0],
+            )))
+            if x_per_theta is not None and theta_repr in x_per_theta:
+                x = x_per_theta[theta_repr][: self.n_per_theta]
+            else:
+                x = simulator.sample_x_given_theta(theta_0, self.n_per_theta, rng)
             for alpha in self.alpha_grid:
                 if has_fast_path:
                     # Single batched forward — any procedure that exposes

@@ -10,12 +10,14 @@ from pathlib import Path
 from typing import Any
 
 import hydra
+import numpy as np
 import pandas as pd
 import torch
 import yaml
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf
 
+from cdsbi.confidence_set.procedures import PivotBasedProcedure
 from cdsbi.reproducibility.env import capture_env
 from cdsbi.reproducibility.run_dir import RunDir, RunStatus
 from cdsbi.reproducibility.seeding import seed_everything
@@ -223,11 +225,47 @@ def _run_diagnostics(cfg: DictConfig, trained, simulator, eval_data, rd: RunDir)
             )),
         )),
     ]
+    # F6: precompute r = procedure.pivot(theta, x) once for pivot-based
+    # procedures and share it across PivotRMSE / MarginalPIT / ConditionalPIT
+    # via a 3-tuple eval_data. Saves two forward passes per run.
+    theta_eval, x_eval = eval_data
+    if isinstance(trained.procedure, PivotBasedProcedure):
+        with torch.no_grad():
+            r_precomputed = trained.procedure.pivot(theta_eval, x_eval).detach()
+        eval_data_shared = (theta_eval, x_eval, r_precomputed)
+    else:
+        eval_data_shared = eval_data
+    # F7: pre-draw X|θ_0 once per θ_0 at the max n across the three consumers
+    # (Coverage / SetSize / JointMahalanobis). Each diagnostic slices the
+    # shared tensor down to its own n_per_theta. This also gives cross-
+    # diagnostic comparability (same X seen by all three at a given θ_0).
+    jm_n = int(OmegaConf.select(
+        cfg, "experiment.joint_mahalanobis_n_per_theta", default=2000,
+    ))
+    n_max = max(int(cfg.experiment.n_eval_per_theta), set_size_n, jm_n)
+    shared_rng = np.random.default_rng(0)
+    shared_x_per_theta = {}
+    for theta_0 in list(cfg.experiment.eval_thetas_interior):
+        theta_repr = str(list(map(
+            float,
+            list(theta_0) if hasattr(theta_0, "__iter__") else [theta_0],
+        )))
+        shared_x_per_theta[theta_repr] = simulator.sample_x_given_theta(
+            theta_0, n_max, shared_rng,
+        )
+
     diag_results = {}
     diag_dir = rd.path / "diagnostics"
     diag_dir.mkdir(exist_ok=True)
+    x_sharing_names = {"coverage", "set_size", "joint_mahalanobis"}
     for name, diag in diagnostics:
-        result = diag(trained, simulator, eval_data=eval_data)
+        if name in x_sharing_names:
+            result = diag(
+                trained, simulator, eval_data=eval_data_shared,
+                x_per_theta=shared_x_per_theta,
+            )
+        else:
+            result = diag(trained, simulator, eval_data=eval_data_shared)
         if isinstance(result.value, pd.DataFrame):
             df = result.value
         else:

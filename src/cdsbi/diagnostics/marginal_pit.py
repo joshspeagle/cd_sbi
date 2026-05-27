@@ -18,9 +18,13 @@ class MarginalPIT(Diagnostic):
                 name=self.name, value=float("nan"), passed=True, noise_floor=0.0,
                 n_samples=0, meta={"reason": "not a pivot-based procedure"},
             )
-        theta, x = eval_data
-        with torch.no_grad():
-            r = trained.procedure.pivot(theta, x)  # (N, d)
+        # F6: accept either 2-tuple (theta, x) or 3-tuple (theta, x, r).
+        if len(eval_data) == 3 and eval_data[2] is not None:
+            theta, x, r = eval_data
+        else:
+            theta, x = eval_data[:2]
+            with torch.no_grad():
+                r = trained.procedure.pivot(theta, x)  # (N, d)
         r_np = r.cpu().numpy()
         d = r_np.shape[-1] if r_np.ndim > 1 else 1
         floor = ks_noise_floor(N=r_np.shape[0], n_bins=1)

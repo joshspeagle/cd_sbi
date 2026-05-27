@@ -29,9 +29,16 @@ class PivotRMSE(Diagnostic):
                 n_samples=0,
                 meta={"reason": "no analytical r*"},
             )
-        theta, x = eval_data
+        # F6: accept either 2-tuple (theta, x) [legacy] or 3-tuple
+        # (theta, x, r_precomputed) from the dispatcher. The 3-tuple form
+        # avoids recomputing procedure.pivot on the same (theta, x).
+        if len(eval_data) == 3 and eval_data[2] is not None:
+            theta, x, r_hat = eval_data
+        else:
+            theta, x = eval_data[:2]
+            with torch.no_grad():
+                r_hat = trained.procedure.pivot(theta, x)
         with torch.no_grad():
-            r_hat = trained.procedure.pivot(theta, x)
             r_star = simulator.r_star(theta, x).to(r_hat.device)
         rmse = (r_hat - r_star).pow(2).mean().sqrt().item()
         return DiagnosticResult(
