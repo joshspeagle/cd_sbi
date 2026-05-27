@@ -172,37 +172,34 @@ class CDSBIRunner(Runner):
     def n_params(self) -> dict:
         # AdditiveFlow1D exposes .a / .b UMNNBlocks; TriangularAdditiveFlow
         # exposes .a_blocks / .b_blocks ModuleLists of UMNNBlocks. Either way,
-        # backbone = sum over the UMNNBlocks; head = α scalars (flow total - backbone).
+        # backbone = sum over the UMNNBlocks; head = α scalars (total - backbone).
+        # v3 flows (DoublyMonotoneUMNN, JointUMNNFlow, JointUMNN1DFlow) have no
+        # explicit backbone/head split, so we report the whole-flow count.
+        total = self.flow.n_params()
         if hasattr(self.flow, "a_blocks"):
             backbone = sum(b.n_params() for b in self.flow.a_blocks) + sum(
                 b.n_params() for b in self.flow.b_blocks
             )
-            head = self.flow.n_params() - backbone  # the α scalars
             return {
                 "backbone": backbone,
-                "head": head,
+                "head": total - backbone,
                 "calibration_stage": 0,
-                "total": self.flow.n_params(),
+                "total": total,
                 "kind": "flow",
             }
         if hasattr(self.flow, "a"):
             backbone = self.flow.a.n_params() + self.flow.b.n_params()
-            head = self.flow.n_params() - backbone  # the α scalars
             return {
                 "backbone": backbone,
-                "head": head,
+                "head": total - backbone,
                 "calibration_stage": 0,
-                "total": self.flow.n_params(),
+                "total": total,
                 "kind": "flow",
             }
-        # v3 flows (DoublyMonotoneUMNN, JointUMNNFlow, JointUMNN1DFlow) and any
-        # future flow without an explicit backbone/head split: report the
-        # whole-flow parameter count.
-        flow_total = self.flow.n_params()
         return {
-            "backbone": flow_total,
+            "backbone": total,
             "head": 0,
             "calibration_stage": 0,
-            "total": flow_total,
+            "total": total,
             "kind": "single_block",
         }

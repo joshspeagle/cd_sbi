@@ -109,21 +109,16 @@ def _build_flow(cfg: DictConfig, simulator) -> Any:
             d=d,
             hidden=budget_hidden,
         )
-    if method_flow_label == "doubly_monotone":
+    # v3 flows all share the same 2-arg constructor (hidden, theta_ref) and the
+    # same budget key (doubly_monotone_hidden).
+    v3_targets = {
+        "doubly_monotone": "cdsbi.flows.doubly_monotone.DoublyMonotoneUMNN",
+        "joint_umnn": "cdsbi.flows.joint_umnn.JointUMNNFlow",
+        "joint_umnn_1d": "cdsbi.flows.joint_umnn_1d.JointUMNN1DFlow",
+    }
+    if method_flow_label in v3_targets:
         return _instantiate(
-            "cdsbi.flows.doubly_monotone.DoublyMonotoneUMNN",
-            hidden=int(cfg.budget.doubly_monotone_hidden),
-            theta_ref=float(simulator.theta_range[0]),
-        )
-    if method_flow_label == "joint_umnn":
-        return _instantiate(
-            "cdsbi.flows.joint_umnn.JointUMNNFlow",
-            hidden=int(cfg.budget.doubly_monotone_hidden),
-            theta_ref=float(simulator.theta_range[0]),
-        )
-    if method_flow_label == "joint_umnn_1d":
-        return _instantiate(
-            "cdsbi.flows.joint_umnn_1d.JointUMNN1DFlow",
+            v3_targets[method_flow_label],
             hidden=int(cfg.budget.doubly_monotone_hidden),
             theta_ref=float(simulator.theta_range[0]),
         )
