@@ -72,16 +72,29 @@ def _build_flow(cfg: DictConfig, simulator) -> Any:
                 "cdsbi.flows.additive.AdditiveFlow1D",
                 hidden=int(cfg.budget.cdsbi_flow_hidden),
             )
+        # d > 1: use the d-specific budget key if present (e.g.
+        # cdsbi_flow_hidden_d2 for d=2). Fall back to the 1D value as a
+        # rough estimate when no d-specific value is defined.
+        d = int(simulator.d_theta)
+        d_key = f"cdsbi_flow_hidden_d{d}"
+        budget_hidden = int(OmegaConf.select(
+            cfg.budget, d_key, default=cfg.budget.cdsbi_flow_hidden,
+        ))
         return _instantiate(
             "cdsbi.flows.triangular_additive.TriangularAdditiveFlow",
-            d=int(simulator.d_theta),
-            hidden=int(cfg.budget.cdsbi_flow_hidden),
+            d=d,
+            hidden=budget_hidden,
         )
     if method_flow_label == "triangular_additive":
+        d = int(simulator.d_theta)
+        d_key = f"cdsbi_flow_hidden_d{d}"
+        budget_hidden = int(OmegaConf.select(
+            cfg.budget, d_key, default=cfg.budget.cdsbi_flow_hidden,
+        ))
         return _instantiate(
             "cdsbi.flows.triangular_additive.TriangularAdditiveFlow",
-            d=int(simulator.d_theta),
-            hidden=int(cfg.budget.cdsbi_flow_hidden),
+            d=d,
+            hidden=budget_hidden,
         )
     raise ValueError(
         f"Unknown flow label '{method_flow_label}' in method.flow. "

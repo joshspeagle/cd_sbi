@@ -45,6 +45,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from cdsbi.flows.additive import AdditiveFlow1D
 from cdsbi.flows.maf_adapter import MAFAdapter
+from cdsbi.flows.triangular_additive import TriangularAdditiveFlow
 from cdsbi.methods.lf2i import MultiQuantileMLP
 from cdsbi.methods.nre import build_classifier_mlp
 
@@ -64,6 +65,11 @@ CANONICAL_ALPHA_GRID_LEN: int = 4
 def cdsbi_flow_params(H: int) -> int:
     m = AdditiveFlow1D(hidden=H)
     return m.a.n_params() + m.b.n_params()
+
+
+def triangular_additive_2d_params(H: int) -> int:
+    m = TriangularAdditiveFlow(d=2, hidden=H)
+    return m.n_params()
 
 
 def maf_params(H: int) -> int:
@@ -140,6 +146,10 @@ def main() -> None:
             prefix = f"{budget_name:<8}" if first else " " * 8
             first = False
             print(f"{prefix}  {domain_key:<24}  {H:>5}  {n:>8}  {target:>8}  {err:>7.1%}  {label}")
+        # v1 d=2 variant of the same domain — for paper §8.2.
+        H_d2, n_d2, e_d2 = pick_best(target, triangular_additive_2d_params, CANDIDATES)
+        print(f"{'':<8}  {'cdsbi_flow_hidden (d=2)':<24}  {H_d2:>5}  {n_d2:>8}  "
+              f"{target:>8}  {e_d2:>7.1%}  {status_label(e_d2)}")
         # LF2I-BFF composite: classifier backbone (shared with NRE) + quantile head.
         cls_H = pick_best(target, classifier_params, CANDIDATES)[0]
         q_H, q_n, lf2i_total, lf2i_err = pick_quantile_residual(target, cls_H, CANDIDATES)
@@ -158,6 +168,8 @@ def main() -> None:
         for domain_key, fn in STANDALONE_DOMAINS.items():
             H, n, err = pick_best(target, fn, CANDIDATES)
             print(f"  {domain_key}: {H}  # actual={n} ({err:.1%})")
+        H_d2, n_d2, e_d2 = pick_best(target, triangular_additive_2d_params, CANDIDATES)
+        print(f"  cdsbi_flow_hidden_d2: {H_d2}  # TriangularAdditiveFlow(d=2) actual={n_d2} ({e_d2:.1%})")
         cls_H = pick_best(target, classifier_params, CANDIDATES)[0]
         q_H, q_n, lf2i_total, lf2i_err = pick_quantile_residual(target, cls_H, CANDIDATES)
         print(f"  quantile_hidden: {q_H}  # LF2I-BFF multi-quantile head actual={q_n}; "

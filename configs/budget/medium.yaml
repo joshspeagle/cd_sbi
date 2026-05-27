@@ -1,6 +1,7 @@
 name: medium
 target_params: 5000
 cdsbi_flow_hidden: 48  # AdditiveFlow1D backbone actual=4996 (0.1%)
+cdsbi_flow_hidden_d2: 32  # TriangularAdditiveFlow(d=2) actual=4752 (5.0%)
 maf_hidden: 32         # MAFAdapter actual=4740 (5.2%) — shared by NPE/NLE/LF2I-stage-1
 classifier_hidden: 68  # NRE MLP actual=4965 (0.7%)
 quantile_hidden: 12    # LF2I MultiQuantileMLP head actual=232; LF2I total=4972 (0.6%, matched)
