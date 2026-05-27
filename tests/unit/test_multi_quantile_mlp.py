@@ -22,18 +22,17 @@ def test_multi_quantile_forward_shape():
 
 
 def test_multi_quantile_param_count_independent_of_alpha_grid_len_for_lf2i():
-    """LF2IRunner.n_params should grow linearly in n_q only through the
+    """LF2I-BFF n_params should grow linearly in n_q only through the
     output heads (n_q * (H+1)), not through duplicated trunks."""
-    from cdsbi.methods.lf2i import LF2IRunner
+    from cdsbi.methods.lf2i_bff import LF2IBFFRunner
 
-    class _DummyFlow:
-        def n_params(self):
-            return 1000
-
-    runner = LF2IRunner(stat_flow=_DummyFlow(), quantile_hidden=12, quantile_depth=2)
-    n3 = runner.n_params(alpha_grid_len=3)["total"]
-    n4 = runner.n_params(alpha_grid_len=4)["total"]
-    n10 = runner.n_params(alpha_grid_len=10)["total"]
+    runner = LF2IBFFRunner(
+        classifier_hidden=16, classifier_depth=2,
+        quantile_hidden=12, quantile_depth=2,
+    )
+    n3 = runner.n_params(d_theta=1, d_x=1, alpha_grid_len=3)["total"]
+    n4 = runner.n_params(d_theta=1, d_x=1, alpha_grid_len=4)["total"]
+    n10 = runner.n_params(d_theta=1, d_x=1, alpha_grid_len=10)["total"]
     # Per-α head contributes only (H+1) = 13 params per additional quantile.
     assert n4 - n3 == 13
     assert n10 - n4 == 6 * 13

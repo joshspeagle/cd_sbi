@@ -1,6 +1,0 @@
-name: lf2i
-runner_class: cdsbi.methods.lf2i.LF2IRunner
-stat_flow: maf
-quantile_hidden: ${budget.quantile_hidden}
-quantile_depth: 2
-theta_ref: null

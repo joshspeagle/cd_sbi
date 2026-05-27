@@ -25,11 +25,10 @@ Domains
                       Shared by NPE / NLE / LF2I-stage-1.
 - classifier_hidden : build_classifier_mlp(input_dim=2, hidden=H, depth=2) — used by NRE.
 - quantile_hidden   : MultiQuantileMLP(input_dim=1, hidden=H, depth=2, n_quantiles=4)
-                      — used by LF2I's calibration stage. Tuned against the residual
-                      (target − maf_params(maf_hidden)); for budgets where the
-                      backbone already exceeds target, the head is shrunk to the
-                      minimum candidate H and the overall LF2I budget is reported
-                      as matched_with_warning.
+                      — used by LF2I-BFF's calibration stage. Tuned against the
+                      residual (target − classifier_params(classifier_hidden));
+                      for budgets where the backbone already exceeds target, the
+                      head is shrunk to the minimum candidate H.
 
 Candidates
 ----------
@@ -99,13 +98,15 @@ def pick_best(target: int, fn, candidates: list[int]) -> tuple[int, int, float]:
 
 
 def pick_quantile_residual(
-    target: int, maf_H: int, candidates: list[int]
+    target: int, backbone_H: int, candidates: list[int]
 ) -> tuple[int, int, int, float]:
-    """Tune the LF2I multi-quantile head against the residual budget.
+    """Tune the LF2I-BFF multi-quantile head against the residual budget.
 
-    Returns (q_H, q_params, lf2i_total, lf2i_rel_err).
+    The LF2I-BFF backbone is the NRE-style classifier (shared with NRE);
+    the head is a small multi-quantile MLP. Returns
+    (q_H, q_params, lf2i_total, lf2i_rel_err).
     """
-    backbone = maf_params(maf_H)
+    backbone = classifier_params(backbone_H)
     residual = target - backbone
     if residual <= 0:
         # Backbone already saturates target; use smallest candidate for the head.
@@ -139,13 +140,13 @@ def main() -> None:
             prefix = f"{budget_name:<8}" if first else " " * 8
             first = False
             print(f"{prefix}  {domain_key:<24}  {H:>5}  {n:>8}  {target:>8}  {err:>7.1%}  {label}")
-        # LF2I composite: shares maf_hidden with NPE/NLE, plus quantile head on residual.
-        maf_H = pick_best(target, maf_params, CANDIDATES)[0]
-        q_H, q_n, lf2i_total, lf2i_err = pick_quantile_residual(target, maf_H, CANDIDATES)
-        print(f"{'':<8}  {'quantile_hidden (LF2I)':<24}  {q_H:>5}  {q_n:>8}  "
-              f"{max(target - maf_params(maf_H), 0):>8}  {'':>7}  "
+        # LF2I-BFF composite: classifier backbone (shared with NRE) + quantile head.
+        cls_H = pick_best(target, classifier_params, CANDIDATES)[0]
+        q_H, q_n, lf2i_total, lf2i_err = pick_quantile_residual(target, cls_H, CANDIDATES)
+        print(f"{'':<8}  {'quantile_hidden (BFF)':<24}  {q_H:>5}  {q_n:>8}  "
+              f"{max(target - classifier_params(cls_H), 0):>8}  {'':>7}  "
               f"head-only fits residual")
-        print(f"{'':<8}  {'  └ LF2I total':<24}  {'':>5}  {lf2i_total:>8}  {target:>8}  "
+        print(f"{'':<8}  {'  └ LF2I-BFF total':<24}  {'':>5}  {lf2i_total:>8}  {target:>8}  "
               f"{lf2i_err:>7.1%}  {status_label(lf2i_err)}")
         print()
 
@@ -157,10 +158,10 @@ def main() -> None:
         for domain_key, fn in STANDALONE_DOMAINS.items():
             H, n, err = pick_best(target, fn, CANDIDATES)
             print(f"  {domain_key}: {H}  # actual={n} ({err:.1%})")
-        maf_H = pick_best(target, maf_params, CANDIDATES)[0]
-        q_H, q_n, lf2i_total, lf2i_err = pick_quantile_residual(target, maf_H, CANDIDATES)
-        print(f"  quantile_hidden: {q_H}  # LF2I multi-quantile head actual={q_n}; "
-              f"LF2I total={lf2i_total} ({lf2i_err:.1%}, {status_label(lf2i_err)})")
+        cls_H = pick_best(target, classifier_params, CANDIDATES)[0]
+        q_H, q_n, lf2i_total, lf2i_err = pick_quantile_residual(target, cls_H, CANDIDATES)
+        print(f"  quantile_hidden: {q_H}  # LF2I-BFF multi-quantile head actual={q_n}; "
+              f"LF2I-BFF total={lf2i_total} ({lf2i_err:.1%}, {status_label(lf2i_err)})")
 
 
 if __name__ == "__main__":

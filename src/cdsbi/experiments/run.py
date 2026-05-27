@@ -40,9 +40,7 @@ def _build_flow(cfg: DictConfig) -> Any:
     the Hydra 1.3 limitation where a secondary config cannot override a parent's
     group default via a nested defaults list.
     """
-    # lf2i uses `stat_flow` instead of `flow`; fall back so both are handled.
-    method_flow_label = OmegaConf.select(cfg, "method.flow",
-                        default=OmegaConf.select(cfg, "method.stat_flow", default=None))
+    method_flow_label = OmegaConf.select(cfg, "method.flow", default=None)
     hydra_flow_name = cfg.flow.name
 
     if method_flow_label is None or method_flow_label == hydra_flow_name:
@@ -106,16 +104,6 @@ def _build_method(cfg: DictConfig, simulator) -> Any:
             classifier_depth=m.classifier_depth,
             device=cfg.device,
         )
-    if m.name == "lf2i":
-        flow = _build_flow(cfg)
-        return _instantiate(
-            runner_class,
-            stat_flow=flow,
-            quantile_hidden=m.quantile_hidden,
-            quantile_depth=m.quantile_depth,
-            theta_ref=m.theta_ref,
-            device=cfg.device,
-        )
     if m.name == "lf2i_bff":
         return _instantiate(
             runner_class,
@@ -157,13 +145,11 @@ def _fit_config(cfg: DictConfig, method_name: str) -> dict:
         return _recipe_dict(t)
     if method_name in ("npe", "nle", "nre"):
         return _recipe_dict(t)
-    if method_name in ("lf2i", "lf2i_bff"):
+    if method_name == "lf2i_bff":
         return {
             **_recipe_dict(t),
             "n_train_stat": int(t.n_train),
             "n_train_quantile": int(t.n_train) // 2,
-            "n_epochs_stat": int(t.n_epochs),
-            "n_epochs_quantile": 100,
             "alpha_grid": list(cfg.experiment.alpha_grid),
         }
     raise ValueError(method_name)
@@ -275,9 +261,7 @@ def main(cfg: DictConfig) -> None:
 
         simulator = _build_simulator(cfg)
         runner = _build_method(cfg, simulator)
-        if cfg.method.name == "lf2i":
-            n_params = runner.n_params(alpha_grid_len=len(list(cfg.experiment.alpha_grid)))
-        elif cfg.method.name == "lf2i_bff":
+        if cfg.method.name == "lf2i_bff":
             n_params = runner.n_params(
                 d_theta=simulator.d_theta,
                 d_x=simulator.d_x,

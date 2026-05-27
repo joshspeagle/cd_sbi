@@ -1,19 +1,24 @@
-"""LF2IRunner — two-stage: (1) NLE-style flow gives test statistic,
-(2) shared-trunk multi-quantile MLP gives critical-value function c_α(θ).
+"""LF2I shared components — multi-quantile head + stage-2 trainer.
+
+The canonical LF2I baseline lives in lf2i_bff.py (BFF test statistic).
+This module exposes the architecture and training pieces both BFF and any
+future LF2I variants (e.g. Waldo) reuse:
+
+  - MultiQuantileMLP       (paper's QuantileNN)
+  - multi_pinball_loss     (sum of per-α pinball losses)
+  - train_multi_quantile_head (recipe-aware stage-2 trainer)
+
+A simplified fixed-reference LR variant (LF2IRunner) previously lived here
+as a stepping stone; it was removed once BFF caught up — the LR test
+statistic is structurally degenerate at θ_0 = θ_ref and cannot reach
+nominal coverage there regardless of training recipe.
 """
 from __future__ import annotations
 
-import time
 from typing import List
 
 import torch
 import torch.nn as nn
-
-from cdsbi.confidence_set.procedures import CriticalValueProcedure
-from cdsbi.device import get_device
-from cdsbi.methods.base import Runner, TrainedModel
-from cdsbi.methods.training_utils import train_with_recipe
-from cdsbi.reproducibility.seeding import seed_everything
 
 
 class MultiQuantileMLP(nn.Module):
@@ -93,131 +98,3 @@ def train_multi_quantile_head(
     return losses
 
 
-class LF2IRunner(Runner):
-    def __init__(
-        self,
-        stat_flow,
-        quantile_hidden: int = 32,
-        quantile_depth: int = 3,
-        theta_ref: float = None,  # default: prior midpoint
-        device: str = "auto",
-    ):
-        self.stat_flow = stat_flow
-        self.quantile_hidden = quantile_hidden
-        self.quantile_depth = quantile_depth
-        self.theta_ref = theta_ref
-        self.device = get_device(device)
-
-    def fit(self, simulator, config: dict, seed: int) -> TrainedModel:
-        rngs = seed_everything(seed)
-        a, b = simulator.theta_range
-        theta_ref = self.theta_ref if self.theta_ref is not None else 0.5 * (a + b)
-
-        # === Stage 1: train NLE-style flow with our recipe knobs ===
-        def nle_loss(net, theta_b, x_b):
-            return -net.log_prob(x_b, context=theta_b).mean()
-
-        t0 = time.time()
-        stage1_losses, _ = train_with_recipe(
-            self.stat_flow, simulator.sample, config, self.device, nle_loss, rngs,
-            n_train=int(config["n_train_stat"]),
-        )
-        flow = self.stat_flow
-
-        theta_ref_t = torch.tensor([[theta_ref]], device=self.device, dtype=torch.float32)
-
-        # NOTE: sign convention. The inversion in CriticalValueProcedure is
-        # {θ : T(θ; X_obs) ≤ c_α(θ)}, and we train c_α via pinball loss at
-        # level α (the α-quantile of T | θ). For that pair to produce a set
-        # with both nominal coverage AND useful power, T must be "large =
-        # evidence against θ" (Wilks-direction). We therefore return
-        # T = ll_ref − ll_θ: small when θ fits, large when it doesn't.
-        # The naive ll_θ − ll_ref direction (used pre-2026-05-26) gave
-        # nominal coverage by quantile algebra but wide sets, because at a
-        # wrong θ* T(θ*; X_obs) was systematically below c_α(θ*).
-        # This is a simplified fixed-reference LR test statistic, not the
-        # paper's canonical LF2I form (ACORE / BFF / Waldo). A proper BFF
-        # implementation lands in a follow-up commit.
-        def test_stat_fn(theta: torch.Tensor, x_obs: torch.Tensor) -> torch.Tensor:
-            theta = theta.to(self.device)
-            x_obs = x_obs.to(self.device)
-            theta_ref_b = theta_ref_t.expand(theta.shape[0], -1)
-            ll_th = flow.log_prob(x=x_obs.expand(theta.shape[0], -1), context=theta)
-            ll_ref = flow.log_prob(x=x_obs.expand(theta.shape[0], -1), context=theta_ref_b)
-            return ll_ref - ll_th
-
-        # === Stage 2: pinball-loss MLP for c_α(θ) ===
-        theta_cal, x_cal = simulator.sample(config["n_train_quantile"], rngs.eval)
-        theta_cal, x_cal = theta_cal.to(self.device), x_cal.to(self.device)
-        with torch.no_grad():
-            t_cal = torch.stack([
-                test_stat_fn(theta_cal[i : i + 1], x_cal[i : i + 1]).squeeze()
-                for i in range(theta_cal.shape[0])
-            ])
-
-        alpha_grid: List[float] = config["alpha_grid"]
-        # Single shared-trunk multi-quantile MLP. Parameter count is
-        # independent of len(alpha_grid), matching the paper's QuantileNN.
-        critical_net = MultiQuantileMLP(
-            input_dim=simulator.d_theta,
-            hidden=self.quantile_hidden,
-            depth=self.quantile_depth,
-            n_quantiles=len(alpha_grid),
-        ).to(self.device)
-        stage2_losses = train_multi_quantile_head(
-            critical_net, theta_cal, t_cal, alpha_grid, config, self.device,
-        )
-        wall = time.time() - t0
-
-        alpha_to_head_idx = {a: k for k, a in enumerate(alpha_grid)}
-
-        def critical_value_fn(theta: torch.Tensor, alpha: float) -> torch.Tensor:
-            k = alpha_to_head_idx[alpha]
-            return critical_net(theta.to(self.device))[:, k]
-
-        procedure = CriticalValueProcedure(
-            test_stat_fn=test_stat_fn,
-            critical_value_fn=critical_value_fn,
-            d_theta=simulator.d_theta,
-            theta_range=simulator.theta_range,
-        )
-
-        return TrainedModel(
-            procedure=procedure,
-            state_dict={
-                "stat_flow": flow.state_dict(),
-                "critical_net": critical_net.state_dict(),
-            },
-            final_loss=0.0,
-            n_steps=int(config["n_steps"]) * 2,  # stage-1 + stage-2 share the recipe's n_steps
-            wall_clock_sec=wall,
-            arch_metadata={
-                "method": "LF2I",
-                "test_statistic": "fixed_reference_LR_wilks_direction",
-                "theta_ref": theta_ref,
-                "alpha_grid": alpha_grid,
-                "critical_net_class": "MultiQuantileMLP",
-                "stage1_loss_tail": stage1_losses[-min(100, len(stage1_losses)):],
-                "stage2_loss_tail": stage2_losses[-min(100, len(stage2_losses)):],
-                "optimizer": str(config.get("optimizer", "adam")),
-                "lr_schedule": str(config.get("lr_schedule", "constant")),
-                "fresh_batch": bool(config.get("fresh_batch", True)),
-            },
-        )
-
-    def n_params(self, alpha_grid_len: int = 4) -> dict:
-        backbone = self.stat_flow.n_params()
-        dummy = MultiQuantileMLP(
-            input_dim=1,
-            hidden=self.quantile_hidden,
-            depth=self.quantile_depth,
-            n_quantiles=alpha_grid_len,
-        )
-        calibration_stage = sum(p.numel() for p in dummy.parameters())
-        return {
-            "backbone": backbone,
-            "head": 0,
-            "calibration_stage": calibration_stage,
-            "total": backbone + calibration_stage,
-            "kind": "two_stage",
-        }
