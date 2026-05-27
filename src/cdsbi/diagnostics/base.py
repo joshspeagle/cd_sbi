@@ -21,4 +21,6 @@ class DiagnosticResult:
 class Diagnostic(Protocol):
     name: str
 
-    def __call__(self, trained, simulator, eval_data) -> DiagnosticResult: ...
+    def __call__(
+        self, trained, simulator, eval_data=None, x_per_theta=None,
+    ) -> DiagnosticResult: ...
