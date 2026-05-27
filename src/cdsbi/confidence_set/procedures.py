@@ -172,15 +172,18 @@ def _ray_sample_set_boundary(
     t_lo = torch.zeros(n_rays, dtype=dtype, device=device)
     t_hi = torch.full((n_rays,), 2.0 * (hi - lo), dtype=dtype, device=device)
     x_batch = x_obs.expand(n_rays, -1)
-    for _ in range(40):
-        m = 0.5 * (t_lo + t_hi)
-        theta_m = center.unsqueeze(0) + m.unsqueeze(-1) * u
-        v = inside_fn(theta_m, x_batch)
-        if v.device != device:
-            v = v.to(device)
-        outside = v > 0
-        t_hi = torch.where(outside, m, t_hi)
-        t_lo = torch.where(outside, t_lo, m)
+    # Bisection needs no autograd — wrap to prevent activation-graph blow-up
+    # when inside_fn touches a trained net (LF2I-BFF / NLE / NRE all do).
+    with torch.no_grad():
+        for _ in range(40):
+            m = 0.5 * (t_lo + t_hi)
+            theta_m = center.unsqueeze(0) + m.unsqueeze(-1) * u
+            v = inside_fn(theta_m, x_batch)
+            if v.device != device:
+                v = v.to(device)
+            outside = v > 0
+            t_hi = torch.where(outside, m, t_hi)
+            t_lo = torch.where(outside, t_lo, m)
     t = 0.5 * (t_lo + t_hi)
     boundary = center.unsqueeze(0) + t.unsqueeze(-1) * u
 
@@ -279,16 +282,22 @@ def _ray_sample_set_boundary_batched(
         -1, x_obs_batch.shape[-1]
     )
 
-    for _ in range(40):
-        m = 0.5 * (t_lo + t_hi)  # (B, K)
-        theta_m = centers_exp + m.unsqueeze(-1) * u_exp  # (B, K, d)
-        theta_flat = theta_m.reshape(-1, d)  # (B*K, d)
-        v = inside_fn(theta_flat, x_obs_for_eval).view(B, n_rays)
-        if v.device != device:
-            v = v.to(device)
-        outside = v > 0
-        t_hi = torch.where(outside, m, t_hi)
-        t_lo = torch.where(outside, t_lo, m)
+    # Bisection needs no autograd — wrap to prevent activation-graph blow-up
+    # when inside_fn touches a trained net at large B*K. (At xlarge budget
+    # with B=500 and K=200, the inside_fn input is 100K rows; LF2I-BFF's
+    # test_stat_fn additionally fans those to 100K × marginal_grid_n
+    # classifier inputs — without no_grad the autograd graph would OOM.)
+    with torch.no_grad():
+        for _ in range(40):
+            m = 0.5 * (t_lo + t_hi)  # (B, K)
+            theta_m = centers_exp + m.unsqueeze(-1) * u_exp  # (B, K, d)
+            theta_flat = theta_m.reshape(-1, d)  # (B*K, d)
+            v = inside_fn(theta_flat, x_obs_for_eval).view(B, n_rays)
+            if v.device != device:
+                v = v.to(device)
+            outside = v > 0
+            t_hi = torch.where(outside, m, t_hi)
+            t_lo = torch.where(outside, t_lo, m)
     t = 0.5 * (t_lo + t_hi)  # (B, K)
     boundaries = centers_exp + t.unsqueeze(-1) * u_exp  # (B, K, d)
 
