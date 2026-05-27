@@ -8,16 +8,12 @@ from typing import List
 
 import torch
 import torch.nn as nn
-from sbi.inference import SNLE_A
-from sbi.utils import BoxUniform
 
 from cdsbi.confidence_set.procedures import CriticalValueProcedure
 from cdsbi.device import get_device
 from cdsbi.methods.base import Runner, TrainedModel
+from cdsbi.methods.training_utils import train_with_recipe
 from cdsbi.reproducibility.seeding import seed_everything
-
-# _likelihood_estimator_builder(maf_adapter, features, context_features) -> factory
-from cdsbi.methods.nle import _likelihood_estimator_builder
 
 
 class MultiQuantileMLP(nn.Module):
@@ -76,30 +72,15 @@ class LF2IRunner(Runner):
         a, b = simulator.theta_range
         theta_ref = self.theta_ref if self.theta_ref is not None else 0.5 * (a + b)
 
-        # === Stage 1: train NLE-style flow ===
-        # _likelihood_estimator_builder signature: (maf_adapter, features, context_features)
-        # For NLE: features=d_x (input), context_features=d_theta (condition).
-        prior = BoxUniform(
-            low=torch.tensor([a], device=self.device),
-            high=torch.tensor([b], device=self.device),
-        )
-        # NOTE: don't pre-move stat_flow / training tensors — see npe.py for the
-        # sbi 0.26 CPU-probe rationale. sbi will move the net to self._device.
-        inferer = SNLE_A(
-            prior=prior,
-            density_estimator=_likelihood_estimator_builder(
-                self.stat_flow,
-                features=simulator.d_x,
-                context_features=simulator.d_theta,
-            ),
-            device=str(self.device),
-            show_progress_bars=False,
-        )
-        theta, x = simulator.sample(config["n_train_stat"], rngs.train)
-        inferer.append_simulations(theta, x)
+        # === Stage 1: train NLE-style flow with our recipe knobs ===
+        def nle_loss(net, theta_b, x_b):
+            return -net.log_prob(x_b, context=theta_b).mean()
 
         t0 = time.time()
-        inferer.train(max_num_epochs=config["n_epochs_stat"], show_train_summary=False)
+        stage1_losses, _ = train_with_recipe(
+            self.stat_flow, simulator.sample, config, self.device, nle_loss, rngs,
+            n_train=int(config["n_train_stat"]),
+        )
         flow = self.stat_flow
 
         theta_ref_t = torch.tensor([[theta_ref]], device=self.device, dtype=torch.float32)
@@ -171,7 +152,7 @@ class LF2IRunner(Runner):
                 "critical_net": critical_net.state_dict(),
             },
             final_loss=0.0,
-            n_steps=config["n_epochs_stat"] + config["n_epochs_quantile"],
+            n_steps=int(config["n_steps"]) + int(config["n_epochs_quantile"]),
             wall_clock_sec=wall,
             arch_metadata={
                 "method": "LF2I",
@@ -179,6 +160,10 @@ class LF2IRunner(Runner):
                 "theta_ref": theta_ref,
                 "alpha_grid": alpha_grid,
                 "critical_net_class": "MultiQuantileMLP",
+                "stage1_loss_tail": stage1_losses[-min(100, len(stage1_losses)):],
+                "optimizer": str(config.get("optimizer", "adam")),
+                "lr_schedule": str(config.get("lr_schedule", "constant")),
+                "fresh_batch": bool(config.get("fresh_batch", True)),
             },
         )
 

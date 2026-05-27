@@ -12,7 +12,13 @@ def test_lf2i_smoke(seed):
     runner = LF2IRunner(stat_flow=flow, quantile_hidden=16, quantile_depth=2)
     trained = runner.fit(
         simulator=sim,
-        config={"n_train_stat": 200, "n_train_quantile": 200, "n_epochs_stat": 5, "n_epochs_quantile": 100, "alpha_grid": [0.5, 0.68, 0.9, 0.95]},
+        config={
+            "lr": 1e-3, "batch_size": 32, "n_steps": 50,
+            "n_train_stat": 200, "n_train_quantile": 200,
+            "n_epochs_quantile": 100,
+            "alpha_grid": [0.5, 0.68, 0.9, 0.95],
+            "fresh_batch": False,
+        },
         seed=seed,
     )
     assert trained.procedure is not None

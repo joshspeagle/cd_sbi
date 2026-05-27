@@ -21,11 +21,14 @@ def test_lf2i_bff_smoke(seed):
     trained = runner.fit(
         simulator=sim,
         config={
+            "lr": 1e-3,
+            "batch_size": 32,
+            "n_steps": 50,
             "n_train_stat": 300,
-            "n_epochs_stat": 5,
             "n_train_quantile": 150,
             "n_epochs_quantile": 50,
             "alpha_grid": [0.5, 0.9],
+            "fresh_batch": False,
         },
         seed=seed,
     )
@@ -62,9 +65,9 @@ def test_lf2i_bff_test_stat_wilks_direction_at_oracle_classifier():
     trained = runner.fit(
         simulator=sim,
         config={
-            "n_train_stat": 1000, "n_epochs_stat": 20,
-            "n_train_quantile": 200, "n_epochs_quantile": 50,
-            "alpha_grid": [0.9],
+            "lr": 1e-3, "batch_size": 32, "n_steps": 300,
+            "n_train_stat": 1000, "n_train_quantile": 200, "n_epochs_quantile": 50,
+            "alpha_grid": [0.9], "fresh_batch": False,
         },
         seed=0,
     )

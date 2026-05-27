@@ -23,14 +23,13 @@ import time
 from typing import List
 
 import torch
-from sbi.inference import SNRE_B
-from sbi.utils import BoxUniform
 
 from cdsbi.confidence_set.procedures import CriticalValueProcedure
 from cdsbi.device import get_device
 from cdsbi.methods.base import Runner, TrainedModel
 from cdsbi.methods.lf2i import MultiQuantileMLP, multi_pinball_loss
-from cdsbi.methods.nre import _classifier_builder, build_classifier_mlp
+from cdsbi.methods.nre import _nre_bce_loss, build_classifier_mlp
+from cdsbi.methods.training_utils import train_with_recipe
 from cdsbi.reproducibility.seeding import seed_everything
 
 
@@ -55,23 +54,17 @@ class LF2IBFFRunner(Runner):
         rngs = seed_everything(seed)
         a, b = simulator.theta_range
 
-        # === Stage 1: train NRE-style classifier (joint vs marginal) ===
-        prior = BoxUniform(
-            low=torch.tensor([a], device=self.device),
-            high=torch.tensor([b], device=self.device),
+        # === Stage 1: train NRE-style classifier with our recipe knobs ===
+        classifier = build_classifier_mlp(
+            input_dim=simulator.d_theta + simulator.d_x,
+            hidden=self.classifier_hidden,
+            depth=self.classifier_depth,
         )
-        inferer = SNRE_B(
-            prior=prior,
-            classifier=_classifier_builder(self.classifier_hidden, self.classifier_depth),
-            device=str(self.device),
-            show_progress_bars=False,
-        )
-        theta, x = simulator.sample(config["n_train_stat"], rngs.train)
-        inferer.append_simulations(theta, x)
 
         t0 = time.time()
-        ratio_estimator = inferer.train(
-            max_num_epochs=config["n_epochs_stat"], show_train_summary=False
+        stage1_losses, _ = train_with_recipe(
+            classifier, simulator.sample, config, self.device, _nre_bce_loss, rngs,
+            n_train=int(config["n_train_stat"]),
         )
 
         # === Stage 2: build BFF test statistic ===
@@ -97,14 +90,13 @@ class LF2IBFFRunner(Runner):
                     )
             B = theta.shape[0]
             # log O(X_i; θ_i) — the numerator (size B).
-            log_r_at = ratio_estimator.unnormalized_log_ratio(theta, x_obs).squeeze(-1)
+            log_r_at = classifier(torch.cat([theta, x_obs], dim=-1)).squeeze(-1)
             # logsumexp_b log O(X_i; θ_b) − log N — the marginal denominator.
             theta_grid_exp = theta_grid.unsqueeze(0).expand(B, -1, -1).reshape(-1, theta.shape[-1])
             x_obs_exp = x_obs.unsqueeze(1).expand(-1, N_grid, -1).reshape(-1, x_obs.shape[-1])
-            log_r_grid = (
-                ratio_estimator.unnormalized_log_ratio(theta_grid_exp, x_obs_exp)
-                .squeeze(-1).view(B, N_grid)
-            )
+            log_r_grid = classifier(
+                torch.cat([theta_grid_exp, x_obs_exp], dim=-1)
+            ).squeeze(-1).view(B, N_grid)
             log_marginal = torch.logsumexp(log_r_grid, dim=1) - log_N
             return log_marginal - log_r_at  # Wilks direction: large = bad fit at θ
 
@@ -146,15 +138,15 @@ class LF2IBFFRunner(Runner):
             theta_range=simulator.theta_range,
         )
 
-        n_class = sum(p.numel() for p in ratio_estimator.parameters())
+        n_class = sum(p.numel() for p in classifier.parameters())
         return TrainedModel(
             procedure=procedure,
             state_dict={
-                "classifier": ratio_estimator.state_dict(),
+                "classifier": classifier.state_dict(),
                 "critical_net": critical_net.state_dict(),
             },
-            final_loss=0.0,
-            n_steps=config["n_epochs_stat"] + config["n_epochs_quantile"],
+            final_loss=float(stage1_losses[-1]),
+            n_steps=int(config["n_steps"]) + int(config["n_epochs_quantile"]),
             wall_clock_sec=wall,
             arch_metadata={
                 "method": "LF2I_BFF",
@@ -163,6 +155,10 @@ class LF2IBFFRunner(Runner):
                 "alpha_grid": alpha_grid,
                 "critical_net_class": "MultiQuantileMLP",
                 "classifier_params_actual": n_class,
+                "stage1_loss_tail": stage1_losses[-min(100, len(stage1_losses)):],
+                "optimizer": str(config.get("optimizer", "adam")),
+                "lr_schedule": str(config.get("lr_schedule", "constant")),
+                "fresh_batch": bool(config.get("fresh_batch", True)),
             },
         )
 

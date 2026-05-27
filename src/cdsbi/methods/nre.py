@@ -1,27 +1,21 @@
-"""NRERunner: wraps sbi.inference.SNRE_B with num_rounds=1 and a controlled MLP classifier.
+"""NRERunner: binary-classifier-based likelihood ratio with the project's recipe knobs.
 
-API note (sbi 0.26.x): the classifier factory must return a RatioEstimator instance
-(a ConditionalEstimator subclass), not a bare nn.Module.  We wrap our MLP in
-sbi's RatioEstimator, which handles the theta/x concatenation internally via
-combine_theta_and_x and exposes unnormalized_log_ratio(theta, x).
-
-The trained ratio_estimator returned by inferer.train() is a RatioEstimator;
-log_ratio_fn therefore calls ratio_estimator.unnormalized_log_ratio(theta, x)
-with separate tensors rather than pre-concatenating them.
+Bypasses sbi.SNRE_B.train() so the optimizer / LR schedule / warmup /
+grad-clip / fresh_batch / batching knobs in the training config actually
+apply. The classifier is just an MLP on concat[θ, X]; we train it via BCE
+on joint (label 1) vs prior-shuffled (label 0) pairs and expose the logit
+as the unnormalized log-ratio at inference.
 """
 from __future__ import annotations
 
-import time
-
 import torch
 import torch.nn as nn
-from sbi.inference import SNRE_B
-from sbi.neural_nets.ratio_estimators import RatioEstimator
-from sbi.utils import BoxUniform
+import torch.nn.functional as F
 
 from cdsbi.confidence_set.procedures import RatioBasedProcedure
 from cdsbi.device import get_device
 from cdsbi.methods.base import Runner, TrainedModel
+from cdsbi.methods.training_utils import train_with_recipe
 from cdsbi.reproducibility.seeding import seed_everything
 
 
@@ -34,25 +28,29 @@ def build_classifier_mlp(input_dim: int, hidden: int, depth: int) -> nn.Module:
     return nn.Sequential(*layers)
 
 
-def _classifier_builder(hidden: int, depth: int):
-    """Factory satisfying sbi's ConditionalEstimatorBuilder protocol.
+def _nre_bce_loss(net, theta_b: torch.Tensor, x_b: torch.Tensor) -> torch.Tensor:
+    """BCE on joint (Y=1) vs shuffled (Y=0) pairs.
 
-    sbi calls build(batch_theta, batch_x) on the first training batch to infer
-    shapes, then expects a RatioEstimator back.  We construct the MLP with the
-    correct input_dim (theta_dim + x_dim) and wrap it in RatioEstimator, which
-    handles concatenation internally.
+    For each batch element, the joint pair (θ_i, X_i) is labelled 1; the
+    shuffled pair (θ_{π(i)}, X_i) — independently sampled θ given X — is
+    labelled 0. Trained classifier f(θ, X) approximates the posterior
+    odds-ratio at the joint, which is the log likelihood ratio at the
+    prior level.
     """
-    def build(batch_theta: torch.Tensor, batch_x: torch.Tensor) -> RatioEstimator:
-        theta_dim = batch_theta.shape[-1]
-        x_dim = batch_x.shape[-1]
-        input_dim = theta_dim + x_dim
-        net = build_classifier_mlp(input_dim, hidden, depth)
-        return RatioEstimator(
-            net=net,
-            theta_shape=torch.Size([theta_dim]),
-            x_shape=torch.Size([x_dim]),
-        )
-    return build
+    B = theta_b.shape[0]
+    perm = torch.randperm(B, device=theta_b.device)
+    theta_shuffled = theta_b[perm]
+    inputs_joint = torch.cat([theta_b, x_b], dim=-1)
+    inputs_marg = torch.cat([theta_shuffled, x_b], dim=-1)
+    logits_joint = net(inputs_joint).squeeze(-1)
+    logits_marg = net(inputs_marg).squeeze(-1)
+    loss_joint = F.binary_cross_entropy_with_logits(
+        logits_joint, torch.ones_like(logits_joint)
+    )
+    loss_marg = F.binary_cross_entropy_with_logits(
+        logits_marg, torch.zeros_like(logits_marg)
+    )
+    return 0.5 * (loss_joint + loss_marg)
 
 
 class NRERunner(Runner):
@@ -60,42 +58,32 @@ class NRERunner(Runner):
         self.classifier_hidden = classifier_hidden
         self.classifier_depth = classifier_depth
         self.device = get_device(device)
+        self._classifier: nn.Module = None  # built at fit time when d_theta/d_x are known
 
     def fit(self, simulator, config: dict, seed: int) -> TrainedModel:
-        seed_everything(seed)
-        a, b = simulator.theta_range
-        prior = BoxUniform(
-            low=torch.tensor([a], device=self.device),
-            high=torch.tensor([b], device=self.device),
-        )
-
-        # NOTE: don't pre-move training tensors — sbi places them itself.
-        inferer = SNRE_B(
-            prior=prior,
-            classifier=_classifier_builder(self.classifier_hidden, self.classifier_depth),
-            device=str(self.device),
-            show_progress_bars=False,
-        )
-
         rngs = seed_everything(seed)
-        theta, x = simulator.sample(config["n_train"], rngs.train)
-        inferer.append_simulations(theta, x)
 
-        t0 = time.time()
-        ratio_estimator = inferer.train(max_num_epochs=config["n_epochs"], show_train_summary=False)
-        wall = time.time() - t0
+        input_dim = simulator.d_theta + simulator.d_x
+        classifier = build_classifier_mlp(
+            input_dim=input_dim,
+            hidden=self.classifier_hidden,
+            depth=self.classifier_depth,
+        )
+        self._classifier = classifier
+
+        losses, wall = train_with_recipe(
+            classifier, simulator.sample, config, self.device, _nre_bce_loss, rngs,
+            n_train=int(config["n_train"]),
+        )
 
         device = self.device
 
-        # ratio_estimator is a RatioEstimator; its forward / unnormalized_log_ratio
-        # takes separate theta and x tensors (not pre-concatenated).
-        # Shape contract: theta (n_theta, d_theta), x_obs (1, d_x) broadcast to (n_theta, d_x).
         def log_ratio_fn(theta: torch.Tensor, x_obs: torch.Tensor) -> torch.Tensor:
             theta = theta.to(device)
             x_obs = x_obs.to(device)
             n_th = theta.shape[0]
-            x_rep = x_obs.expand(n_th, -1)
-            return ratio_estimator.unnormalized_log_ratio(theta, x_rep).squeeze(-1)
+            x_rep = x_obs.expand(n_th, -1) if x_obs.shape[0] == 1 else x_obs
+            return classifier(torch.cat([theta, x_rep], dim=-1)).squeeze(-1)
 
         procedure = RatioBasedProcedure(
             log_ratio_fn=log_ratio_fn,
@@ -103,14 +91,21 @@ class NRERunner(Runner):
             theta_range=simulator.theta_range,
         )
 
-        n_class = sum(p.numel() for p in ratio_estimator.parameters())
+        n_class = sum(p.numel() for p in classifier.parameters())
         return TrainedModel(
             procedure=procedure,
-            state_dict={"classifier": ratio_estimator.state_dict()},
-            final_loss=0.0,
-            n_steps=config["n_epochs"],
+            state_dict={"classifier": classifier.state_dict()},
+            final_loss=float(losses[-1]),
+            n_steps=int(config["n_steps"]),
             wall_clock_sec=wall,
-            arch_metadata={"method": "NRE_B", "classifier_params_actual": n_class},
+            arch_metadata={
+                "method": "NRE_custom",
+                "classifier_params_actual": n_class,
+                "loss_history_tail": losses[-min(100, len(losses)):],
+                "optimizer": str(config.get("optimizer", "adam")),
+                "lr_schedule": str(config.get("lr_schedule", "constant")),
+                "fresh_batch": bool(config.get("fresh_batch", True)),
+            },
         )
 
     def n_params(self, d_theta: int = 1, d_x: int = 1) -> dict:

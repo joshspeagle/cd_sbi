@@ -1,38 +1,21 @@
-"""NLERunner: wraps sbi.inference.SNLE_A with num_rounds=1 and our MAFAdapter.
+"""NLERunner: density estimation p̂(X|θ) via MLE with the project's recipe knobs.
 
-API note (sbi 0.26.x): the density_estimator factory must return a
-ConditionalDensityEstimator instance, not a bare nn.Module.  We reuse
-_density_estimator_builder from npe.py — both SNPE_C and SNLE_A share
-the same factory contract.
-
-Note: for NLE the roles of theta/x are flipped relative to NPE — the
-likelihood is p(x|theta), so x is the "input" and theta is the
-"condition" in sbi's vocabulary.
+Bypasses sbi.SNLE_A.train() so the optimizer / LR schedule / warmup /
+grad-clip / fresh_batch / batching knobs in the training config actually
+apply (sbi's internal train loop ignores all of them). Inference still
+uses our LikelihoodBasedProcedure with a closure over the trained flow.
 """
 from __future__ import annotations
 
-import time
+from typing import List
 
 import torch
-from sbi.inference import SNLE_A
-from sbi.neural_nets.estimators import NFlowsFlow
-from sbi.utils import BoxUniform
 
 from cdsbi.confidence_set.procedures import LikelihoodBasedProcedure
 from cdsbi.device import get_device
 from cdsbi.methods.base import Runner, TrainedModel
+from cdsbi.methods.training_utils import train_with_recipe
 from cdsbi.reproducibility.seeding import seed_everything
-
-
-def _likelihood_estimator_builder(maf_adapter, features: int, context_features: int):
-    """Factory for SNLE_A: input=x (features), condition=theta (context_features)."""
-    def build(batch_theta: torch.Tensor, batch_x: torch.Tensor) -> NFlowsFlow:
-        return NFlowsFlow(
-            net=maf_adapter.flow,
-            input_shape=torch.Size([features]),
-            condition_shape=torch.Size([context_features]),
-        )
-    return build
 
 
 class NLERunner(Runner):
@@ -41,36 +24,18 @@ class NLERunner(Runner):
         self.device = get_device(device)
 
     def fit(self, simulator, config: dict, seed: int) -> TrainedModel:
-        seed_everything(seed)
-        a, b = simulator.theta_range
-        prior = BoxUniform(
-            low=torch.tensor([a], device=self.device),
-            high=torch.tensor([b], device=self.device),
-        )
-
-        # For NLE: input=x, condition=theta → features=d_x, context_features=d_theta.
-        # NOTE: don't pre-move flow / training tensors — see npe.py for the
-        # sbi 0.26 CPU-probe rationale. sbi moves the net to self._device
-        # (base.py:969) before training proper, so after fit() the flow's
-        # parameters live on self.device.
-        inferer = SNLE_A(
-            prior=prior,
-            density_estimator=_likelihood_estimator_builder(
-                self.flow,
-                features=simulator.d_x,
-                context_features=simulator.d_theta,
-            ),
-            device=str(self.device),
-            show_progress_bars=False,
-        )
-
         rngs = seed_everything(seed)
-        theta, x = simulator.sample(config["n_train"], rngs.train)
-        inferer.append_simulations(theta, x)
 
-        t0 = time.time()
-        inferer.train(max_num_epochs=config["n_epochs"], show_train_summary=False)
-        wall = time.time() - t0
+        # NLE: x is the input, θ is the conditioning context.
+        # MAFAdapter expects features=d_x and context_features=d_theta at
+        # construction time; loss is the standard negative-log-likelihood.
+        def nle_loss(net, theta_b, x_b):
+            return -net.log_prob(x_b, context=theta_b).mean()
+
+        losses, wall = train_with_recipe(
+            self.flow, simulator.sample, config, self.device, nle_loss, rngs,
+            n_train=int(config["n_train"]),
+        )
 
         flow = self.flow
         device = self.device
@@ -87,10 +52,17 @@ class NLERunner(Runner):
         return TrainedModel(
             procedure=procedure,
             state_dict={"flow": flow.state_dict()},
-            final_loss=0.0,
-            n_steps=config["n_epochs"],
+            final_loss=float(losses[-1]),
+            n_steps=int(config["n_steps"]),
             wall_clock_sec=wall,
-            arch_metadata={"flow_class": "MAFAdapter", "method": "NLE_A"},
+            arch_metadata={
+                "method": "NLE",
+                "flow_class": "MAFAdapter",
+                "loss_history_tail": losses[-min(100, len(losses)):],
+                "optimizer": str(config.get("optimizer", "adam")),
+                "lr_schedule": str(config.get("lr_schedule", "constant")),
+                "fresh_batch": bool(config.get("fresh_batch", True)),
+            },
         )
 
     def n_params(self) -> dict:

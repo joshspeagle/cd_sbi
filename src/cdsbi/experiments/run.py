@@ -129,30 +129,37 @@ def _build_method(cfg: DictConfig, simulator) -> Any:
     raise ValueError(f"Unknown method: {m.name}")
 
 
+def _recipe_dict(t: DictConfig) -> dict:
+    """Common training-recipe extraction shared by all methods that use
+    train_with_recipe (cd_sbi, npe, nle, nre, lf2i, lf2i_bff)."""
+    return {
+        "lr": float(t.lr),
+        "batch_size": int(t.batch_size),
+        "n_steps": int(t.n_steps),
+        "n_train": int(t.n_train),
+        "fresh_batch": bool(OmegaConf.select(t, "fresh_batch", default=True)),
+        "optimizer": str(OmegaConf.select(t, "optimizer", default="adam")),
+        "weight_decay": float(OmegaConf.select(t, "weight_decay", default=0.0)),
+        "betas": list(OmegaConf.select(t, "betas", default=[0.9, 0.999])),
+        "momentum": float(OmegaConf.select(t, "momentum", default=0.9)),
+        "lr_schedule": str(OmegaConf.select(t, "lr_schedule", default="constant")),
+        "warmup_steps": int(OmegaConf.select(t, "warmup_steps", default=0)),
+        "lr_min_ratio": float(OmegaConf.select(t, "lr_min_ratio", default=0.0)),
+        "lr_gamma": float(OmegaConf.select(t, "lr_gamma", default=0.999)),
+        "batching": str(OmegaConf.select(t, "batching", default="random_replacement")),
+        "grad_clip_norm": float(OmegaConf.select(t, "grad_clip_norm", default=5.0)),
+    }
+
+
 def _fit_config(cfg: DictConfig, method_name: str) -> dict:
     t = cfg.training
     if method_name == "cd_sbi":
-        return {
-            "lr": float(t.lr),
-            "batch_size": int(t.batch_size),
-            "n_steps": int(t.n_steps),
-            "n_train": int(t.n_train),
-            "fresh_batch": bool(OmegaConf.select(t, "fresh_batch", default=True)),
-            "optimizer": str(OmegaConf.select(t, "optimizer", default="adam")),
-            "weight_decay": float(OmegaConf.select(t, "weight_decay", default=0.0)),
-            "betas": list(OmegaConf.select(t, "betas", default=[0.9, 0.999])),
-            "momentum": float(OmegaConf.select(t, "momentum", default=0.9)),
-            "lr_schedule": str(OmegaConf.select(t, "lr_schedule", default="constant")),
-            "warmup_steps": int(OmegaConf.select(t, "warmup_steps", default=0)),
-            "lr_min_ratio": float(OmegaConf.select(t, "lr_min_ratio", default=0.0)),
-            "lr_gamma": float(OmegaConf.select(t, "lr_gamma", default=0.999)),
-            "batching": str(OmegaConf.select(t, "batching", default="random_replacement")),
-            "grad_clip_norm": float(OmegaConf.select(t, "grad_clip_norm", default=5.0)),
-        }
+        return _recipe_dict(t)
     if method_name in ("npe", "nle", "nre"):
-        return {"n_train": int(t.n_train), "n_epochs": int(t.n_epochs)}
+        return _recipe_dict(t)
     if method_name in ("lf2i", "lf2i_bff"):
         return {
+            **_recipe_dict(t),
             "n_train_stat": int(t.n_train),
             "n_train_quantile": int(t.n_train) // 2,
             "n_epochs_stat": int(t.n_epochs),
