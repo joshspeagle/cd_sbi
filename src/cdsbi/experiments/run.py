@@ -45,6 +45,17 @@ def _build_flow(cfg: DictConfig, simulator) -> Any:
     method_flow_label = OmegaConf.select(cfg, "method.flow", default=None)
     hydra_flow_name = cfg.flow.name
 
+    # v3 flows (doubly_monotone, joint_umnn, joint_umnn_1d): when the experiment
+    # overrides /flow to one of these, respect it regardless of the method's
+    # default flow label. The flow YAMLs carry their own _target_ + hidden refs
+    # so the fast-path instantiation is sufficient.
+    v3_flow_names = {"doubly_monotone", "joint_umnn", "joint_umnn_1d"}
+    if hydra_flow_name in v3_flow_names:
+        flow_dict = OmegaConf.to_container(cfg.flow, resolve=True)
+        target = flow_dict.pop("_target_")
+        flow_dict.pop("name", None)
+        return _instantiate(target, **flow_dict)
+
     if method_flow_label is None or method_flow_label == hydra_flow_name:
         # Fast path: cfg.flow already holds the right config (cd_sbi case).
         flow_dict = OmegaConf.to_container(cfg.flow, resolve=True)
@@ -98,9 +109,28 @@ def _build_flow(cfg: DictConfig, simulator) -> Any:
             d=d,
             hidden=budget_hidden,
         )
+    if method_flow_label == "doubly_monotone":
+        return _instantiate(
+            "cdsbi.flows.doubly_monotone.DoublyMonotoneUMNN",
+            hidden=int(cfg.budget.doubly_monotone_hidden),
+            theta_ref=float(simulator.theta_range[0]),
+        )
+    if method_flow_label == "joint_umnn":
+        return _instantiate(
+            "cdsbi.flows.joint_umnn.JointUMNNFlow",
+            hidden=int(cfg.budget.doubly_monotone_hidden),
+            theta_ref=float(simulator.theta_range[0]),
+        )
+    if method_flow_label == "joint_umnn_1d":
+        return _instantiate(
+            "cdsbi.flows.joint_umnn_1d.JointUMNN1DFlow",
+            hidden=int(cfg.budget.doubly_monotone_hidden),
+            theta_ref=float(simulator.theta_range[0]),
+        )
     raise ValueError(
         f"Unknown flow label '{method_flow_label}' in method.flow. "
-        "Expected 'maf' or 'additive_umnn'."
+        "Expected one of: 'maf', 'additive_umnn', 'triangular_additive', "
+        "'doubly_monotone', 'joint_umnn', 'joint_umnn_1d'."
     )
 
 
@@ -115,14 +145,26 @@ def _build_method(cfg: DictConfig, simulator) -> Any:
     m = cfg.method
     runner_class = m.runner_class
     if m.name == "cd_sbi":
-        from cdsbi.conditioners.identity import Identity
         from cdsbi.losses.nfmle import NFMLELoss
         flow = _build_flow(cfg, simulator)
         allow_ablation = bool(OmegaConf.select(cfg, "method.allow_ablation", default=False))
+        # Conditioner dispatch: exp_rate uses MLPConditioner(frozen_sum) to reduce
+        # X ∈ R^{n_iid} to the sufficient statistic T = Σ X_i with the
+        # accompanying log|∂T/∂X|; all other targets pass X through unchanged.
+        if cfg.target.name == "exp_rate":
+            from cdsbi.conditioners.mlp import MLPConditioner
+            conditioner = MLPConditioner(
+                input_dim=int(simulator.d_x),
+                output_dim=1,
+                mode="frozen_sum",
+            )
+        else:
+            from cdsbi.conditioners.identity import Identity
+            conditioner = Identity()
         return _instantiate(
             runner_class,
             flow=flow,
-            conditioner=Identity(),
+            conditioner=conditioner,
             loss=NFMLELoss(),
             allow_ablation=allow_ablation,
             device=cfg.device,
@@ -299,7 +341,10 @@ def _write_index_row(cfg: DictConfig, rd: RunDir, trained, diag_results, config_
         "config_hash": config_hash,
         "experiment": cfg.experiment.name,
         "method": cfg.method.name,
-        "flow": OmegaConf.select(cfg, "method.flow", default=cfg.flow.name),
+        # Report the actual instantiated flow group (cfg.flow.name) — this
+        # reflects experiment-level /flow overrides (e.g. 8_3's triangular_additive,
+        # 8_4's doubly_monotone) rather than the method's default flow label.
+        "flow": cfg.flow.name,
         "target": cfg.target.name,
         "budget_name": cfg.budget.name,
         "target_params": int(cfg.budget.target_params),

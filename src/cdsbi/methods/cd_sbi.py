@@ -26,6 +26,10 @@ class CDSBIRunner(Runner):
         from cdsbi.reproducibility.seeding import seed_everything
         rngs = seed_everything(seed)
         self.flow.to(self.device)
+        # Put the flow into train mode so autograd-based Jacobian flows (e.g.
+        # JointUMNNFlow, JointUMNN1DFlow) can build the second-order graph via
+        # create_graph=self.training during training.
+        self.flow.train()
 
         # --- Optimizer factory ---
         opt_name = config.get("optimizer", "adam")
@@ -173,13 +177,32 @@ class CDSBIRunner(Runner):
             backbone = sum(b.n_params() for b in self.flow.a_blocks) + sum(
                 b.n_params() for b in self.flow.b_blocks
             )
-        else:
+            head = self.flow.n_params() - backbone  # the α scalars
+            return {
+                "backbone": backbone,
+                "head": head,
+                "calibration_stage": 0,
+                "total": self.flow.n_params(),
+                "kind": "flow",
+            }
+        if hasattr(self.flow, "a"):
             backbone = self.flow.a.n_params() + self.flow.b.n_params()
-        head = self.flow.n_params() - backbone  # the α scalars
+            head = self.flow.n_params() - backbone  # the α scalars
+            return {
+                "backbone": backbone,
+                "head": head,
+                "calibration_stage": 0,
+                "total": self.flow.n_params(),
+                "kind": "flow",
+            }
+        # v3 flows (DoublyMonotoneUMNN, JointUMNNFlow, JointUMNN1DFlow) and any
+        # future flow without an explicit backbone/head split: report the
+        # whole-flow parameter count.
+        flow_total = self.flow.n_params()
         return {
-            "backbone": backbone,
-            "head": head,
+            "backbone": flow_total,
+            "head": 0,
             "calibration_stage": 0,
-            "total": self.flow.n_params(),
-            "kind": "flow",
+            "total": flow_total,
+            "kind": "single_block",
         }
