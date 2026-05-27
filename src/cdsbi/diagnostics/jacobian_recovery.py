@@ -41,12 +41,7 @@ class JacobianRecovery(Diagnostic):
         self.max_residual_tol = max_residual_tol
 
     def __call__(self, trained, simulator, eval_data=None, x_per_theta=None) -> DiagnosticResult:
-        # Structural check: any procedure exposing a callable `pivot(θ, X)` is
-        # eligible (matches the duck-typed `_LinearPivotProcedure` test fixture
-        # and stays forward-compatible if a non-`PivotBasedProcedure` pivot
-        # class is added later).
-        procedure = trained.procedure
-        if not (isinstance(procedure, PivotBasedProcedure) or callable(getattr(procedure, "pivot", None))):
+        if not isinstance(trained.procedure, PivotBasedProcedure):
             return _skip(self.name, "not a pivot-based procedure")
         if not hasattr(simulator, "r_star_jacobian"):
             return _skip(self.name, "simulator has no r_star_jacobian (no truth target)")
