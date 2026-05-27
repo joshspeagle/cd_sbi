@@ -40,27 +40,32 @@ is the working one. The conda `pdflatex` at
 on this machine — its perl-based `mktexfmt` can't find
 `mktexlsr.pl` and bails before opening `pdflatex.fmt`.
 
-**Python codebase** (v0 + v0.1 + v0.2 landed; 70 fast tests passing):
+**Python codebase** (v0 + v1 + v2 landed; 175 fast tests + 3 intensive replication tests):
 
 ```bash
 pip install -e ".[dev]"               # install cdsbi package + dev deps
 pytest                                # fast tests (unit + integration + diagnostics)
 pytest -m intensive                   # opt-in full-budget replication (minutes)
 python -m cdsbi.experiments.run experiment=8_1_replication seed=0   # single run
-python -m cdsbi.experiments.run -m experiment=8_1_baseline_sweep    # full sweep
+python -m cdsbi.experiments.run -m experiment=8_3_baseline_sweep \
+    method=cd_sbi,npe,nle,nre,lf2i_bff \
+    budget=small,medium,large,xlarge \
+    seed=0,1,2,3,4 \
+    training.fresh_batch=false        # 100-run cross-method sweep (≈ 5 hr)
 ```
 
 ## Current state of the repo
 
-- `cd_sbi_v7.tex` — the manuscript (47 pages, post-round-3). Source of truth.
+- `cd_sbi_v7.tex` — the manuscript (50 pages; §8.1 / §8.2 / §8.3 carry
+  v0 / v1 / v2 sweep-averaged results). Source of truth.
 - `cd_sbi.bib` — 45 BibTeX entries; manuscript uses natbib.
 - `references/<bibkey>.md` — paper note per cited entry, built during round 2.
 - `reviews/round{1,2,3}/` — per-round critic reports and audit trail.
-- `docs/superpowers/specs/` — design specs (v0 infrastructure spec lives here).
-- `docs/superpowers/plans/` — implementation plans (v0 implementation plan lives here).
-- `src/cdsbi/` — Python package (v0 + v0.1 + v0.2 landed; 70 fast tests + 1 intensive replication test).
+- `docs/superpowers/specs/` — design specs.
+- `docs/superpowers/plans/` — implementation plans (v0, v1, v2 plans live here; v3 plan next).
+- `src/cdsbi/` — Python package (v0 + v1 + v2 landed). Six core layers + `confidence_set/`, `experiments/`, `analysis/`, `reproducibility/`.
 - `configs/` — Hydra config groups (target / flow / conditioner / method / training / budget / experiment).
-- `tests/` — `unit/`, `integration/`, `diagnostics/`, opt-in `intensive/`.
+- `tests/` — `unit/`, `integration/`, `diagnostics/`, opt-in `intensive/` (3 replication tests: §8.1, §8.2, §8.3).
 - `LICENSE`, `README.md`, `.gitignore` — repo setup.
 
 ## Specs and plans
@@ -75,9 +80,11 @@ The repo uses a brainstorm → spec → plan → implementation workflow
   TDD-style implementation plans, derived from an approved spec. Each step
   contains the actual code to write and the test that drives it.
 
-The current active artifacts:
-- `docs/superpowers/specs/2026-05-25-cd-sbi-experiment-infrastructure-design.md`
+Active artifacts:
+- `docs/superpowers/specs/2026-05-25-cd-sbi-experiment-infrastructure-design.md` (covers v0 → v8 roadmap)
 - `docs/superpowers/plans/2026-05-25-cd-sbi-v0-experiment-infrastructure.md`
+- `docs/superpowers/plans/2026-05-26-cd-sbi-v1-multivariate-iid.md`
+- `docs/superpowers/plans/2026-05-27-cd-sbi-v2-correlated-sigma.md`
 
 ## Manuscript status
 
@@ -155,54 +162,84 @@ per the round-3 fresh-reader verdicts.
   trailer. No `--no-verify`, no `--amend` on existing commits unless
   explicitly requested.
 
-## v0 codebase status
+## Codebase status (v0 + v1 + v2 done)
 
-The v0 experiment infrastructure (replicating manuscript §8.1 + matched-
-budget baselines against NPE / NLE / NRE / LF2I) is **implemented and
-test-passing**:
+All three phases are **implemented, test-passing, and reflected in the
+manuscript**. 175 fast tests pass in ~90s; 3 intensive replication tests
+clear their tolerance bands (§8.1 in ~5 min, §8.2 in ~16 min, §8.3 in
+~5 min wall on GPU). The cross-method sweep at each section runs 5
+methods × 4 budgets × 5 seeds = 100 runs.
 
-- Spec: `docs/superpowers/specs/2026-05-25-cd-sbi-experiment-infrastructure-design.md`
-- Plan: `docs/superpowers/plans/2026-05-25-cd-sbi-v0-experiment-infrastructure.md`
-- Package: `src/cdsbi/` — 6 core layers + `confidence_set/`,
-  `experiments/`, `analysis/`, `reproducibility/`.
-- 25 implementation commits + 3 cleanup commits (`.gitignore` dedupe,
-  seeding refactor, equal_tailed_1d rename) + 1 v0.1 cleanup commit
-  (alpha_b log-parameterization, budget-validation warning, dead imports
-  removed, LF2I/NRE n_params dynamism, NPE/NLE/NRE smoke tests exercise
-  procedure.confidence_set) + 1 v0.2 alignment commit (UMNN MLP
-  activation Tanh, integrand `+ 1e-3` floor, `b.bias_trainable=False`
-  in AdditiveFlow1D to break the redundant-bias degeneracy, fresh-batch-
-  per-step training).
-- 70 fast tests pass in ~30 s.
-- Single-seed §8.1 validation at medium budget now lands inside the
-  spec's tolerance bands (pivot_rmse=0.043, marginal_ks=0.012,
-  coverage_error_max=0.018 vs bands 0.05 / 0.023 / 0.02).
+**Headline empirical result across v0 → v1 → v2 (coverage_error_max,
+mean ± std; lower = better; noise floor ~0.02):**
 
-**Known caveats** (documented; not blockers for the §8.1 sweep):
-- v0.2 hard-coded the fresh-batch-per-step training regime. The
-  finite-sample regime (pre-sample N points, SGD with replacement) is
-  the real research scenario for expensive simulators and should
-  return as a configurable option in v0.3 — added to the experimental
-  matrix as its own axis. **Don't conflate "fresh-vs-finite-sample
-  training regime" with other architecture comparisons.**
-- YAML widths at most budgets are off target (validation warns but
-  doesn't raise). Paper-table consumers should check
-  `actual_params_total` / `budget_status` columns, not `target_params`.
-  The widths in `configs/budget/*.yaml` need re-tuning per method.
-- `model.pt` saves only `arch_metadata + final_loss`, not the actual
-  state_dict — no restart/resume in v0.
-- Coverage diagnostic hardcodes `X = θ + N(0, 1)` (LocationNormal1D-only);
-  v1+ simulators will need a `sample_x_given_theta` hook.
-- `JointMahalanobis` diagnostic and (R2) ablation tests deferred to v1
-  and v3 respectively, per spec.
+| Method | §8.1 (1D) | §8.2 (2D iid) | §8.3 (2D corr) |
+|---|---|---|---|
+| **CDSBI** | **0.025** | **0.025** | **0.025** ← at noise floor across all three |
+| NLE | 0.025 (tied) | 0.07–0.09 (3–4× floor) | 0.10–0.12 (4–5× floor) |
+| NPE | 0.06–0.07 | 0.05–0.10 | 0.05–0.09 |
+| LF2I-BFF | 0.06–0.07 | 0.11–0.12 | 0.11–0.14 |
+| NRE | 0.08–0.12 | 0.14–0.18 | 0.14–0.19 |
 
-**Scheduled v0.3 follow-ups** (before publishing §8.1 numbers):
-- Restore finite-sample training regime as a `training/`-config flag
-  (`fresh_batch: true | false`); add to the experimental matrix.
-- Retune `configs/budget/*.yaml` widths per method so the budget
-  validator reports `matched` at every (method, budget) combination.
+The CDSBI → NLE gap widens monotonically as the data distribution gets
+more non-trivial — theory predicted this; v0 → v2 confirmed it empirically.
 
-Next milestones per the spec's roadmap: v1 (§8.2 multivariate Σ=I),
-v2 (§8.3 correlated Σ), v3 (§8.4 exponential rate + (R2) ablation),
-then real-data targets (SBI benchmark suite, astronomy inference,
-image observations).
+**Per-phase summary:**
+
+- **v0 (§8.1).** UMNN, AdditiveFlow1D, MAFAdapter, 5 method runners
+  returning ConfidenceProcedure subtypes, 1D root-finder, 4 diagnostics,
+  Hydra/run-dir/seeding/device plumbing. Final v0 close-out moved the
+  default training recipe to `adamw_cosine_warmup` with
+  `fresh_batch=false` (finite-sample regime as the research-realistic
+  default).
+- **v1 (§8.2).** `TriangularAdditiveFlow`, multivariate `confidence_set`
+  via ray-bisection from a found center, `JointMahalanobis` diagnostic
+  (the inferentially-primary 2D check), per-coordinate PIT, `paper_table_8_2`.
+  In-execution fix-pack F1–F7 added cross-procedure caching (`_BatchCache`
+  on `id(x_obs_batch)`) and dispatcher-level X|θ_0 sharing; LF2I-BFF
+  quantile-head schedule retuned after the §8.1 sweep exposed a
+  U-shape budget-extreme artifact.
+- **v2 (§8.3).** `LocationGaussian2D_corr` simulator with closed-form
+  `r_star_jacobian()`; new `JacobianRecovery` diagnostic empirically
+  validates the Knothe–Rosenblatt uniqueness claim (Theorem A-d) —
+  trained `E[∂r/∂θ]` matches `L⁻¹` to ~3% max-element residual across
+  5 seeds. No new flow code; v1's TriangularAdditiveFlow covers the
+  correlated case unchanged. `paper_table_8_3` adds the
+  `jacobian_max_residual` aggregate column. Mid-execution perf fix
+  dropped `PosteriorBasedProcedure` default `n_samples` 10000 → 2000
+  (5× NPE wall speedup; coverage answer unchanged).
+
+**Known caveats (still open; revisit at the relevant milestone):**
+
+- **NPE d > 1 credible region uses empirical Mahalanobis**, not a
+  true KDE-based HPD. Analytic HPD for Gaussian posteriors (exact under
+  uniform priors, which is what §8.2/§8.3 have), approximation otherwise.
+  Footnoted in §8.2 and §8.3 manuscript tables. Revisit when a
+  non-Gaussian-posterior target lands (v4+).
+- **SetSize d > 1 uses set diameter as a width proxy**, not true
+  ellipsoid volume. Adequate for paper-table sanity at d = 2; would
+  need proper volume estimation at higher d or for inferential use.
+- **Coverage diagnostic uses a fixed 5-point θ_0 grid.** Works at
+  d ≤ 2; v6 high-d will need a θ_0-grid generation strategy.
+- **(R2) ablation tests deferred to v3** (§8.4 is where the §3.5
+  mechanism failure can be empirically demonstrated).
+
+**Manuscript-to-code mapping:**
+- §8.1 numbers: `outputs/8_1_baseline_sweep/2026-05-27_00-57-31/` +
+  `outputs/8_1_baseline_sweep/2026-05-27_07-50-18/` (LF2I-BFF retune).
+- §8.2 numbers: `outputs/8_2_baseline_sweep/2026-05-27_04-36-58/`
+  (non-NPE non-LF2I) + `2026-05-27_05-32-50/` (NPE re-run) +
+  `2026-05-27_08-00-09/` (LF2I-BFF retune).
+- §8.3 numbers: `outputs/8_3_baseline_sweep/2026-05-27_11-18-28/`
+  (non-NPE) + `2026-05-27_16-08-27/` (NPE re-run with `n_samples=2000`).
+
+**Next milestone:** v3 (§8.4 exponential rate + (R2) ablation). New
+code expected: `DoublyMonotoneUMNN`, `JointUMNNFlow`, `JointUMNN1DFlow`,
+`MLPConditioner` (X→T sufficient-statistic reduction with non-zero
+`log_det_jac_input_contribution`), and a new Ablation test category
+that empirically validates the §3.5 mechanism failure when (R2) is
+not enforced.
+
+After v3: v4 (SBI benchmark), v5 (§3.7 alt-loss), v6 (synthetic
+high-d), v7 (real-data astronomy), v8 (image/sequence). See spec §12
+for the full roadmap.
