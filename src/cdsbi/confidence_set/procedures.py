@@ -893,13 +893,17 @@ class PosteriorBasedProcedure:
         self, theta_0_value, x_obs_batch: torch.Tensor, alpha: float,
         n_samples: int = 10_000,
     ) -> torch.Tensor:
-        """Vectorized containment for the equal-tailed posterior interval.
+        """Vectorized containment test. 1D uses equal-tailed quantile; d > 1
+        uses empirical Mahalanobis credible region (matches the
+        confidence_set d > 1 path)."""
+        if self.d_theta == 1:
+            return self._contains_batch_1d(theta_0_value, x_obs_batch, alpha, n_samples)
+        return self._contains_batch_d_gt_1(theta_0_value, x_obs_batch, alpha, n_samples)
 
-        Requires sample_batched_fn; otherwise falls back to a per-X_obs loop
-        through the scalar sample_fn (no real speedup — Coverage would do
-        this anyway).
-        """
-        assert self.d_theta == 1, "contains_batch only supports d_theta=1 in v0"
+    def _contains_batch_1d(
+        self, theta_0_value, x_obs_batch: torch.Tensor, alpha: float, n_samples: int,
+    ) -> torch.Tensor:
+        """Existing v1 1D body — equal-tailed quantile of posterior samples."""
         B = x_obs_batch.shape[0]
         if self.sample_batched_fn is None:
             results = []
@@ -911,16 +915,55 @@ class PosteriorBasedProcedure:
         samples = self._sample_cache.get_or_compute(
             cache_key,
             lambda: self.sample_batched_fn(x_obs_batch, n_samples),
-        )  # (n, B, d_θ)
+        )
         if samples.ndim == 2:
-            # (n, B): treat as d_θ=1 with implicit last dim.
             samples = samples.unsqueeze(-1)
-        # Per-X_obs equal-tailed quantiles along the n axis.
         tail = (1.0 - alpha) / 2.0
-        lo = torch.quantile(samples, tail, dim=0).squeeze(-1)         # (B,)
-        hi = torch.quantile(samples, 1.0 - tail, dim=0).squeeze(-1)  # (B,)
+        lo = torch.quantile(samples, tail, dim=0).squeeze(-1)
+        hi = torch.quantile(samples, 1.0 - tail, dim=0).squeeze(-1)
         theta_0_t = torch.tensor(float(theta_0_value), device=lo.device, dtype=lo.dtype)
         return (lo <= theta_0_t) & (theta_0_t <= hi)
+
+    def _contains_batch_d_gt_1(
+        self, theta_0_value, x_obs_batch: torch.Tensor, alpha: float, n_samples: int,
+    ) -> torch.Tensor:
+        """Empirical Mahalanobis credible region per X_obs. Mirrors the
+        d > 1 confidence_set logic but only does the inside-check at θ_0,
+        not the full ellipsoid surface boundary."""
+        B = x_obs_batch.shape[0]
+        d = self.d_theta
+        cache_key = ("samples_d_gt_1", id(x_obs_batch), int(n_samples))
+
+        def _draw():
+            if self.sample_batched_fn is None:
+                return torch.stack([
+                    self.sample_fn(x_obs_batch[i : i + 1], n_samples).view(n_samples, d)
+                    for i in range(B)
+                ], dim=1)  # (n, B, d)
+            return self.sample_batched_fn(x_obs_batch, n_samples)
+
+        samples = self._sample_cache.get_or_compute(cache_key, _draw)  # (n, B, d)
+        # Per-X_obs (μ, Σ) — batched.
+        mu = samples.mean(dim=0)  # (B, d)
+        centered = samples - mu.unsqueeze(0)  # (n, B, d)
+        cov = torch.einsum("nbi,nbj->bij", centered, centered) / (samples.shape[0] - 1)
+        cov = cov + 1e-6 * torch.eye(d, dtype=cov.dtype, device=cov.device).unsqueeze(0)
+        L = torch.linalg.cholesky(cov)  # (B, d, d)
+        # Per-X_obs sample Mahalanobis² → α-quantile = threshold.
+        n_s = samples.shape[0]
+        z = torch.linalg.solve_triangular(
+            L.unsqueeze(0).expand(n_s, -1, -1, -1).reshape(-1, d, d),
+            centered.reshape(-1, d, 1),
+            upper=False,
+        ).reshape(n_s, B, d)
+        sq = z.pow(2).sum(dim=-1)  # (n, B)
+        thresh_per_row = torch.quantile(sq, alpha, dim=0)  # (B,)
+        # θ_0 Mahalanobis² per row.
+        theta_0_t = _theta_to_row_tensor(theta_0_value, mu.dtype, mu.device, d)  # (1, d)
+        theta_delta = (theta_0_t - mu).unsqueeze(-1)  # (B, d, 1)
+        z_theta = torch.linalg.solve_triangular(L, theta_delta, upper=False).squeeze(-1)  # (B, d)
+        theta_sq = z_theta.pow(2).sum(dim=-1)  # (B,)
+        return theta_sq <= thresh_per_row
 
     def confidence_set_batch(
         self, x_obs_batch: torch.Tensor, alpha: float, n_samples: int = 10_000,

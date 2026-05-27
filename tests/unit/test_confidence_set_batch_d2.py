@@ -98,6 +98,34 @@ def test_posterior_d2_batch_matches_analytic(seed):
     assert (radii.mean(dim=1) - raw_radius).abs().max().item() < 0.10
 
 
+def test_posterior_d2_contains_batch_matches_analytic(seed):
+    """For posterior = N(X_obs, σ² I), a point exactly at X_obs is always
+    inside; a point far away is always outside."""
+    sigma2 = 0.5
+
+    def sample_fn(x_obs, n):
+        center = x_obs.flatten()[:2]
+        return center + (sigma2 ** 0.5) * torch.randn(n, 2)
+
+    def sample_batched_fn(x_obs_batch, n):
+        return x_obs_batch.unsqueeze(0) + (sigma2 ** 0.5) * torch.randn(
+            n, x_obs_batch.shape[0], 2,
+        )
+
+    proc = PosteriorBasedProcedure(
+        sample_fn=sample_fn, d_theta=2, sample_batched_fn=sample_batched_fn,
+    )
+    x_batch = torch.tensor([[0.0, 0.0], [1.0, -1.0], [2.0, 2.0]])
+    # Probe at each X_obs's own center — all 3 should be inside.
+    for i, theta_at_x in enumerate(x_batch):
+        inside = proc.contains_batch(theta_at_x.tolist(), x_batch, alpha=0.9, n_samples=5000)
+        assert inside.dtype == torch.bool and inside.shape == (3,)
+        assert bool(inside[i]), f"θ at X_obs[{i}] should be inside its own posterior"
+    # Far-away θ → outside everywhere.
+    inside = proc.contains_batch([10.0, 10.0], x_batch, alpha=0.9, n_samples=5000)
+    assert not inside.any(), f"far-away θ should be outside; got {inside.tolist()}"
+
+
 def test_pivot_d2_batch_faster_than_slow_path():
     """Speedup vs. per-X_obs _confidence_set_d_gt_1 loop."""
     def pivot(th, x):
