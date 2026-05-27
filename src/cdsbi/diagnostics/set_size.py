@@ -41,8 +41,13 @@ class SetSize(Diagnostic):
         for theta_0 in self.theta_0_grid:
             x = simulator.sample_x_given_theta(theta_0, self.n_per_theta, rng)
             for alpha in self.alpha_grid:
-                if isinstance(trained.procedure, PivotBasedProcedure):
+                if (
+                    isinstance(trained.procedure, PivotBasedProcedure)
+                    and trained.procedure.d_theta == 1
+                ):
                     # Fast path: single vectorized 3-stage bisection across batch.
+                    # confidence_set_batch is d_theta=1 only in v0; d>1 falls
+                    # through to the slow loop with the diameter convention.
                     with torch.no_grad():
                         left, right = trained.procedure.confidence_set_batch(x, alpha)
                     widths = (right - left).detach().cpu().numpy()
@@ -57,11 +62,14 @@ class SetSize(Diagnostic):
                         elif br.numel() == 0:
                             widths[i] = 0.0  # empty set
                         else:
-                            # d > 1: max distance between any boundary point and
-                            # the boundary centroid — proxy for set diameter.
+                            # d > 1: 2 × max distance from boundary centroid —
+                            # diameter proxy that matches the d=1 (right - left)
+                            # convention. For a perfect ellipsoid, this equals
+                            # 2 × semi-major axis (so the column is dimensionally
+                            # consistent across d).
                             center = br.mean(dim=0)
                             dist = (br - center).pow(2).sum(dim=-1).sqrt()
-                            widths[i] = float(dist.max().item())
+                            widths[i] = float(2.0 * dist.max().item())
                 theta_vec = np.atleast_1d(np.asarray(theta_0, dtype=np.float64)).reshape(-1)
                 row = {f"theta_0_{k}": float(theta_vec[k]) for k in range(theta_vec.shape[0])}
                 row.update({

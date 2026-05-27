@@ -73,3 +73,32 @@ def test_set_size_catches_wide_set(seed):
     diag = SetSize(theta_0_grid=[0.0], alpha_grid=[0.9], n_per_theta=50)
     df = diag(trained, sim, eval_data=None).value
     assert abs(df["mean_width"].iloc[0] - 20.0) < 1e-6
+
+
+def test_set_size_2d_oracle_matches_analytic_width(seed):
+    """d=2 oracle pivot r* = θ - X gives a circular α-set of radius √χ²_{2,α}.
+    With the diameter convention (matches d=1's right-left), expect 2√χ²_{2,α}.
+    """
+    import numpy as np
+    from scipy.stats import chi2
+    from cdsbi.simulators.location_gauss_2d_iid import LocationGaussian2D_iid
+    from cdsbi.confidence_set.procedures import PivotBasedProcedure
+    from cdsbi.methods.base import TrainedModel
+    from cdsbi.reproducibility.seeding import seed_everything
+    seed_everything(seed)
+    sim = LocationGaussian2D_iid()
+    proc = PivotBasedProcedure(
+        pivot_fn=lambda th, x: th - x, d_theta=2, theta_range=(-7.0, 7.0),
+    )
+    trained = TrainedModel(
+        procedure=proc, state_dict={}, final_loss=0.0, n_steps=0, wall_clock_sec=0.0,
+    )
+    diag = SetSize(theta_0_grid=[[0.0, 0.0]], alpha_grid=[0.5, 0.9, 0.95], n_per_theta=100)
+    df = diag(trained, sim, eval_data=None).value
+    for _, row in df.iterrows():
+        analytic_diameter = 2.0 * np.sqrt(chi2.ppf(row["alpha"], df=2))
+        # Boundary samples + ray bisection tolerance combine to a few-% error.
+        assert abs(row["mean_width"] - analytic_diameter) / analytic_diameter < 0.10, (
+            f"alpha={row['alpha']}: mean_width={row['mean_width']:.4f}, "
+            f"analytic diameter={analytic_diameter:.4f}"
+        )
