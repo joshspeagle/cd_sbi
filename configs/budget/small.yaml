@@ -4,4 +4,4 @@ cdsbi_flow_hidden: 20  # AdditiveFlow1D backbone actual=964 (3.6%)
 cdsbi_flow_hidden_d2: 14  # TriangularAdditiveFlow(d=2) actual=1080 (8.0%)
 maf_hidden: 14         # MAFAdapter actual=1068 (6.8%) — shared by NPE/NLE/LF2I-stage-1
 classifier_hidden: 30  # NRE MLP actual=1051 (5.1%)
-quantile_hidden: 4     # LF2I MultiQuantileMLP head actual=48; LF2I total=1116 (11.6%, matched_with_warning — backbone alone exceeds target)
+quantile_hidden: 16    # LF2I MultiQuantileMLP head actual=372; LF2I total=1423 (+42%, matched_with_warning). Head sized to give the quantile-regression stage enough capacity (a 4-unit head was undersized; see §8.1 LF2I-BFF coverage U-shape).

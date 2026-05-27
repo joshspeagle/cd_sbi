@@ -4,4 +4,4 @@ cdsbi_flow_hidden: 222  # AdditiveFlow1D backbone actual=100348 (0.3%)
 cdsbi_flow_hidden_d2: 156  # TriangularAdditiveFlow(d=2) actual=100480 (0.5%)
 maf_hidden: 156         # MAFAdapter actual=100468 (0.5%) — shared by NPE/NLE/LF2I-stage-1
 classifier_hidden: 314  # NRE MLP actual=100167 (0.2%)
-quantile_hidden: 4      # LF2I MultiQuantileMLP head actual=48; LF2I total=100516 (0.5%, matched — backbone alone fills target)
+quantile_hidden: 32    # LF2I MultiQuantileMLP head actual=1252; LF2I total=101419 (+1.4%, matched). Previous value (4) was clamped to fit the cap with the backbone alone, which starved the quantile-regression stage and produced the §8.1 LF2I-BFF U-shape (small + xlarge both 3-5× worse than medium/large). Head now grows monotonically with budget.
