@@ -1,0 +1,5 @@
+name: loc_gauss_2d_corr
+_target_: cdsbi.simulators.location_gauss_2d_corr.LocationGaussian2D_corr
+theta_range: [-7.0, 7.0]
+# sigma defaults to [[1.0, 0.5], [0.5, 1.0]] per the manuscript; override here
+# only if you want to sweep correlation strength (e.g. for a §11 follow-up).
