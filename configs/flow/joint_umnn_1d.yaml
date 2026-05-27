@@ -1,0 +1,3 @@
+name: joint_umnn_1d
+_target_: cdsbi.flows.joint_umnn_1d.JointUMNN1DFlow
+hidden: ${budget.doubly_monotone_hidden}

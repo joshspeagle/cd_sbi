@@ -1,0 +1,19 @@
+# @package _global_
+defaults:
+  - override /target: exp_rate
+  - override /flow: doubly_monotone
+
+experiment:
+  name: 8_4_baseline_sweep
+  n_eval: 6000
+  eval_thetas_interior: [0.5, 1.0, 1.5, 2.0, 2.5]
+  eval_thetas_edge: []
+  alpha_grid: [0.5, 0.68, 0.9, 0.95]
+  n_eval_per_theta: 2000
+
+# Launch with explicit sweep dims:
+#   python -m cdsbi.experiments.run -m experiment=8_4_baseline_sweep \
+#     method=cd_sbi,npe,nle,nre,lf2i_bff \
+#     budget=small,medium,large,xlarge \
+#     seed=0,1,2,3,4 \
+#     training.fresh_batch=false

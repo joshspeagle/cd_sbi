@@ -1,0 +1,15 @@
+# @package _global_
+defaults:
+  - override /target: exp_rate
+  - override /flow: doubly_monotone
+  - override /method: cd_sbi
+  - override /budget: medium
+
+experiment:
+  name: 8_4_replication
+  n_eval: 6000
+  eval_thetas_interior: [0.5, 1.0, 1.5, 2.0, 2.5]
+  eval_thetas_edge: []
+  alpha_grid: [0.5, 0.68, 0.9, 0.95]
+  n_eval_per_theta: 2000
+  joint_mahalanobis_n_per_theta: 0  # 1D — JointMahalanobis no-ops

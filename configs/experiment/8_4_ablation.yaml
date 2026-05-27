@@ -1,0 +1,23 @@
+# @package _global_
+defaults:
+  - override /target: exp_rate
+  - override /flow: joint_umnn          # the R1-only ablation flow
+  - override /method: cd_sbi
+  - override /budget: medium
+
+# This experiment compares the architectural (doubly_monotone) case to the
+# autograd-Jacobian (joint_umnn) ablation. allow_ablation=true is required
+# so CDSBIRunner doesn't raise MonotonicityMismatchError on joint_umnn (R1
+# only). The ablation flow is intentionally below the (R2) contract — its
+# final loss should fall below the simulator's entropy_lower_bound, which
+# is the §3.5 mechanism failure.
+method:
+  allow_ablation: true
+
+experiment:
+  name: 8_4_ablation
+  n_eval: 6000
+  eval_thetas_interior: [0.5, 1.0, 1.5, 2.0, 2.5]
+  eval_thetas_edge: []
+  alpha_grid: [0.5, 0.68, 0.9, 0.95]
+  n_eval_per_theta: 2000
