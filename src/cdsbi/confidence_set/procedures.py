@@ -192,6 +192,109 @@ def _ray_sample_set_boundary(
     return _contains, boundary
 
 
+def _ray_sample_set_boundary_batched(
+    x_obs_batch: torch.Tensor,
+    inside_fn,
+    theta_range: tuple,
+    d: int,
+    n_rays: int = 200,
+    n_grid_per_dim: int = 9,
+    n_newton: int = 8,
+) -> tuple:
+    """Batched multivariate confidence-set boundary via line-sampling.
+
+    Args:
+        x_obs_batch: shape (B, d_x).
+        inside_fn: callable (theta_flat: (N, d), x_flat: (N, d_x)) -> (N,)
+            tensor. inside_fn(θ; X) ≤ 0 iff θ ∈ α-set. Helper passes flat
+            tensors of size (B,) (during center search) or (B*K,) (during
+            ray bisection) and expects flat outputs.
+        theta_range: (lo, hi) bounds of the prior box.
+        d: dimension of θ.
+        n_rays: K — number of random unit directions on S^{d-1} per X_obs.
+        n_grid_per_dim: coarse-grid resolution per coord for center seed.
+        n_newton: L-BFGS iterations for center refinement.
+
+    Returns:
+        centers: (B, d) tensor of per-X_obs argmin-of-inside_fn.
+        boundaries: (B, K, d) tensor of K boundary points per X_obs.
+        empty_mask: (B,) bool tensor — True where the set is empty (center
+            itself violates inside_fn ≤ 0).
+    """
+    dtype = x_obs_batch.dtype
+    device = x_obs_batch.device
+    lo, hi = theta_range
+    B = x_obs_batch.shape[0]
+
+    # 1) Coarse grid argmin per X_obs via one batched inside_fn eval.
+    axes = [torch.linspace(lo, hi, n_grid_per_dim, dtype=dtype, device=device)
+            for _ in range(d)]
+    mesh = torch.stack(torch.meshgrid(*axes, indexing="ij"), dim=-1).view(-1, d)  # (G, d)
+    G = mesh.shape[0]
+    theta_mesh_exp = mesh.unsqueeze(0).expand(B, -1, -1).reshape(-1, d)  # (B*G, d)
+    x_obs_exp = x_obs_batch.unsqueeze(1).expand(-1, G, -1).reshape(
+        -1, x_obs_batch.shape[-1]
+    )
+    with torch.no_grad():
+        vals = inside_fn(theta_mesh_exp, x_obs_exp).view(B, G)  # (B, G)
+    grid_argmin = vals.argmin(dim=1)  # (B,)
+    centers_init = mesh[grid_argmin]  # (B, d)
+
+    # 2) Joint L-BFGS center refinement across B rows (each row independent —
+    #    inside_fn(centers, x_obs_batch).sum() decomposes into a sum over rows).
+    centers = centers_init.clone().detach().requires_grad_(True)
+    opt = torch.optim.LBFGS([centers], lr=0.5, max_iter=n_newton)
+
+    def _closure():
+        opt.zero_grad()
+        v = inside_fn(centers, x_obs_batch).sum()
+        v.backward()
+        return v
+
+    try:
+        opt.step(_closure)
+    except RuntimeError:
+        # Non-differentiable inside_fn (e.g. constant critical_value MLP);
+        # the grid-init suffices.
+        pass
+    centers = centers.detach()
+
+    # 3) Empty-set mask: rows where the refined center still violates the set.
+    with torch.no_grad():
+        v_c = inside_fn(centers, x_obs_batch)  # (B,)
+    empty_mask = (v_c > 0)  # (B,)
+
+    # 4) Sample n_rays unit directions on S^{d-1}. Directions are shared
+    #    across X_obs (still uniform per row); could be batch-distinct but
+    #    sharing is simpler and equally well-distributed.
+    u = torch.randn(n_rays, d, dtype=dtype, device=device)
+    u = u / u.norm(dim=-1, keepdim=True).clamp_min(1e-12)  # (K, d)
+
+    # 5) Vectorized bisection along each (row, ray) pair.
+    t_lo = torch.zeros(B, n_rays, dtype=dtype, device=device)
+    t_hi = torch.full((B, n_rays), 2.0 * (hi - lo), dtype=dtype, device=device)
+    centers_exp = centers.unsqueeze(1)  # (B, 1, d)
+    u_exp = u.unsqueeze(0)  # (1, K, d)
+    x_obs_for_eval = x_obs_batch.unsqueeze(1).expand(-1, n_rays, -1).reshape(
+        -1, x_obs_batch.shape[-1]
+    )
+
+    for _ in range(40):
+        m = 0.5 * (t_lo + t_hi)  # (B, K)
+        theta_m = centers_exp + m.unsqueeze(-1) * u_exp  # (B, K, d)
+        theta_flat = theta_m.reshape(-1, d)  # (B*K, d)
+        v = inside_fn(theta_flat, x_obs_for_eval).view(B, n_rays)
+        if v.device != device:
+            v = v.to(device)
+        outside = v > 0
+        t_hi = torch.where(outside, m, t_hi)
+        t_lo = torch.where(outside, t_lo, m)
+    t = 0.5 * (t_lo + t_hi)  # (B, K)
+    boundaries = centers_exp + t.unsqueeze(-1) * u_exp  # (B, K, d)
+
+    return centers, boundaries, empty_mask
+
+
 @runtime_checkable
 class ConfidenceProcedure(Protocol):
     def confidence_set(self, x_obs: torch.Tensor, alpha: float) -> ConfidenceSet: ...
@@ -366,13 +469,25 @@ class PivotBasedProcedure:
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Vectorized chi-square inversion across a batch of X_obs.
 
-        Returns (left, right): each shape (B,). Only implemented for d_theta=1.
-        For each x_obs, the confidence interval is {θ : r(θ, x_obs)² ≤ chi²_{1, α}}.
+        For d_theta=1 returns (left, right) — each shape (B,) — i.e. the
+        endpoints of the interval {θ : r(θ, X_obs)² ≤ χ²_{1, α}}.
+
+        For d_theta > 1 returns (centers, boundaries) — shapes (B, d) and
+        (B, K, d) — sampled on the ellipsoid {θ : ‖r(θ, X_obs)‖² ≤ χ²_{d, α}}
+        via the batched ray-bisection helper.
+        """
+        if self.d_theta == 1:
+            return self._confidence_set_batch_1d(x_obs_batch, alpha)
+        return self._confidence_set_batch_d_gt_1(x_obs_batch, alpha)
+
+    def _confidence_set_batch_1d(
+        self, x_obs_batch: torch.Tensor, alpha: float
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """1D path: three vectorized bisections.
 
         Uses three fixed-iteration (40 iters) vectorized bisections in parallel
         across the batch. At 40 iters over a 40-wide default range, tol ≈ 3.6e-11.
         """
-        assert self.d_theta == 1, "confidence_set_batch only supports d_theta=1 in v0"
         thresh = float(chi2.ppf(alpha, df=1))
         B = x_obs_batch.shape[0]
         lo, hi = self.theta_range
@@ -440,6 +555,32 @@ class PivotBasedProcedure:
         right = 0.5 * (a + b)
 
         return left, right
+
+    def _confidence_set_batch_d_gt_1(
+        self, x_obs_batch: torch.Tensor, alpha: float
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """d > 1 path: batched ray-bisection of ‖r‖² − χ²_{d, α} = 0.
+
+        Returns (centers: (B, d), boundaries: (B, K, d)).
+        """
+        thresh = float(chi2.ppf(alpha, df=self.d_theta))
+        # Probe device — pivot_fn may live on CUDA while x_obs_batch is CPU.
+        probe = self.pivot_fn(
+            torch.zeros(1, self.d_theta, dtype=x_obs_batch.dtype, device=x_obs_batch.device),
+            x_obs_batch[:1],
+        )
+        device = probe.device
+        if x_obs_batch.device != device:
+            x_obs_batch = x_obs_batch.to(device)
+
+        def inside_fn(theta_flat, x_flat):
+            r = self.pivot_fn(theta_flat, x_flat)
+            return r.pow(2).sum(dim=-1) - thresh
+
+        centers, boundaries, _empty_mask = _ray_sample_set_boundary_batched(
+            x_obs_batch, inside_fn, self.theta_range, self.d_theta, n_rays=200,
+        )
+        return centers, boundaries
 
 
 class CriticalValueProcedure:
@@ -569,10 +710,18 @@ class CriticalValueProcedure:
     def confidence_set_batch(
         self, x_obs_batch: torch.Tensor, alpha: float, n_grid: int = 200,
     ) -> tuple:
-        """Vectorized 1D LF2I confidence-set boundaries across a batch of X_obs.
-        Returns (left, right), each shape (B,). 1D only in v1.
+        """Vectorized LF2I confidence-set boundaries across a batch of X_obs.
+
+        For d_theta=1 returns (left, right) — each (B,).
+        For d_theta > 1 returns (centers, boundaries) — (B, d), (B, K, d).
         """
-        assert self.d_theta == 1, "confidence_set_batch is 1D only in v1"
+        if self.d_theta == 1:
+            return self._confidence_set_batch_1d(x_obs_batch, alpha, n_grid=n_grid)
+        return self._confidence_set_batch_d_gt_1(x_obs_batch, alpha)
+
+    def _confidence_set_batch_1d(
+        self, x_obs_batch: torch.Tensor, alpha: float, n_grid: int = 200,
+    ) -> tuple:
         # Probe device once and cache (shared with contains_batch's probe).
         if self._probed_device is None:
             probe = self.test_stat_fn(
@@ -625,6 +774,38 @@ class CriticalValueProcedure:
         b = torch.full((B,), hi, dtype=x_obs_batch.dtype, device=device)
         right = _vectorized_bisect_1d(f_batch, a, b, f_sign_at_a=-1)
         return left, right
+
+    def _confidence_set_batch_d_gt_1(
+        self, x_obs_batch: torch.Tensor, alpha: float,
+    ) -> tuple:
+        """d > 1 path: batched ray-bisection of T(θ; X) − c_α(θ) = 0.
+
+        Returns (centers: (B, d), boundaries: (B, K, d)).
+        """
+        # Probe device.
+        if self._probed_device is None:
+            probe = self.test_stat_fn(
+                torch.zeros(1, self.d_theta, dtype=x_obs_batch.dtype, device=x_obs_batch.device),
+                x_obs_batch[:1],
+            )
+            self._probed_device = probe.device
+        device = self._probed_device
+        if x_obs_batch.device != device:
+            x_obs_batch = x_obs_batch.to(device)
+
+        def inside_fn(theta_flat, x_flat):
+            t = self.test_stat_fn(theta_flat, x_flat)
+            c = self.critical_value_fn(theta_flat, alpha)
+            if t.ndim > 1:
+                t = t.squeeze(-1)
+            if c.ndim > 1:
+                c = c.squeeze(-1)
+            return t - c
+
+        centers, boundaries, _empty_mask = _ray_sample_set_boundary_batched(
+            x_obs_batch, inside_fn, self.theta_range, self.d_theta, n_rays=200,
+        )
+        return centers, boundaries
 
 
 class PosteriorBasedProcedure:
@@ -744,12 +925,23 @@ class PosteriorBasedProcedure:
     def confidence_set_batch(
         self, x_obs_batch: torch.Tensor, alpha: float, n_samples: int = 10_000,
     ) -> tuple:
-        """Vectorized 1D equal-tailed posterior interval boundaries across a
-        batch of X_obs. Returns (left, right), each shape (B,). Uses
-        sample_batched_fn when available; falls back to a per-X_obs sample_fn
-        loop otherwise (no real speedup vs the slow path in that case).
+        """Vectorized posterior credible-set boundaries across a batch of X_obs.
+
+        For d_theta=1 returns (left, right) — each (B,) — equal-tailed.
+        For d_theta > 1 returns (centers, boundaries) — (B, d), (B, K, d) —
+        the per-X_obs empirical Mahalanobis ellipsoid surface.
+
+        Uses sample_batched_fn when available; falls back to a per-X_obs
+        sample_fn loop otherwise (no real speedup vs the slow path in that
+        case).
         """
-        assert self.d_theta == 1, "confidence_set_batch is 1D only in v1"
+        if self.d_theta == 1:
+            return self._confidence_set_batch_1d(x_obs_batch, alpha, n_samples=n_samples)
+        return self._confidence_set_batch_d_gt_1(x_obs_batch, alpha, n_samples=n_samples)
+
+    def _confidence_set_batch_1d(
+        self, x_obs_batch: torch.Tensor, alpha: float, n_samples: int = 10_000,
+    ) -> tuple:
         B = x_obs_batch.shape[0]
         tail = (1.0 - alpha) / 2.0
         if self.sample_batched_fn is None:
@@ -771,6 +963,62 @@ class PosteriorBasedProcedure:
         lo_q = torch.quantile(samples.squeeze(-1), tail, dim=0)
         hi_q = torch.quantile(samples.squeeze(-1), 1.0 - tail, dim=0)
         return lo_q, hi_q
+
+    def _confidence_set_batch_d_gt_1(
+        self, x_obs_batch: torch.Tensor, alpha: float, n_samples: int = 10_000,
+    ) -> tuple:
+        """d > 1 path: per-X_obs empirical Mahalanobis ellipsoid.
+
+        Mirrors _confidence_set_mahalanobis but vectorized across X_obs:
+        sample once (caching is α-invariant), compute per-row mean / Cov /
+        Cholesky / Mahalanobis quantile in one batched pass.
+
+        Returns (centers: (B, d) = per-row posterior mean, boundaries:
+        (B, K, d) = K points on each per-row ellipsoid surface).
+        """
+        cache_key = ("samples_d_gt_1", id(x_obs_batch), int(n_samples))
+        B = x_obs_batch.shape[0]
+        d = self.d_theta
+
+        def _draw():
+            if self.sample_batched_fn is None:
+                # Fallback: per-X_obs sample loop. Acceptable for d > 1.
+                return torch.stack([
+                    self.sample_fn(x_obs_batch[i : i + 1], n_samples).view(n_samples, d)
+                    for i in range(B)
+                ], dim=1)  # (n, B, d)
+            return self.sample_batched_fn(x_obs_batch, n_samples)  # (n, B, d)
+
+        samples = self._sample_cache.get_or_compute(cache_key, _draw)  # (n, B, d)
+        n = samples.shape[0]
+        device = samples.device
+        dtype = samples.dtype
+
+        # Per-X_obs (μ, Σ).
+        mu = samples.mean(dim=0)  # (B, d)
+        centered = samples - mu.unsqueeze(0)  # (n, B, d)
+        cov = torch.einsum("nbi,nbj->bij", centered, centered) / (n - 1)  # (B, d, d)
+        cov = cov + 1e-6 * torch.eye(d, dtype=dtype, device=device).unsqueeze(0)
+        L = torch.linalg.cholesky(cov)  # (B, d, d)
+
+        # Per-row whitened samples: z[i, b] = L_inv[b] @ centered[i, b].
+        # Use solve_triangular: solve L[b] z[i, b] = centered[i, b].
+        L_exp = L.unsqueeze(0).expand(n, -1, -1, -1).reshape(-1, d, d)
+        rhs = centered.reshape(-1, d, 1)
+        z = torch.linalg.solve_triangular(L_exp, rhs, upper=False).reshape(n, B, d)
+        sq = z.pow(2).sum(dim=-1)  # (n, B)
+        thresh_per_row = torch.quantile(sq, alpha, dim=0)  # (B,)
+        radius_per_row = thresh_per_row.sqrt()  # (B,)
+
+        # Boundary: K points on each per-row ellipsoid surface.
+        n_boundary = 200
+        u = torch.randn(n_boundary, d, dtype=dtype, device=device)
+        u = u / u.norm(dim=-1, keepdim=True).clamp_min(1e-12)  # (K, d)
+        # boundaries[b, k] = μ[b] + radius[b] * L[b] @ u[k]
+        Lu = torch.einsum("bij,kj->bki", L, u)  # (B, K, d)
+        boundaries = mu.unsqueeze(1) + radius_per_row.view(B, 1, 1) * Lu  # (B, K, d)
+        centers = mu  # (B, d)
+        return centers, boundaries
 
 
 class LikelihoodBasedProcedure:
@@ -911,10 +1159,18 @@ class LikelihoodBasedProcedure:
     def confidence_set_batch(
         self, x_obs_batch: torch.Tensor, alpha: float, n_grid: int = 200,
     ) -> tuple:
-        """Vectorized 1D Wilks-LR confidence interval boundaries across a batch
-        of X_obs. Returns (left, right), each shape (B,). 1D only in v1.
+        """Vectorized Wilks-LR confidence-set boundaries across a batch of X_obs.
+
+        For d_theta=1 returns (left, right), each shape (B,).
+        For d_theta > 1 returns (centers, boundaries) of shapes (B, d), (B, K, d).
         """
-        assert self.d_theta == 1, "confidence_set_batch is 1D only in v1"
+        if self.d_theta == 1:
+            return self._confidence_set_batch_1d(x_obs_batch, alpha, n_grid=n_grid)
+        return self._confidence_set_batch_d_gt_1(x_obs_batch, alpha)
+
+    def _confidence_set_batch_1d(
+        self, x_obs_batch: torch.Tensor, alpha: float, n_grid: int = 200,
+    ) -> tuple:
         thresh = float(chi2.ppf(alpha, df=1))
         # Probe device.
         probe = self.log_likelihood_fn(
@@ -961,6 +1217,63 @@ class LikelihoodBasedProcedure:
         b = torch.full((B,), hi, dtype=x_obs_batch.dtype, device=device)
         right = _vectorized_bisect_1d(f_batch, a, b, f_sign_at_a=-1)
         return left, right
+
+    def _confidence_set_batch_d_gt_1(
+        self, x_obs_batch: torch.Tensor, alpha: float,
+    ) -> tuple:
+        """d > 1 path: batched ray-bisection of 2(ll_max - ll(θ; X)) − χ² = 0.
+
+        Precomputes ll_max(X_obs) per row via a coarse θ-mesh (one batched
+        log_likelihood call). Returns (centers: (B, d), boundaries: (B, K, d)).
+        """
+        thresh = float(chi2.ppf(alpha, df=self.d_theta))
+        # Probe device.
+        probe = self.log_likelihood_fn(
+            torch.zeros(1, self.d_theta, dtype=x_obs_batch.dtype, device=x_obs_batch.device),
+            x_obs_batch[:1],
+        )
+        device = probe.device
+        if x_obs_batch.device != device:
+            x_obs_batch = x_obs_batch.to(device)
+        B = x_obs_batch.shape[0]
+        lo, hi = self.theta_range
+
+        # ll_max per X_obs via coarse mesh (matches the per-X_obs slow-path
+        # resolution at n_grid=25-per-dim).
+        n_grid = 25
+        axes = [torch.linspace(lo, hi, n_grid, device=device, dtype=x_obs_batch.dtype)
+                for _ in range(self.d_theta)]
+        mesh = torch.stack(torch.meshgrid(*axes, indexing="ij"), dim=-1).view(-1, self.d_theta)
+        G = mesh.shape[0]
+        theta_mesh_exp = mesh.unsqueeze(0).expand(B, -1, -1).reshape(-1, self.d_theta)
+        x_obs_exp = x_obs_batch.unsqueeze(1).expand(-1, G, -1).reshape(
+            -1, x_obs_batch.shape[-1]
+        )
+        with torch.no_grad():
+            ll_grid = self.log_likelihood_fn(theta_mesh_exp, x_obs_exp).view(B, G)
+            ll_max_per_row = ll_grid.max(dim=1).values  # (B,)
+
+        def inside_fn(theta_flat, x_flat):
+            # Helper calls inside_fn(centers, x_obs_batch) with shape (B, d)
+            # during center search, and (B*K, d) during ray bisection.
+            # Derive K from theta_flat.shape[0] // B to broadcast ll_max_per_row.
+            n = theta_flat.shape[0]
+            if n == B:
+                ll_max_expanded = ll_max_per_row
+            else:
+                k_eff = n // B
+                ll_max_expanded = (
+                    ll_max_per_row.unsqueeze(1).expand(-1, k_eff).reshape(-1)
+                )
+            ll = self.log_likelihood_fn(theta_flat, x_flat)
+            if ll.ndim > 1:
+                ll = ll.squeeze(-1)
+            return 2.0 * (ll_max_expanded - ll) - thresh
+
+        centers, boundaries, _empty_mask = _ray_sample_set_boundary_batched(
+            x_obs_batch, inside_fn, self.theta_range, self.d_theta, n_rays=200,
+        )
+        return centers, boundaries
 
 
 class RatioBasedProcedure:

@@ -10,12 +10,11 @@ For 1D, "size" is the width `right - left` of the confidence interval.
 Multivariate sizing (volume / area / boundary-sample dispersion) lands
 with v1+ flows.
 
-Fast path: any procedure that exposes `confidence_set_batch` (returning
-(left, right) tensors across an X_obs batch) takes the vectorized path;
-otherwise SetSize falls back to a per-X_obs `confidence_set` loop. As of
-v1 Task B6, all five procedure types implement `confidence_set_batch` for
-d_theta=1; multivariate fast paths are future work, and d>1 falls through
-to the slow loop with the diameter convention.
+Fast path: any procedure that exposes `confidence_set_batch` takes the
+vectorized path; otherwise SetSize falls back to a per-X_obs
+`confidence_set` loop. All five procedure types implement
+`confidence_set_batch` for both d_theta=1 (returning (left, right)) and
+d_theta > 1 (returning (centers, boundaries)).
 """
 from __future__ import annotations
 
@@ -50,17 +49,24 @@ class SetSize(Diagnostic):
             else:
                 x = simulator.sample_x_given_theta(theta_0, self.n_per_theta, rng)
             for alpha in self.alpha_grid:
-                has_fast = (
-                    hasattr(trained.procedure, "confidence_set_batch")
-                    and getattr(trained.procedure, "d_theta", 1) == 1
-                )
+                has_fast = hasattr(trained.procedure, "confidence_set_batch")
                 if has_fast:
                     # Fast path: single vectorized bisection across batch.
-                    # confidence_set_batch is d_theta=1 only in v1; d>1 falls
-                    # through to the slow loop with the diameter convention.
                     with torch.no_grad():
-                        left, right = trained.procedure.confidence_set_batch(x, alpha)
-                    widths = (right - left).detach().cpu().numpy()
+                        result = trained.procedure.confidence_set_batch(x, alpha)
+                    if getattr(trained.procedure, "d_theta", 1) == 1:
+                        left, right = result
+                        widths = (right - left).detach().cpu().numpy()
+                    else:
+                        centers, boundaries = result  # (B, d), (B, K, d)
+                        # Diameter convention (matches the d > 1 slow path):
+                        # 2 × max distance from boundary centroid per X_obs.
+                        centroid_per_row = boundaries.mean(dim=1)  # (B, d)
+                        dists = (
+                            (boundaries - centroid_per_row.unsqueeze(1))
+                            .pow(2).sum(dim=-1).sqrt()
+                        )  # (B, K)
+                        widths = (2.0 * dists.max(dim=1).values).detach().cpu().numpy()
                 else:
                     widths = np.empty(self.n_per_theta, dtype=np.float64)
                     for i in range(self.n_per_theta):
