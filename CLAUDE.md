@@ -30,8 +30,15 @@ scaling beyond the toy validation experiments currently in the draft.
 **Build the manuscript** (clean BibTeX cycle):
 
 ```bash
-pdflatex cd_sbi_v7 && bibtex cd_sbi_v7 && pdflatex cd_sbi_v7 && pdflatex cd_sbi_v7
+/usr/bin/pdflatex cd_sbi_v7 && /usr/bin/bibtex cd_sbi_v7 \
+  && /usr/bin/pdflatex cd_sbi_v7 && /usr/bin/pdflatex cd_sbi_v7
 ```
+
+Use the absolute path: the system TeX Live install at `/usr/bin/`
+is the working one. The conda `pdflatex` at
+`/home/joshspeagle/miniconda3/bin/pdflatex` (first on PATH) is broken
+on this machine — its perl-based `mktexfmt` can't find
+`mktexlsr.pl` and bails before opening `pdflatex.fmt`.
 
 **Python codebase** (v0 + v0.1 + v0.2 landed; 70 fast tests passing):
 
