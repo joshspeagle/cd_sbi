@@ -30,7 +30,7 @@ def _instantiate(target_path: str, **kwargs) -> Any:
     return getattr(module, cls_name)(**kwargs)
 
 
-def _build_flow(cfg: DictConfig) -> Any:
+def _build_flow(cfg: DictConfig, simulator) -> Any:
     """Instantiate the flow requested by cfg.method.flow, resolved against cfg.budget.
 
     cfg.flow is the Hydra group default (always additive_umnn from config.yaml's
@@ -48,6 +48,9 @@ def _build_flow(cfg: DictConfig) -> Any:
         flow_dict = OmegaConf.to_container(cfg.flow, resolve=True)
         target = flow_dict.pop("_target_")
         flow_dict.pop("name", None)
+        # Multivariate triangular flow needs d injected from the simulator.
+        if "triangular_additive.TriangularAdditiveFlow" in target:
+            flow_dict.setdefault("d", int(simulator.d_theta))
         return _instantiate(target, **flow_dict)
 
     # Slow path: method requests a different flow than the Hydra group default.
@@ -55,14 +58,29 @@ def _build_flow(cfg: DictConfig) -> Any:
     if method_flow_label == "maf":
         return _instantiate(
             "cdsbi.flows.maf_adapter.MAFAdapter",
-            features=1,
-            context_features=1,
+            features=int(simulator.d_theta),
+            context_features=int(simulator.d_x),
             hidden=int(cfg.budget.maf_hidden),
             num_layers=2,
         )
+        # TODO(v1+): for asymmetric d (d_x != d_theta), NLE wants features=d_x
+        # and context_features=d_theta. v1's loc_gauss_2d_iid is symmetric so
+        # this is correct; revisit when an asymmetric target lands.
     if method_flow_label == "additive_umnn":
+        if int(simulator.d_theta) == 1:
+            return _instantiate(
+                "cdsbi.flows.additive.AdditiveFlow1D",
+                hidden=int(cfg.budget.cdsbi_flow_hidden),
+            )
         return _instantiate(
-            "cdsbi.flows.additive.AdditiveFlow1D",
+            "cdsbi.flows.triangular_additive.TriangularAdditiveFlow",
+            d=int(simulator.d_theta),
+            hidden=int(cfg.budget.cdsbi_flow_hidden),
+        )
+    if method_flow_label == "triangular_additive":
+        return _instantiate(
+            "cdsbi.flows.triangular_additive.TriangularAdditiveFlow",
+            d=int(simulator.d_theta),
             hidden=int(cfg.budget.cdsbi_flow_hidden),
         )
     raise ValueError(
@@ -84,7 +102,7 @@ def _build_method(cfg: DictConfig, simulator) -> Any:
     if m.name == "cd_sbi":
         from cdsbi.conditioners.identity import Identity
         from cdsbi.losses.nfmle import NFMLELoss
-        flow = _build_flow(cfg)
+        flow = _build_flow(cfg, simulator)
         allow_ablation = bool(OmegaConf.select(cfg, "method.allow_ablation", default=False))
         return _instantiate(
             runner_class,
@@ -95,7 +113,7 @@ def _build_method(cfg: DictConfig, simulator) -> Any:
             device=cfg.device,
         )
     if m.name in ("npe", "nle"):
-        flow = _build_flow(cfg)
+        flow = _build_flow(cfg, simulator)
         return _instantiate(runner_class, flow=flow, device=cfg.device)
     if m.name == "nre":
         return _instantiate(
@@ -158,6 +176,7 @@ def _fit_config(cfg: DictConfig, method_name: str) -> dict:
 def _run_diagnostics(cfg: DictConfig, trained, simulator, eval_data, rd: RunDir):
     from cdsbi.diagnostics.conditional_pit import ConditionalPIT
     from cdsbi.diagnostics.coverage import Coverage
+    from cdsbi.diagnostics.joint_mahalanobis import JointMahalanobis
     from cdsbi.diagnostics.marginal_pit import MarginalPIT
     from cdsbi.diagnostics.pivot_rmse import PivotRMSE
     from cdsbi.diagnostics.set_size import SetSize
@@ -183,6 +202,12 @@ def _run_diagnostics(cfg: DictConfig, trained, simulator, eval_data, rd: RunDir)
             theta_0_grid=list(cfg.experiment.eval_thetas_interior),
             alpha_grid=list(cfg.experiment.alpha_grid),
             n_per_theta=set_size_n,
+        )),
+        ("joint_mahalanobis", JointMahalanobis(
+            theta_0_grid=list(cfg.experiment.eval_thetas_interior),
+            n_per_theta=int(OmegaConf.select(
+                cfg, "experiment.joint_mahalanobis_n_per_theta", default=2000,
+            )),
         )),
     ]
     diag_results = {}
