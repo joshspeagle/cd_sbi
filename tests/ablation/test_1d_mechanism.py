@@ -7,6 +7,14 @@ literal folding).
 """
 from __future__ import annotations
 
+# NOTE: torch.manual_seed(SEED) before flow construction is a workaround.
+# CDSBIRunner.fit(seed=...) calls seed_everything(seed) AFTER the flow
+# is constructed, so the pre-fit seed determines flow weights and the
+# fit-internal seed determines data sampling. This is functional today
+# but fragile: any future lazy-init parameter in the flow's first
+# forward pass would consume the fit-internal seed and break
+# reproducibility. The proper fix is a flow_init_seed parameter on
+# CDSBIRunner.fit() — deferred to v3.1+.
 import math
 
 import pytest
@@ -51,13 +59,17 @@ def test_1d_r1_only_flow_folds_in_x():
     }
     trained = runner.fit(simulator=sim, config=config, seed=0)
     # Check 1: loss below the entropy lower bound for N(θ, 1). The §3.5
-    # mechanism creates loss oscillations, so use the min over the
-    # last-100-step tail as the robust signature — captures whether
-    # the flow ever crossed the floor in the converged regime.
-    tail_min = float(min(trained.arch_metadata["loss_history_tail"]))
-    assert tail_min < H_floor - 0.02, (
-        f"tail_min={tail_min:.3f} (final={float(trained.final_loss):.3f}) did NOT fall below "
-        f"H_floor={H_floor:.3f}; 1D R2-ablation mechanism failed to reproduce"
+    # mechanism creates loss oscillations, so require ≥10 of the last-100
+    # tail steps to sit below the floor minus a margin — i.e. the flow
+    # spent substantial time in the folded regime, not just a single
+    # transient dip.
+    MARGIN = 0.02
+    tail = trained.arch_metadata["loss_history_tail"]
+    n_below = sum(1 for x in tail if x < H_floor - MARGIN)
+    assert n_below >= 10, (
+        f"only {n_below}/{len(tail)} tail steps below H_floor-{MARGIN}={H_floor - MARGIN:.3f}; "
+        f"1D R1-only direct-construction mechanism failed to reproduce "
+        f"(tail min={min(tail):.3f}, max={max(tail):.3f})"
     )
     # Check 2: the trained flow's ∂r/∂x is negative somewhere on the support
     # (this is the literal folding — non-monotone in X). Place test tensors
