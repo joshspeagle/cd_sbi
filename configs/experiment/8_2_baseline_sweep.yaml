@@ -1,0 +1,25 @@
+# @package _global_
+defaults:
+  - override /target: loc_gauss_2d_iid
+  - override /flow: triangular_additive
+
+experiment:
+  name: 8_2_baseline_sweep
+  n_eval: 5000
+  eval_thetas_interior:
+    - [-3.0, -3.0]
+    - [-3.0,  0.0]
+    - [ 0.0,  0.0]
+    - [ 3.0,  0.0]
+    - [ 3.0,  3.0]
+  eval_thetas_edge: []
+  alpha_grid: [0.5, 0.68, 0.9, 0.95]
+  n_eval_per_theta: 2000
+
+# Launch with explicit sweep dims per the v0 lesson — Hydra ignores
+# hydra.sweeper.params inside experiment group configs:
+#   python -m cdsbi.experiments.run -m experiment=8_2_baseline_sweep \
+#     method=cd_sbi,npe,nle,nre,lf2i_bff \
+#     budget=small,medium,large,xlarge \
+#     seed=0,1,2,3,4 \
+#     training.fresh_batch=false

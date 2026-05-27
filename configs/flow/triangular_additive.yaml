@@ -1,0 +1,4 @@
+name: triangular_additive
+_target_: cdsbi.flows.triangular_additive.TriangularAdditiveFlow
+hidden: ${budget.cdsbi_flow_hidden_d2}
+# d is injected by experiments.run._build_flow from simulator.d_theta.

@@ -1,0 +1,19 @@
+# @package _global_
+defaults:
+  - override /target: loc_gauss_2d_iid
+  - override /flow: triangular_additive
+  - override /method: cd_sbi
+  - override /budget: medium
+
+experiment:
+  name: 8_2_replication
+  n_eval: 5000
+  eval_thetas_interior:
+    - [-3.0, -3.0]
+    - [-3.0,  0.0]
+    - [ 0.0,  0.0]
+    - [ 3.0,  0.0]
+    - [ 3.0,  3.0]
+  eval_thetas_edge: []  # 2D edges are corners; deferred to v2 along with §8.3
+  alpha_grid: [0.5, 0.68, 0.9, 0.95]
+  n_eval_per_theta: 2000
