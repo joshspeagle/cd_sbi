@@ -35,7 +35,8 @@ class LocationGaussian2D_corr:
         # Cholesky factor; lower-triangular by convention.
         self._L = np.linalg.cholesky(sigma_np)
         self._L_inv = np.linalg.inv(self._L)
-        self._log_det_sigma = float(np.log(np.linalg.det(sigma_np)))
+        # log|Σ| = log|L L^T| = 2 * sum(log(diag(L))) — numerically stable for ill-conditioned Σ
+        self._log_det_sigma = 2.0 * float(np.sum(np.log(np.diagonal(self._L))))
 
     def sample(self, n: int, rng: np.random.Generator) -> Tuple[torch.Tensor, torch.Tensor]:
         a, b = self.theta_range
@@ -66,9 +67,11 @@ class LocationGaussian2D_corr:
         # (theta - x) is (n, d); (L_inv @ (theta-x)^T)^T == (theta-x) @ L_inv^T
         return (theta - x) @ L_inv.T
 
-    def r_star_jacobian(self) -> torch.Tensor:
+    def r_star_jacobian(self, dtype: torch.dtype | None = None) -> torch.Tensor:
         """Jacobian ∂r*/∂θ = L⁻¹ (constant across (θ, X) by the location-family structure)."""
-        return torch.from_numpy(self._L_inv).float()
+        if dtype is None:
+            dtype = torch.get_default_dtype()
+        return torch.from_numpy(self._L_inv).to(dtype=dtype)
 
     def log_prob(self, x: torch.Tensor, theta: torch.Tensor) -> torch.Tensor:
         # log p(X | θ) = -d/2 log(2π) - ½ log|Σ| - ½ (X-θ)^T Σ⁻¹ (X-θ)

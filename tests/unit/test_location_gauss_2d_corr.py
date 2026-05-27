@@ -53,6 +53,19 @@ def test_r_star_jacobian_is_L_inverse():
     np.testing.assert_allclose(J.numpy(), expected, atol=1e-6)
 
 
+def test_r_star_jacobian_honors_dtype():
+    import torch
+    from cdsbi.simulators.location_gauss_2d_corr import LocationGaussian2D_corr
+    sim = LocationGaussian2D_corr()
+    J_default = sim.r_star_jacobian()
+    assert J_default.dtype == torch.get_default_dtype()
+    J_double = sim.r_star_jacobian(dtype=torch.float64)
+    assert J_double.dtype == torch.float64
+    # Numeric values must match across dtypes.
+    import numpy as np
+    np.testing.assert_allclose(J_default.numpy(), J_double.numpy(), atol=1e-6)
+
+
 def test_log_prob_matches_independent_gaussian_formula(seed):
     from cdsbi.simulators.location_gauss_2d_corr import LocationGaussian2D_corr
     rng = np.random.default_rng(seed)
