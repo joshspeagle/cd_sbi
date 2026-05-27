@@ -25,6 +25,18 @@ class LocationNormal1D:
             torch.from_numpy(x_np).float(),
         )
 
+    def sample_x_given_theta(self, theta_0, n: int, rng: "np.random.Generator") -> torch.Tensor:
+        """Draw n samples of X conditional on θ = θ_0. Used by coverage / size diagnostics."""
+        # theta_0 may be a scalar float or a length-1 sequence — both map to a (1,) vector.
+        import numpy as np
+        theta_vec = np.atleast_1d(np.asarray(theta_0, dtype=np.float64))
+        assert theta_vec.shape == (self.d_theta,), (
+            f"theta_0 has shape {theta_vec.shape}, expected ({self.d_theta},)"
+        )
+        eps = rng.standard_normal(size=(n, self.d_x))
+        x_np = theta_vec[None, :] + eps  # broadcast (1, d_x) + (n, d_x) → (n, d_x)
+        return torch.from_numpy(x_np).float()
+
     def r_star(self, theta: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
         return theta - x
 

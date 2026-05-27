@@ -48,3 +48,26 @@ def test_log_prob_matches_normal():
     x = torch.tensor([[1.0]])
     expected = -0.5 * math.log(2 * math.pi) - 0.5
     assert abs(sim.log_prob(x, theta).item() - expected) < 1e-6
+
+
+def test_sample_x_given_theta_shape_and_distribution(seed):
+    import numpy as np
+    from cdsbi.simulators.location_normal_1d import LocationNormal1D
+    rng = np.random.default_rng(seed)
+    sim = LocationNormal1D()
+    x = sim.sample_x_given_theta(theta_0=2.5, n=5000, rng=rng)
+    assert x.shape == (5000, 1)
+    # X | θ=2.5 ~ N(2.5, 1)
+    assert abs(float(x.mean()) - 2.5) < 0.05
+    assert abs(float(x.std()) - 1.0) < 0.05
+
+
+def test_sample_x_given_theta_accepts_vector_theta(seed):
+    import numpy as np
+    from cdsbi.simulators.location_normal_1d import LocationNormal1D
+    rng = np.random.default_rng(seed)
+    sim = LocationNormal1D()
+    # In 1D, a "vector" θ_0 is a length-1 sequence — implementation must accept both.
+    x = sim.sample_x_given_theta(theta_0=[1.0], n=500, rng=rng)
+    assert x.shape == (500, 1)
+    assert abs(float(x.mean()) - 1.0) < 0.1
