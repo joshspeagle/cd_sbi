@@ -68,8 +68,22 @@ class LF2IBFFRunner(Runner):
         )
 
         # === Stage 2: build BFF test statistic ===
-        # Integration grid over the prior (uniform over [a, b] in our case).
-        theta_grid = torch.linspace(a, b, self.marginal_grid_n, device=self.device).view(-1, 1)
+        # Integration grid over the prior.
+        # 1D → equispaced linspace (deterministic, low variance);
+        # d > 1 → N uniform-prior Monte-Carlo samples (a product grid would
+        # be exponential in d). Uses rngs.eval but bumps its state once
+        # before drawing the grid so the calibration draw immediately
+        # after is deterministic per (seed) — see commit message for why.
+        d = int(simulator.d_theta)
+        if d == 1:
+            theta_grid = torch.linspace(
+                a, b, self.marginal_grid_n, device=self.device,
+            ).view(-1, 1)
+        else:
+            grid_np = rngs.eval.uniform(
+                a, b, size=(self.marginal_grid_n, d),
+            )
+            theta_grid = torch.from_numpy(grid_np).float().to(self.device)
         N_grid = theta_grid.shape[0]
         log_N = math.log(N_grid)
         device = self.device

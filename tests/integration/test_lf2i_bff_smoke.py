@@ -78,3 +78,42 @@ def test_lf2i_bff_test_stat_wilks_direction_at_oracle_classifier():
     assert t_right < t_wrong, (
         f"BFF direction wrong: T(0; X=0)={t_right:.3f}, T(5; X=0)={t_wrong:.3f}"
     )
+
+
+def test_lf2i_bff_smoke_d2(seed):
+    """BFF runs end-to-end on LocationGaussian2D_iid; produces a finite-size 2D set.
+
+    Only checks: training completes; procedure exposes test_statistic/critical_value;
+    `boundary_repr` for the multivariate confidence_set lands in v1 Task 13b — for
+    now we exercise contains_batch (which already handles d > 1 via ray-bisection
+    inside CriticalValueProcedure once Task 13b lands; for this task we only
+    verify the training pipeline survives).
+    """
+    from cdsbi.simulators.location_gauss_2d_iid import LocationGaussian2D_iid
+    seed_everything(seed)
+    sim = LocationGaussian2D_iid()
+    runner = LF2IBFFRunner(
+        classifier_hidden=16, classifier_depth=2,
+        quantile_hidden=8, quantile_depth=2,
+        marginal_grid_n=32,
+    )
+    trained = runner.fit(
+        simulator=sim,
+        config={
+            "lr": 1e-3, "batch_size": 32, "n_steps": 50,
+            "n_train_stat": 300, "n_train_quantile": 150,
+            "alpha_grid": [0.5, 0.9], "fresh_batch": False,
+        },
+        seed=seed,
+    )
+    assert trained.procedure is not None
+    assert trained.procedure.d_theta == 2
+    # Test statistic evaluated at a (B=4) × (d=2) batch returns shape (4,).
+    theta_q = torch.tensor([[0.0, 0.0], [1.0, 1.0], [-1.0, -1.0], [2.0, -2.0]])
+    x_obs = torch.tensor([[0.0, 0.0]])  # (1, d_x); broadcast in test_stat_fn
+    t_vals = trained.procedure.test_statistic(theta_q, x_obs)
+    assert t_vals.shape == (4,)
+    # Closer-to-X θ should give smaller T (BFF is Wilks-direction: large = bad fit).
+    assert float(t_vals[0]) < float(t_vals[3]), (
+        f"BFF at θ=(0,0) X=(0,0) ({t_vals[0]}) should be < at θ=(2,-2) ({t_vals[3]})"
+    )
