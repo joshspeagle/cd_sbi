@@ -2545,8 +2545,8 @@ NLE & \(0.025 \pm 0.005\) & \(0.026 \pm 0.004\) &
 \(0.030 \pm 0.016\) & \(0.028 \pm 0.009\) \\
 NPE & \(0.055 \pm 0.012\) & \(0.061 \pm 0.006\) &
 \(0.067 \pm 0.005\) & \(0.067 \pm 0.008\) \\
-LF2I-BFF & \(0.144 \pm 0.051\) & \(0.056 \pm 0.013\) &
-\(0.066 \pm 0.027\) & \(0.151 \pm 0.036\) \\
+LF2I-BFF & \(0.070 \pm 0.026\) & \(0.065 \pm 0.019\) &
+\(0.062 \pm 0.019\) & \(0.055 \pm 0.021\) \\
 NRE & \(0.098 \pm 0.043\) & \(0.116 \pm 0.060\) &
 \(0.080 \pm 0.040\) & \(0.098 \pm 0.046\) \\
 \end{longtable}
@@ -2558,16 +2558,15 @@ loss, and for the location-normal model with a uniform prior the
 Bayesian posterior coincides with the UMPU confidence distribution
 (Theorem A, \S\ref{sec:4}); the two trained densities are reading the
 same surface and should produce indistinguishable intervals here.
-\emph{(ii) The other three methods land above the floor.} NPE sits
-at roughly twice the floor and is constant in budget; NRE is three
-to five times the floor across budgets; LF2I-BFF is non-monotone,
-comparable to NPE at medium budget but degrading at small and xlarge
-budgets --- a signature of the separately trained quantile-regression
-calibration stage. The architectural account is in \S\ref{sec:10}:
-only CD-SBI bakes in pointwise frequentist coverage by construction;
-NPE and NLE target a Bayesian object (with no built-in coverage),
-NRE targets a likelihood ratio, and LF2I-BFF relies on a separately
-trained critical-value function whose error compounds with the
+\emph{(ii) The other three methods land above the floor.} NPE and
+LF2I-BFF both sit at roughly twice the floor and are nearly constant
+in budget (LF2I-BFF mildly improves from \(0.07\) at small to
+\(0.06\) at xlarge); NRE is three to five times the floor across
+budgets. The architectural account is in \S\ref{sec:10}: only CD-SBI
+bakes in pointwise frequentist coverage by construction; NPE and NLE
+target a Bayesian object (with no built-in coverage), NRE targets a
+likelihood ratio, and LF2I-BFF relies on a separately trained
+critical-value function whose error compounds with the
 test-statistic's.
 
 \textbf{Synthesis.} The 1D case is a sanity check that the
