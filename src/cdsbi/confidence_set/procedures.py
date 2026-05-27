@@ -69,6 +69,98 @@ def _vectorized_bisect_1d(
     return 0.5 * (a + b)
 
 
+def _ray_sample_set_boundary(
+    x_obs: torch.Tensor,
+    inside_fn,
+    theta_range: tuple,
+    d: int,
+    n_rays: int = 200,
+    n_grid_per_dim: int = 9,
+    n_newton: int = 8,
+) -> tuple:
+    """Multivariate confidence-set boundary via line-sampling.
+
+    Args:
+        x_obs: shape (1, d_x).
+        inside_fn: callable (theta: (B, d), x_obs: (B, d_x)) -> (B,) tensor.
+            inside_fn(θ; X) ≤ 0 iff θ ∈ α-set.
+        theta_range: (lo, hi) bounds of the prior box.
+        d: dimension of θ.
+        n_rays: number of random unit directions on S^{d-1} to sample.
+        n_grid_per_dim: coarse-grid resolution per coord for center seed.
+        n_newton: L-BFGS iterations for center refinement.
+
+    Returns (contains_fn, boundary_repr): caller wraps in a ConfidenceSet with
+    the appropriate α. boundary_repr has shape (n_rays, d), or (0, d) when the
+    set is empty (center itself violates inside_fn ≤ 0).
+
+    Assumes the α-set is radially convex around the center — same precondition
+    as PivotBasedProcedure._confidence_set_ray_sampled.
+    """
+    dtype = x_obs.dtype
+    device = x_obs.device
+    lo, hi = theta_range
+
+    # 1) Coarse grid argmin of inside_fn.
+    axes = [torch.linspace(lo, hi, n_grid_per_dim, dtype=dtype, device=device)
+            for _ in range(d)]
+    mesh = torch.stack(torch.meshgrid(*axes, indexing="ij"), dim=-1).view(-1, d)
+    with torch.no_grad():
+        x_batch = x_obs.expand(mesh.shape[0], -1)
+        vals = inside_fn(mesh, x_batch)
+        best = int(torch.argmin(vals).item())
+    center = mesh[best].clone().detach().requires_grad_(True)
+
+    # 2) L-BFGS refinement.
+    opt = torch.optim.LBFGS([center], lr=0.5, max_iter=n_newton)
+
+    def _closure():
+        opt.zero_grad()
+        loss = inside_fn(center.unsqueeze(0), x_obs).sum()
+        loss.backward()
+        return loss
+
+    try:
+        opt.step(_closure)
+    except RuntimeError:
+        # inside_fn may not be differentiable w.r.t. θ (e.g. critical-value
+        # MLP returns a constant); fall back to the grid argmin.
+        pass
+    center = center.detach()
+
+    # 3) Empty-set short-circuit.
+    with torch.no_grad():
+        v_c = float(inside_fn(center.unsqueeze(0), x_obs).item())
+    if v_c > 0:
+        empty_boundary = torch.empty((0, d), dtype=dtype, device=device)
+        return (lambda _theta_val: False), empty_boundary
+
+    # 4) Sample n_rays unit directions and bisect along each.
+    u = torch.randn(n_rays, d, dtype=dtype, device=device)
+    u = u / u.norm(dim=-1, keepdim=True).clamp_min(1e-12)
+    t_lo = torch.zeros(n_rays, dtype=dtype, device=device)
+    t_hi = torch.full((n_rays,), 2.0 * (hi - lo), dtype=dtype, device=device)
+    x_batch = x_obs.expand(n_rays, -1)
+    for _ in range(40):
+        m = 0.5 * (t_lo + t_hi)
+        theta_m = center.unsqueeze(0) + m.unsqueeze(-1) * u
+        v = inside_fn(theta_m, x_batch)
+        if v.device != device:
+            v = v.to(device)
+        outside = v > 0
+        t_hi = torch.where(outside, m, t_hi)
+        t_lo = torch.where(outside, t_lo, m)
+    t = 0.5 * (t_lo + t_hi)
+    boundary = center.unsqueeze(0) + t.unsqueeze(-1) * u
+
+    def _contains(theta_val) -> bool:
+        theta_t = _theta_to_row_tensor(theta_val, dtype, device, d)
+        v = inside_fn(theta_t, x_obs)
+        return bool(float(v.item()) <= 0)
+
+    return _contains, boundary
+
+
 @runtime_checkable
 class ConfidenceProcedure(Protocol):
     def confidence_set(self, x_obs: torch.Tensor, alpha: float) -> ConfidenceSet: ...
@@ -377,8 +469,11 @@ class CriticalValueProcedure:
         return t_obs <= c_scalar
 
     def confidence_set(self, x_obs: torch.Tensor, alpha: float) -> ConfidenceSet:
-        assert self.d_theta == 1
+        if self.d_theta == 1:
+            return self._confidence_set_1d(x_obs, alpha)
+        return self._confidence_set_d_gt_1(x_obs, alpha)
 
+    def _confidence_set_1d(self, x_obs: torch.Tensor, alpha: float) -> ConfidenceSet:
         def f(theta_val: float) -> float:
             theta = torch.tensor([[theta_val]], dtype=x_obs.dtype, device=x_obs.device)
             t = self.test_stat_fn(theta, x_obs).item()
@@ -406,6 +501,21 @@ class CriticalValueProcedure:
         return ConfidenceSet(
             contains=contains, boundary_repr=torch.tensor([left, right]), alpha=alpha
         )
+
+    def _confidence_set_d_gt_1(self, x_obs: torch.Tensor, alpha: float) -> ConfidenceSet:
+        def inside_fn(theta, x):
+            t = self.test_stat_fn(theta, x)
+            c = self.critical_value_fn(theta, alpha)
+            if t.ndim > 1:
+                t = t.squeeze(-1)
+            if c.ndim > 1:
+                c = c.squeeze(-1)
+            return t - c
+
+        contains_fn, boundary = _ray_sample_set_boundary(
+            x_obs, inside_fn, self.theta_range, self.d_theta, n_rays=200,
+        )
+        return ConfidenceSet(contains=contains_fn, boundary_repr=boundary, alpha=alpha)
 
     def confidence_set_batch(
         self, x_obs_batch: torch.Tensor, alpha: float, n_grid: int = 200,
@@ -606,7 +716,11 @@ class LikelihoodBasedProcedure:
         return 2.0 * (ll_max - ll_at_0) <= thresh
 
     def confidence_set(self, x_obs: torch.Tensor, alpha: float) -> ConfidenceSet:
-        assert self.d_theta == 1
+        if self.d_theta == 1:
+            return self._confidence_set_1d(x_obs, alpha)
+        return self._confidence_set_d_gt_1(x_obs, alpha)
+
+    def _confidence_set_1d(self, x_obs: torch.Tensor, alpha: float) -> ConfidenceSet:
         thresh = float(chi2.ppf(alpha, df=1))
 
         lo, hi = self.theta_range
@@ -640,6 +754,32 @@ class LikelihoodBasedProcedure:
         return ConfidenceSet(
             contains=contains, boundary_repr=torch.tensor([left, right]), alpha=alpha
         )
+
+    def _confidence_set_d_gt_1(self, x_obs: torch.Tensor, alpha: float) -> ConfidenceSet:
+        thresh = float(chi2.ppf(alpha, df=self.d_theta))
+        lo, hi = self.theta_range
+        dtype = x_obs.dtype
+        device = x_obs.device
+        # Precompute ll_max(X) via the same coarse θ-grid the ray helper uses
+        # (cheap, and stays consistent with what _ray_sample_set_boundary will
+        # refine via L-BFGS).
+        n_grid = 25  # coarse but enough for ll_max approx in d=2-3
+        axes = [torch.linspace(lo, hi, n_grid, dtype=dtype, device=device)
+                for _ in range(self.d_theta)]
+        mesh = torch.stack(torch.meshgrid(*axes, indexing="ij"), dim=-1).view(-1, self.d_theta)
+        with torch.no_grad():
+            x_batch_for_ll_max = x_obs.expand(mesh.shape[0], -1)
+            ll_grid = self.log_likelihood_fn(mesh, x_batch_for_ll_max)
+            ll_max = float(ll_grid.max().item())
+
+        def inside_fn(theta, x):
+            ll = self.log_likelihood_fn(theta, x)
+            return 2.0 * (ll_max - ll) - thresh
+
+        contains_fn, boundary = _ray_sample_set_boundary(
+            x_obs, inside_fn, self.theta_range, self.d_theta, n_rays=200,
+        )
+        return ConfidenceSet(contains=contains_fn, boundary_repr=boundary, alpha=alpha)
 
     def confidence_set_batch(
         self, x_obs_batch: torch.Tensor, alpha: float, n_grid: int = 200,
