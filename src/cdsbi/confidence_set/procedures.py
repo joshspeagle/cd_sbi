@@ -18,6 +18,20 @@ from cdsbi.confidence_set.datatypes import ConfidenceSet
 from cdsbi.confidence_set.root_find import bisect_1d
 
 
+def _theta_to_row_tensor(theta_value, dtype, device, d_theta: int) -> torch.Tensor:
+    """Normalise a scalar / sequence / tensor θ_0 into a (1, d_theta) row.
+
+    Handles Python float / int, numpy scalar / 0-d tensor (np.ndim == 0),
+    Python list / tuple, 1-d ndarray, 1-d torch.Tensor.
+    """
+    import numpy as np
+    arr = np.atleast_1d(np.asarray(theta_value, dtype=np.float64)).reshape(-1)
+    assert arr.shape == (d_theta,), (
+        f"theta_0 has shape {arr.shape}, expected ({d_theta},)"
+    )
+    return torch.from_numpy(arr).to(dtype=dtype, device=device).view(1, d_theta)
+
+
 @runtime_checkable
 class ConfidenceProcedure(Protocol):
     def confidence_set(self, x_obs: torch.Tensor, alpha: float) -> ConfidenceSet: ...
@@ -35,35 +49,134 @@ class PivotBasedProcedure:
         return self.pivot_fn(theta, x)
 
     def confidence_set(self, x_obs: torch.Tensor, alpha: float) -> ConfidenceSet:
-        assert self.d_theta == 1, "Multivariate confidence_set lands in v1+."
-        thresh = float(chi2.ppf(alpha, df=1))
+        thresh = float(chi2.ppf(alpha, df=self.d_theta))
+        if self.d_theta == 1:
+            return self._confidence_set_1d(x_obs, alpha, thresh)
+        return self._confidence_set_ray_sampled(x_obs, alpha, thresh, n_rays=200)
 
+    def _confidence_set_1d(self, x_obs, alpha, thresh):
+        # Existing v0 1D bisection body — chi-square inversion via
+        # 1D bisection of f(θ) = r(θ)² − thresh on either side of the
+        # center where r=0.
         def f(theta_val: float) -> float:
             theta = torch.tensor([[theta_val]], dtype=x_obs.dtype, device=x_obs.device)
             r = self.pivot_fn(theta, x_obs)
             return (r.pow(2).sum().item() - thresh)
 
-        # Pivot is monotone in θ at fixed X_obs; r² is U-shaped with min where r=0.
-        # Locate the minimum (where r ≈ 0) by bisecting r itself.
         def r_only(theta_val: float) -> float:
             theta = torch.tensor([[theta_val]], dtype=x_obs.dtype, device=x_obs.device)
             return self.pivot_fn(theta, x_obs).item()
 
         lo, hi = self.theta_range
         center = bisect_1d(r_only, lo, hi, tol=1e-4)
-        # Now find left and right zeros of f(θ) = r(θ)² − thresh
-        # On each side of the center, r is monotone, so f has a single zero
         left = bisect_1d(f, lo, center, tol=1e-4)
         right = bisect_1d(f, center, hi, tol=1e-4)
 
-        def contains(theta_val: float) -> bool:
-            return left <= theta_val <= right
+        def contains(theta_val) -> bool:
+            v = float(theta_val) if not hasattr(theta_val, "__len__") else float(theta_val[0])
+            return left <= v <= right
 
         return ConfidenceSet(
-            contains=contains,
-            boundary_repr=torch.tensor([left, right]),
-            alpha=alpha,
+            contains=contains, boundary_repr=torch.tensor([left, right]), alpha=alpha,
         )
+
+    def _find_center(self, x_obs, n_grid_per_dim: int = 9, n_newton: int = 8):
+        """Find a θ_center inside the α-set with ||r||² near 0 (or its minimum).
+
+        For an oracle location-form pivot (r = θ - X), the min is at θ = X_obs.
+        For a trained flow, r(X_obs; X_obs) is generally non-zero, so we:
+          (1) evaluate ||r(θ; X_obs)||² on a coarse d-dim grid over theta_range
+              (n_grid_per_dim^d points; cheap in d=2-3),
+          (2) pick the argmin as a starting point,
+          (3) refine by a few L-BFGS steps.
+        Returns a (d,) tensor.
+        """
+        dtype = x_obs.dtype
+        device = x_obs.device
+        d = self.d_theta
+        lo, hi = self.theta_range
+        # Coarse grid argmin
+        axes = [torch.linspace(lo, hi, n_grid_per_dim, dtype=dtype, device=device)
+                for _ in range(d)]
+        mesh = torch.stack(torch.meshgrid(*axes, indexing="ij"), dim=-1).view(-1, d)
+        with torch.no_grad():
+            x_batch = x_obs.expand(mesh.shape[0], -1)
+            r = self.pivot_fn(mesh, x_batch)
+            sq = r.pow(2).sum(dim=-1)
+            best = int(torch.argmin(sq).item())
+        center = mesh[best].clone().detach().requires_grad_(True)
+        opt = torch.optim.LBFGS([center], lr=0.5, max_iter=n_newton)
+
+        def _closure():
+            opt.zero_grad()
+            r = self.pivot_fn(center.unsqueeze(0), x_obs)
+            loss = r.pow(2).sum()
+            loss.backward()
+            return loss
+
+        opt.step(_closure)
+        return center.detach()
+
+    def _confidence_set_ray_sampled(self, x_obs, alpha, thresh, n_rays: int):
+        """Multivariate boundary via line-sampling.
+
+        Finds a center via _find_center (argmin of ||r||²), then for each of
+        `n_rays` random unit directions u_i ∈ S^{d-1} bisects along the ray
+        to find t_i where ||r(center + t · u_i; X)||² = thresh.
+
+        Note: this assumes f(t) = ||r(center + t·u; X)||² − thresh is monotone
+        in t along each ray near the boundary, i.e. the α-set is radially
+        convex around the center. True for all ellipsoids and well-behaved
+        pivots; pathological non-star-shaped sets would need a different
+        boundary representation.
+        """
+        dtype = x_obs.dtype
+        device = x_obs.device
+        d = self.d_theta
+        center = self._find_center(x_obs)  # (d,)
+
+        # If center is itself outside the α-set, signal an empty set.
+        with torch.no_grad():
+            r_c = self.pivot_fn(center.unsqueeze(0), x_obs)
+            sq_c = float(r_c.pow(2).sum().item())
+        if sq_c > thresh:
+            empty_boundary = torch.empty((0, d), dtype=dtype, device=device)
+
+            def _contains_empty(theta_val) -> bool:
+                return False
+            return ConfidenceSet(
+                contains=_contains_empty, boundary_repr=empty_boundary, alpha=alpha,
+            )
+
+        # Sample n_rays unit directions uniformly on S^{d-1}.
+        u = torch.randn(n_rays, d, dtype=dtype, device=device)
+        u = u / u.norm(dim=-1, keepdim=True).clamp_min(1e-12)
+
+        # 1D bisection along each ray. f(t=0) < 0 (center is inside),
+        # f(t=t_max) > 0 (far enough is outside).
+        lo, hi = self.theta_range
+        t_lo = torch.zeros(n_rays, dtype=dtype, device=device)
+        t_hi = torch.full((n_rays,), 2.0 * (hi - lo), dtype=dtype, device=device)
+        x_batch = x_obs.expand(n_rays, -1)
+        for _ in range(40):
+            m = 0.5 * (t_lo + t_hi)
+            theta_m = center.unsqueeze(0) + m.unsqueeze(-1) * u
+            r = self.pivot_fn(theta_m, x_batch)
+            f = r.pow(2).sum(dim=-1) - thresh
+            outside = f > 0
+            t_hi = torch.where(outside, m, t_hi)
+            t_lo = torch.where(outside, t_lo, m)
+        t = 0.5 * (t_lo + t_hi)
+        boundary = center.unsqueeze(0) + t.unsqueeze(-1) * u
+
+        def contains(theta_val) -> bool:
+            import numpy as np
+            arr = np.atleast_1d(np.asarray(theta_val, dtype=np.float64)).reshape(-1)
+            theta_t = torch.from_numpy(arr).to(dtype=dtype, device=device).view(1, d)
+            r = self.pivot_fn(theta_t, x_obs)
+            return bool((r.pow(2).sum().item() <= thresh))
+
+        return ConfidenceSet(contains=contains, boundary_repr=boundary, alpha=alpha)
 
     def contains_batch(
         self, theta_0_value, x_obs_batch: torch.Tensor, alpha: float
@@ -76,10 +189,9 @@ class PivotBasedProcedure:
         """
         thresh = float(chi2.ppf(alpha, df=self.d_theta))
         B = x_obs_batch.shape[0]
-        theta_t = torch.full(
-            (B, self.d_theta), float(theta_0_value),
-            dtype=x_obs_batch.dtype, device=x_obs_batch.device,
-        )
+        theta_t = _theta_to_row_tensor(
+            theta_0_value, x_obs_batch.dtype, x_obs_batch.device, self.d_theta,
+        ).expand(B, -1)
         r = self.pivot_fn(theta_t, x_obs_batch)  # (B, d_theta)
         r_sq = r.pow(2).sum(dim=-1)               # (B,)
         return r_sq <= thresh

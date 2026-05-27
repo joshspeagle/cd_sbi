@@ -12,8 +12,9 @@ class ConfidenceSet:
     """Confidence set at a single X_obs and confidence level α.
 
     `contains(theta_value)` → bool; `boundary_repr` is shape (2,) in 1D
-    (lower, upper) and a set of boundary samples in higher d (added v1+).
+    (lower, upper) and shape (K, d) in d > 1 — K boundary points sampled
+    via ray-bisection from the set's center.
     """
-    contains: Callable[[float], bool]
+    contains: Callable
     boundary_repr: torch.Tensor
     alpha: float
