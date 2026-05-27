@@ -28,5 +28,6 @@ where = ["src"]
 testpaths = ["tests"]
 markers = [
     "intensive: full-budget replication tests; opt-in via `pytest -m intensive`",
+    "ablation: (R2) ablation tests; opt-in via `pytest -m ablation`",
 ]
-addopts = "-m 'not intensive'"
+addopts = "-m 'not intensive and not ablation'"
