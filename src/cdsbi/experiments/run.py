@@ -229,7 +229,11 @@ def _write_index_row(cfg: DictConfig, rd: RunDir, trained, diag_results, config_
         "final_loss": float(trained.final_loss),
         "wall_clock_sec": float(trained.wall_clock_sec),
         "coverage_error_max": coverage_error_max,
-        "marginal_ks": float(marg.value) if marg and isinstance(marg.value, float) else None,
+        "marginal_ks": (
+            float(marg.value) if marg and isinstance(marg.value, float)
+            else float(marg.value["ks"].mean()) if marg and hasattr(marg.value, "columns") and "ks" in marg.value.columns
+            else None
+        ),
         "pivot_rmse": float(pivot.value) if pivot and isinstance(pivot.value, float) else None,
     }
     pd.DataFrame([row]).to_parquet(rd.path / "index_row.parquet")

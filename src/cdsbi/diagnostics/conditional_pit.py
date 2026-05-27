@@ -30,30 +30,34 @@ class ConditionalPIT(Diagnostic):
         N = theta.shape[0]
         floor = self._per_bin_floor(N)
         with torch.no_grad():
-            r = trained.procedure.pivot(theta, x).flatten().cpu().numpy()
-        theta_np = theta.flatten().cpu().numpy()
-        # Bin θ into equal-count bins
-        edges = np.quantile(theta_np, np.linspace(0, 1, self.n_bins + 1))
+            r = trained.procedure.pivot(theta, x).cpu().numpy()  # (N, d)
+        theta_np = theta.cpu().numpy()
+        d = theta_np.shape[-1] if theta_np.ndim > 1 else 1
         rows = []
-        for k in range(self.n_bins):
-            lo, hi = edges[k], edges[k + 1]
-            mask = (theta_np >= lo) & (theta_np <= hi)
-            r_bin = r[mask]
-            if r_bin.size < 10:
-                continue
-            u_bin = norm.cdf(r_bin)
-            ks_stat, _ = kstest(u_bin, "uniform")
-            rows.append({
-                "theta_0_bin": k,
-                "theta_0_center_0": 0.5 * (lo + hi),
-                "ks": ks_stat,
-                "per_bin_noise_floor": floor,
-                "n_per_bin": int(r_bin.size),
-                "passed": ks_stat <= floor,
-            })
+        for c in range(d):
+            theta_c = theta_np[:, c] if d > 1 else theta_np.flatten()
+            r_c = r[:, c] if r.ndim > 1 else r.flatten()
+            edges = np.quantile(theta_c, np.linspace(0, 1, self.n_bins + 1))
+            for k in range(self.n_bins):
+                lo, hi = edges[k], edges[k + 1]
+                mask = (theta_c >= lo) & (theta_c <= hi)
+                r_bin = r_c[mask]
+                if r_bin.size < 10:
+                    continue
+                u_bin = norm.cdf(r_bin)
+                ks_stat, _ = kstest(u_bin, "uniform")
+                rows.append({
+                    "coord": int(c),
+                    "theta_0_bin": k,
+                    "theta_0_center_0": 0.5 * (lo + hi),
+                    "ks": ks_stat,
+                    "per_bin_noise_floor": floor,
+                    "n_per_bin": int(r_bin.size),
+                    "passed": ks_stat <= floor,
+                })
         df = pd.DataFrame(rows)
         passed = bool(df["passed"].all())
         return DiagnosticResult(
             name=self.name, value=df, passed=passed, noise_floor=floor,
-            n_samples=N, meta={"n_bins": self.n_bins},
+            n_samples=N, meta={"n_bins": self.n_bins, "d": int(d)},
         )

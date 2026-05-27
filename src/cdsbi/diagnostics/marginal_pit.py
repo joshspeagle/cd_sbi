@@ -15,23 +15,37 @@ class MarginalPIT(Diagnostic):
     def __call__(self, trained, simulator, eval_data) -> DiagnosticResult:
         if not isinstance(trained.procedure, PivotBasedProcedure):
             return DiagnosticResult(
-                name=self.name,
-                value=float("nan"),
-                passed=True,
-                noise_floor=0.0,
-                n_samples=0,
-                meta={"reason": "not a pivot-based procedure"},
+                name=self.name, value=float("nan"), passed=True, noise_floor=0.0,
+                n_samples=0, meta={"reason": "not a pivot-based procedure"},
             )
         theta, x = eval_data
         with torch.no_grad():
-            r = trained.procedure.pivot(theta, x).flatten()
-        u = norm.cdf(r.cpu().numpy())
-        ks_stat, _ = kstest(u, "uniform")
-        floor = ks_noise_floor(N=u.size, n_bins=1)
+            r = trained.procedure.pivot(theta, x)  # (N, d)
+        r_np = r.cpu().numpy()
+        d = r_np.shape[-1] if r_np.ndim > 1 else 1
+        floor = ks_noise_floor(N=r_np.shape[0], n_bins=1)
+        if d == 1:
+            u = norm.cdf(r_np.flatten())
+            ks_stat, _ = kstest(u, "uniform")
+            return DiagnosticResult(
+                name=self.name, value=float(ks_stat),
+                passed=ks_stat <= floor, noise_floor=floor, n_samples=u.size,
+            )
+        rows = []
+        for k in range(d):
+            u_k = norm.cdf(r_np[:, k])
+            ks_stat, _ = kstest(u_k, "uniform")
+            rows.append({
+                "coord": int(k),
+                "ks": float(ks_stat),
+                "noise_floor": floor,
+                "passed": ks_stat <= floor,
+                "n_samples": int(u_k.size),
+            })
+        import pandas as pd
+        df = pd.DataFrame(rows)
         return DiagnosticResult(
-            name=self.name,
-            value=float(ks_stat),
-            passed=ks_stat <= floor,
-            noise_floor=floor,
-            n_samples=u.size,
+            name=self.name, value=df,
+            passed=bool(df["passed"].all()), noise_floor=floor,
+            n_samples=r_np.shape[0], meta={"d": int(d)},
         )

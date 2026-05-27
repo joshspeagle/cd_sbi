@@ -40,4 +40,5 @@ class PivotRMSE(Diagnostic):
             passed=rmse < 0.05,
             noise_floor=0.05,
             n_samples=theta.shape[0],
+            meta={"d": int(r_hat.shape[-1]) if r_hat.ndim > 1 else 1},
         )
