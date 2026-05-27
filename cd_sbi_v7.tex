@@ -2453,47 +2453,130 @@ Each experiment trains in 2--4 minutes on CPU.
 
 \textbf{Architecture.} Additive flow
 \(r(\theta, X) = \alpha_a \cdot a(\theta) - \alpha_b \cdot b(X)\) with
-\(a, b\) scalar UMNNs.
+\(a, b\) scalar UMNNs (\S\ref{subsec:7.1}).
 
-\textbf{Results.}
+\textbf{Sweep.} Five training seeds at each of four matched-parameter
+budgets (approximately 1k, 5k, 25k, and 100k total parameters per
+method). Diagnostics are evaluated on a held-out evaluation set:
+\(N = 5000\) draws for marginal PIT and pivot RMSE,
+\(N/\text{bin} = 1000\) for the 5-bin conditional PIT, and
+200 reference \(\theta_0\) values \(\times\) 50 \(X \mid \theta\)
+samples per nominal coverage level \(\alpha\). Values are mean
+\(\pm\) standard deviation across the five seeds; ``noise floor''
+is the Monte-Carlo floor of the diagnostic at the stated sample size
+(\S\ref{subsec:7.3}), below which a value is statistically
+indistinguishable from the truth.
+
+\textbf{CDSBI calibration diagnostics.} Single-method results at the
+medium budget (\(\approx\) 5k parameters):
 
 \begin{longtable}[]{@{}
-  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}
-  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}
-  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.3333}}@{}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.40}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.30}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.30}}@{}}
 \toprule\noalign{}
 \begin{minipage}[b]{\linewidth}\raggedright
 Diagnostic
 \end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-Value
+Value (mean \(\pm\) std)
 \end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-Status
+Noise floor
 \end{minipage} \\
 \midrule\noalign{}
 \endhead
 \bottomrule\noalign{}
 \endlastfoot
-Pivot RMSE & 0.030 & clean (\textasciitilde0.3\% of dynamic range) \\
-Slope at \(\theta = 0, X = 0\) & \(\partial_\theta r = 0.997\),
-\(\partial_X r = -0.983\) & within 1--2\% of truth \\
-Marginal PIT KS & 0.008 & PASS (well below noise floor) \\
-Conditional PIT KS at 7 \(\theta_0\) values & bulk KS \(\approx 0.01\),
-edge KS up to 0.05 & bulk PASS; edge effects at \(\rho\) boundary \\
-Coverage error at all levels in interior & \(< 0.01\) & excellent \\
+Pivot RMSE & \(0.023 \pm 0.005\) & 0.050 \\
+Marginal PIT KS & \(0.013 \pm 0.004\) & 0.023 \\
+Conditional PIT KS, bulk \((|\theta_0| \le 4)\) & \(0.026 \pm 0.002\)
+& 0.051 \\
+Conditional PIT KS, edge \((|\theta_0| > 4)\) & \(0.029 \pm 0.004\)
+& 0.051 \\
+Coverage error \(\max_{\theta_0, \alpha}\) & \(0.025 \pm 0.005\) &
+\(\sim 0.02\) (binomial SE) \\
 \end{longtable}
 
-The 1D case is a sanity check. Both the additive architecture and a
-(more flexible) joint UMNN architecture converge under NF-MLE, with the
-additive form converging 20× faster and to lower RMSE because it
-exactly contains \(r^*\). The conditional PIT degrades near
-\(\theta_0 = \pm 7\) because the \emph{trained} \(r\) is a poorer
-approximation there: those points are at the support boundary of the
-training proposal \(\rho\), where the network sees fewer samples and
-the universal-approximation error is largest. The interior is uniformly
-clean. This is a property of the trained network's coverage of the
-deployment region (a training-distribution effect), not a finite-sample
-statistical artifact of the diagnostic --- see also the discussion of
-choosing \(\rho\) with margin in \S\ref{sec:9}.
+All five diagnostics sit at or below their Monte-Carlo noise floors:
+the trained pivot is indistinguishable from \(r^*\) within MC
+fluctuation, both in distribution (marginal and conditional PIT, joint
+coverage) and in pointwise RMSE. The conditional-PIT bulk and edge
+values are statistically indistinguishable, so we do not see
+meaningful boundary degradation at the outermost bin center
+(\(|\theta_0| \approx 5.6\), \(80\%\) of the \(\rho\)-support range).
+
+\textbf{Budget invariance.} Across the four budgets, all diagnostics
+are statistically constant: pivot RMSE \(0.022\)--\(0.025\), marginal
+KS \(0.013\) throughout, coverage error max \(0.025\) throughout. The
+model saturates at the smallest budget (\(\approx\) 1k parameters);
+additional capacity neither helps nor hurts on this problem.
+
+\paragraph{Comparison with baselines.} We sweep the same budgets and
+seeds for four baselines --- NPE, NLE, NRE, and LF2I-BFF --- and
+report the worst-case coverage error,
+\(\max_{\theta_0, \alpha} \bigl| \hat{C}_\alpha(\theta_0) - \alpha \bigr|\)
+(mean \(\pm\) std across seeds; smaller is better; noise floor
+\(\sim 0.02\)).
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 8\tabcolsep) * \real{0.20}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 8\tabcolsep) * \real{0.20}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 8\tabcolsep) * \real{0.20}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 8\tabcolsep) * \real{0.20}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 8\tabcolsep) * \real{0.20}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Method
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Small (\(\approx\)1k)
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Medium (\(\approx\)5k)
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Large (\(\approx\)25k)
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+XLarge (\(\approx\)100k)
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+CD-SBI & \(0.025 \pm 0.007\) & \(0.025 \pm 0.006\) &
+\(0.025 \pm 0.005\) & \(0.025 \pm 0.006\) \\
+NLE & \(0.025 \pm 0.005\) & \(0.026 \pm 0.004\) &
+\(0.030 \pm 0.016\) & \(0.028 \pm 0.009\) \\
+NPE & \(0.055 \pm 0.012\) & \(0.061 \pm 0.006\) &
+\(0.067 \pm 0.005\) & \(0.067 \pm 0.008\) \\
+LF2I-BFF & \(0.144 \pm 0.051\) & \(0.056 \pm 0.013\) &
+\(0.066 \pm 0.027\) & \(0.151 \pm 0.036\) \\
+NRE & \(0.098 \pm 0.043\) & \(0.116 \pm 0.060\) &
+\(0.080 \pm 0.040\) & \(0.098 \pm 0.046\) \\
+\end{longtable}
+
+Two patterns. \emph{(i) CD-SBI and NLE are statistically tied at the
+noise floor at every budget.} This is consistent with theory:
+\S\ref{subsec:3.4} shows the two methods optimize the same NF-MLE
+loss, and for the location-normal model with a uniform prior the
+Bayesian posterior coincides with the UMPU confidence distribution
+(Theorem A, \S\ref{sec:4}); the two trained densities are reading the
+same surface and should produce indistinguishable intervals here.
+\emph{(ii) The other three methods land above the floor.} NPE sits
+at roughly twice the floor and is constant in budget; NRE is three
+to five times the floor across budgets; LF2I-BFF is non-monotone,
+comparable to NPE at medium budget but degrading at small and xlarge
+budgets --- a signature of the separately trained quantile-regression
+calibration stage. The architectural account is in \S\ref{sec:10}:
+only CD-SBI bakes in pointwise frequentist coverage by construction;
+NPE and NLE target a Bayesian object (with no built-in coverage),
+NRE targets a likelihood ratio, and LF2I-BFF relies on a separately
+trained critical-value function whose error compounds with the
+test-statistic's.
+
+\textbf{Synthesis.} The 1D case is a sanity check that the
+architecture and loss combination work as the theory predicts. They
+do: CD-SBI reaches the diagnostic noise floor at every budget and
+matches the only baseline that shares its training objective (NLE)
+exactly. The cross-method gap is small but consistent here, and
+foreshadows \S\ref{subsec:8.2}--\S\ref{subsec:8.4}, where
+architectural calibration matters more.
 
 \subsection{2D location-Gaussian, \(\Sigma = I\)}\label{subsec:8.2}
 
