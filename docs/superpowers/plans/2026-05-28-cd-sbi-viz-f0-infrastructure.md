@@ -65,6 +65,21 @@ No changes to existing `src/cdsbi/analysis/{loaders,paper_tables}.py` — `data_
 
 - **`model.pt` reality (verified):** the checkpoint dict is `{"arch_metadata": {...}, "final_loss": float}` and contains **no `state_dict`/weights**. `arch_metadata` includes `loss_history_tail` (last 100 training-loss values). `data_io.checkpoints` therefore exposes `arch_metadata` + `final_loss` only. **Figures needing trained weights (C1, C3 in F3) are NOT satisfiable from current checkpoints** — see "Known gap for later milestones" at the bottom. F0 builds none of those, so this does not block F0.
 
+## Visual acceptance protocol (applies to F0 and is inherited by F1–F3)
+
+Automated tests verify *structure* (an Axes exists, the right number of lines/patches, the style took effect). They cannot verify a figure *reads well and conveys its intended message*. So every figure — starting with F0's hello-world — gets a mandatory **visual acceptance** step before its commit is final:
+
+1. Render the figure to PNG (`python -m cdsbi.analysis.figures.render --fig <id>`).
+2. **Actually view it.** The executing agent is multimodal — `Read` the `figures/<id>.png` file so the rendered pixels enter context. (A human executor opens it in an image viewer.)
+3. Judge it against an explicit checklist:
+   - **Renders at all** — not blank, not a single dot, no overlapping/clipped labels.
+   - **Style applied** — top/right spines absent, grid faint, fonts legible at the target column width.
+   - **Math renders** — LaTeX-style labels (e.g. `$\theta$`) show real glyphs, not `□`/tofu replacement characters.
+   - **Message lands (F1–F3 only)** — a reader who knows nothing could state the figure's one-sentence takeaway from the picture alone. For cross-method figures, CDSBI is visually the protagonist (navy, foregrounded) and the colour convention is honoured.
+4. If it fails any check, iterate on the builder and re-render before committing. Record the verdict in one line in the commit message or task notes (e.g. "visual: OK — spines clean, mathtext renders, sine legible").
+
+For F0 the only "message" is "the pipeline produces a clean styled plot"; the F1–F3 plans reuse this same protocol with figure-specific takeaways.
+
 ---
 
 ## Task 1: Subpackage skeleton + gitignore for tracked figures
@@ -125,10 +140,16 @@ The repo's `.gitignore` has a blanket `*.pdf` rule (for LaTeX build artifacts). 
 ```gitignore
 
 # Visualization suite outputs ARE tracked (override the global *.pdf rule above).
-# PNGs are not globally ignored, but negate them too for clarity / future-proofing.
+# Use the ** form so nested figure subdirs (e.g. figures/section_8/e1.pdf) are
+# also un-ignored, not just files directly in figures/. PNGs are not globally
+# ignored, but negate them too for clarity / future-proofing.
+!figures/**/*.pdf
+!figures/**/*.png
 !figures/*.pdf
 !figures/*.png
 ```
+
+(Both the `**` and the single-level forms are listed: `**/*.pdf` does not match files directly in `figures/` on older Git, so the single-level line is the belt-and-suspenders for the F0 hello-world, which lives directly in `figures/`.)
 
 - [ ] **Step 4: Verify the negation works**
 
@@ -282,12 +303,22 @@ def apply_style() -> None:
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt  # noqa: F401  (ensure pyplot binds to Agg)
     style_path = resources.files("cdsbi.analysis.figures") / "cdsbi.mplstyle"
+    # Fail loudly and clearly if the style file isn't shipped, rather than
+    # surfacing a baffling matplotlib OSError mid-figure-build.
+    assert style_path.is_file(), f"cdsbi.mplstyle not found at {style_path}"
     matplotlib.style.use(str(style_path))
 ```
 
 - [ ] **Step 5: Ensure the mplstyle ships as package data**
 
-The `.mplstyle` is a non-`.py` file inside the package, so `importlib.resources` can find it at runtime from the source tree (editable install) without extra config. No `pyproject.toml` change is needed for the editable `pip install -e` used in this repo. (If a wheel build is ever added, package-data config would be required — out of scope here.)
+The `.mplstyle` is a non-`.py` file inside the package. Under the editable `pip install -e` used in this repo, `importlib.resources.files("cdsbi.analysis.figures")` returns a path into the live `src/` tree, so the file resolves at runtime without extra config — **for editable installs only**. A real wheel build would drop the `.mplstyle` because `[tool.setuptools.packages.find]` discovers `.py` files only. If a wheel build is ever added, declare package data:
+
+```toml
+[tool.setuptools.package-data]
+"cdsbi.analysis.figures" = ["*.mplstyle"]
+```
+
+This is **out of scope for F0** (the repo only does editable installs) but is recorded so it isn't forgotten. The `assert style_path.is_file()` added above turns any future packaging regression into an immediate, legible failure.
 
 - [ ] **Step 6: Run tests to verify they pass**
 
@@ -384,9 +415,9 @@ def make_sweep(root: Path) -> Path:
 
 - [ ] **Step 2: Smoke-check the fixture imports and builds**
 
-Run:
+Run (note the `PYTHONPATH=.` — the `tests` package lives outside `src/`, so a bare `python -c` from a fresh shell cannot import it; only a pytest session puts the repo root on `sys.path` automatically):
 ```bash
-python -c "
+PYTHONPATH=. python -c "
 import tempfile, pathlib
 from tests.figures_fixtures import make_sweep
 import pandas as pd, glob
@@ -398,7 +429,7 @@ assert len(runs) == 4
 print('OK')
 "
 ```
-Expected: `n run-dirs: 4` then `OK`. (Run from the repo root so `tests` is importable; the repo has `tests/__init__.py`.)
+Expected: `n run-dirs: 4` then `OK`. (Verified: without `PYTHONPATH=.` this raises `ModuleNotFoundError: No module named 'tests.figures_fixtures'`.)
 
 - [ ] **Step 3: Commit**
 
@@ -452,8 +483,10 @@ def test_load_aggregates_empty_list_returns_empty_frame(tmp_path):
 def test_load_aggregates_skips_non_ok_runs(tmp_path):
     from cdsbi.analysis.figures.data_io.aggregates import load_aggregates
     root = make_sweep(tmp_path / "sweep")
-    # Corrupt one run's STATUS so it is excluded.
-    bad = next((root).glob("method=cd_sbi,*seed=0*"))
+    # Corrupt one run's STATUS so it is excluded. Use a default + assert so a
+    # fixture-naming drift surfaces as a clear failure, not a bare StopIteration.
+    bad = next(root.glob("method=cd_sbi,*seed=0*"), None)
+    assert bad is not None, "fixture run-dir naming changed; update this glob"
     (bad / "STATUS").write_text("FAILED")
     df = load_aggregates([str(root)])
     assert len(df) == 3
@@ -966,7 +999,10 @@ def _manifest(tmp_path):
 
 
 def test_render_one_writes_pdf_and_png(tmp_path):
-    from cdsbi.analysis.figures.render import render_one, load_manifest
+    # Import load_manifest from its home module, not via render's namespace,
+    # so the test doesn't break if render.py ever switches to a lazy import.
+    from cdsbi.analysis.figures.render import render_one
+    from cdsbi.analysis.figures.manifest import load_manifest
     mpath, out = _manifest(tmp_path)
     specs = load_manifest(str(mpath))
     render_one(specs["_hello"])
@@ -1022,13 +1058,20 @@ DEFAULT_MANIFEST = "configs/figures/manifest.yaml"
 
 
 def render_one(spec: FigureSpec) -> None:
-    """Build one figure and save it to its PDF + PNG paths."""
+    """Build one figure and save it to its PDF + PNG paths.
+
+    Suppresses the timestamp metadata matplotlib otherwise embeds, so a
+    re-render of an unchanged figure produces byte-identical output and does
+    not create spurious git diffs on the tracked figures/ artifacts.
+    """
     builder = spec.resolve_builder()
     fig = builder(spec)
     for out in (spec.output_pdf, spec.output_png):
         Path(out).parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(spec.output_pdf)
-    fig.savefig(spec.output_png)
+    # PDF embeds a CreationDate by default; None drops it. PNG embeds a
+    # Software tEXt chunk; None drops it.
+    fig.savefig(spec.output_pdf, metadata={"CreationDate": None})
+    fig.savefig(spec.output_png, metadata={"Software": None})
     import matplotlib.pyplot as plt
     plt.close(fig)
 
@@ -1064,11 +1107,15 @@ def main(argv: list[str] | None = None) -> None:
         from cdsbi.analysis.figures.gallery import write_gallery
         path = write_gallery(args.manifest)
         print(f"Wrote gallery: {path}")
+    if not (args.fig or args.all or args.gallery):
+        parser.error("nothing to do: pass --fig <id>, --all, and/or --gallery")
 
 
 if __name__ == "__main__":
     main()
 ```
+
+Note: the final `parser.error` guard means invoking the CLI with no action flag prints usage and exits non-zero, rather than silently doing nothing.
 
 Note: the `--gallery` branch imports `gallery.write_gallery`, created in Task 9. The import is inside the branch, so the CLI works for `--fig`/`--all` before Task 9 lands.
 
@@ -1087,11 +1134,23 @@ ls -la figures/_hello.pdf figures/_hello.png
 ```
 Expected: both files exist with nonzero size; `ignored_exit=1` (NOT ignored — the Task 1 negation holds).
 
-- [ ] **Step 6: Commit (code + the rendered hello-world artifacts)**
+- [ ] **Step 6: Visual acceptance — actually view the rendered figure**
+
+Per the **Visual acceptance protocol** above, `Read` the rendered PNG so the pixels enter context (a human executor opens it in an image viewer):
+
+```
+Read figures/_hello.png
+```
+
+Confirm against the checklist: renders a clean sine curve (not blank); top/right spines absent and grid faint (style applied); the `$\theta$` / `$\sin(\theta)$` axis labels show real glyphs, not tofu boxes (mathtext + fallback working). If any check fails, fix `cdsbi.mplstyle` or `_hello.py` and re-render before committing. This is the F0 proof that the whole styling pipeline produces a usable image — every F1–F3 figure repeats this step with its own message checklist.
+
+- [ ] **Step 7: Commit (code + the rendered hello-world artifacts)**
 
 ```bash
 git add src/cdsbi/analysis/figures/render.py tests/integration/test_figures_render_cli.py figures/_hello.pdf figures/_hello.png
-git commit -m "feat(figures): render CLI (--fig/--all/--section) + hello-world artifact"
+git commit -m "feat(figures): render CLI (--fig/--all/--section) + hello-world artifact
+
+visual: OK — sine renders, spines clean, mathtext labels legible"
 ```
 
 ---
@@ -1250,7 +1309,7 @@ git commit -m "feat(figures): gallery generator (figures/README.md)"
 - [ ] **Step 1: Run the entire fast test suite**
 
 Run: `pytest -q`
-Expected: all previously-passing tests still pass, plus the new figure tests (≈ 23 new tests across style/aggregates/checkpoints/manifest/hello/render/gallery). No failures, no errors. The `intensive` and `ablation` markers stay deselected (default `addopts`).
+Expected: all previously-passing tests still pass, plus **26 new figure tests** (style 6 + aggregates 4 + checkpoints 3 + manifest 5 + hello 3 + render CLI 3 + gallery 2). No failures, no errors. The `intensive` and `ablation` markers stay deselected (default `addopts`).
 
 - [ ] **Step 2: Confirm only the figure subpackage + figures/ changed**
 
@@ -1272,6 +1331,10 @@ Expected: `Rendered 1 figure(s): _hello`, gallery written, and `git status --por
 Run: `du -sh figures/`
 Expected: well under the 9 MB budget (the hello-world PDF+PNG are a few KB). This confirms the budget mechanism is realistic before real figures land in F1–F3.
 
+- [ ] **Step 5: Final visual acceptance of the gallery**
+
+`Read figures/_hello.png` one more time alongside `figures/README.md` and confirm the gallery embeds the PNG correctly (the `![_hello](_hello.png)` link resolves to the image you just viewed). This closes the F0 visual-acceptance loop: the pipeline renders a clean styled figure *and* surfaces it in the browsable gallery. No commit needed if Tasks 8–9 already committed the artifacts and the re-render produced identical bytes (the `metadata=None` suppression makes this deterministic).
+
 ---
 
 ## Known gap for later milestones (do NOT fix in F0)
@@ -1291,3 +1354,15 @@ This gap is recorded here and in `data_io/checkpoints.py`'s module docstring so 
 - **Spec coverage (F0 scope):** style.py + cdsbi.mplstyle (Task 2) ✓; data_io aggregates (Task 4) ✓; data_io checkpoints (Task 5) ✓; manifest schema with `section`/`source_runs`/`checkpoint_runs` (Task 6) ✓; render CLI with `--fig`/`--all`/`--section`/`--gallery` (Tasks 8–9) ✓; gallery generator (Task 9) ✓; hello-world end-to-end (Tasks 7–9) ✓; Agg backend + mathtext fallback (Task 2) ✓; smoke fixtures (Task 3) ✓; gitignore negation + size-budget check (Tasks 1, 10) ✓; panels/ placeholder for F1 (Task 1) ✓.
 - **Deferred to F1–F3 by design:** real panels, the 16 catalogue figures, manuscript `\includegraphics` integration, the C1/C3 weights gap.
 - **Type consistency:** `FigureSpec` fields (`source_runs`, `checkpoint_runs`, `output_pdf`, `output_png`, `resolve_builder`) are used identically in render.py and gallery.py. `CheckpointData.loss_history_tail` and `load_aggregates(roots: list[str])` signatures match their tests. Builder contract `render(spec) -> Figure` is uniform across `_hello.py`, render.py, and all tests.
+
+### Dual-review fixes folded in (2026-05-28)
+
+Self-review + an independent agent review of this plan produced these corrections, all applied above:
+- **Visual acceptance protocol added** (the user's explicit ask): a mandatory "actually `Read` the rendered PNG and judge it" step, defined once near the top and exercised in Task 8 Step 6 + Task 10 Step 5; inherited by F1–F3.
+- **Executability bug fixed:** Task 3's smoke-check now uses `PYTHONPATH=.` (verified: bare `python -c` raises `ModuleNotFoundError` for the out-of-`src` `tests` package).
+- **`apply_style` asserts the `.mplstyle` exists** (clear failure vs baffling OSError); wheel-build `package-data` note recorded as out-of-scope-but-documented.
+- **gitignore** uses both `**/*.pdf` and single-level `*.pdf` negations for nested-path robustness.
+- **render CLI** suppresses PDF/PNG timestamp metadata so tracked artifacts re-render byte-identically (no spurious git diffs); `main()` errors on no action flag instead of silently no-op'ing.
+- **Test hardening:** render-CLI test imports `load_manifest` from its home module; aggregates test uses `next(..., None)` + assert instead of a bare `next()` that could `StopIteration`.
+- **Test count corrected** to 26 (was "≈23").
+- Verified against matplotlib 3.10.5: `mathtext.fallback` and `axes.spines.*` rcParam keys are valid.

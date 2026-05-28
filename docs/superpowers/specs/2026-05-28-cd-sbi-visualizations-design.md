@@ -231,6 +231,12 @@ content does not overlap, only their data source.
 which sweep a figure uses is a one-YAML-edit operation; figure
 builder code stays sweep-agnostic.
 
+**Tracked artifacts re-render byte-identically.** The render CLI
+suppresses the timestamp metadata matplotlib embeds (PDF
+`CreationDate`, PNG `Software` chunk), so re-running a figure whose
+inputs and builder are unchanged produces identical bytes and no
+spurious git diff on the committed `figures/` outputs.
+
 **Outputs are git-tracked, with a size budget.** `figures/<id>.pdf` and
 `.png` are checked in so the manuscript builds anywhere without
 needing the run-dirs themselves (run-dirs stay gitignored). Target
@@ -283,7 +289,30 @@ gracefully when the configured font isn't installed.
   correctness — that is the author's eyeballs' job — but does catch
   panel-composition regressions.
 
-**Manual.** Author inspects rendered PDFs / PNGs and approves.
+**Visual acceptance (mandatory, not "eyeballs optional").** Automated
+tests verify structure, never whether a figure *reads well and lands
+its message*. So every figure gets an explicit visual-acceptance step
+before its commit is final, and the F0–F3 plans bake it in as a task
+step:
+
+1. Render the figure to PNG (`render --fig <id>`).
+2. **Actually view it** — the executing agent is multimodal and
+   `Read`s `figures/<id>.png` so the pixels enter context; a human
+   executor opens it in an image viewer.
+3. Judge against a checklist: (a) renders at all — not blank, no
+   clipped/overlapping labels; (b) style applied — top/right spines
+   absent, grid faint, fonts legible at column width; (c) math
+   renders — `$\theta$`-style labels show real glyphs, not tofu
+   boxes; (d) **message lands** — a naïve reader could state the
+   figure's one-sentence takeaway from the picture alone, and in
+   cross-method figures CDSBI is the visual protagonist with the
+   colour convention honoured.
+4. If it fails any check, iterate on the builder and re-render before
+   committing; record the verdict in one line in the commit message.
+
+This replaces the weaker "author inspects and approves" — the
+inspection is a defined, repeatable gate, run for the F0 hello-world
+and every F1–F3 figure.
 
 ## Decomposition — F0–F3 milestones
 
@@ -292,12 +321,14 @@ figures in one shot.
 
 **F0 — Infrastructure (no figures yet).**
 
-- `style.py`, `cdsbi.mplstyle`, `data_io.py`, manifest schema +
-  loader, render CLI, gallery generator.
+- `style.py`, `cdsbi.mplstyle`, `data_io/aggregates.py`,
+  `data_io/checkpoints.py`, manifest schema + loader, render CLI,
+  gallery generator.
 - A "hello world" placeholder figure to exercise the full pipeline
-  end-to-end.
-- Smoke-test fixtures (synthetic mini-run-dir parquet files).
-- Wire `pyproject.toml` + any imports needed.
+  end-to-end, including its visual-acceptance step.
+- Smoke-test fixtures (synthetic mini-run-dir parquet + model.pt).
+- `.gitignore` negation so `figures/` artifacts are tracked despite
+  the global `*.pdf` rule.
 
 **F1 — Empirical primitives (panels).**
 
