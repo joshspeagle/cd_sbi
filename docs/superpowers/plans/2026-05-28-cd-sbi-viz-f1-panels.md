@@ -230,15 +230,19 @@ def test_coverage_curve_draws_single_series():
     assert list(ax.lines[0].get_xdata()) == list(nominal)
 
 
-def test_coverage_tile_draws_one_quadmesh():
+def test_coverage_tile_draws_one_quadmesh_and_a_colorbar():
     from cdsbi.analysis.figures.panels.calibration import coverage_tile
-    ax = _ax()
+    ax = _ax()                              # fig starts with exactly 1 axes
     theta0 = np.array([-2.0, 0.0, 2.0])
     alpha = np.array([0.5, 0.68, 0.9, 0.95])
     error = np.abs(np.random.default_rng(1).normal(0, 0.02, size=(3, 4)))
     out = coverage_tile(ax, theta0, alpha, error)
     assert out is ax
     assert len(ax.collections) == 1         # the QuadMesh
+    # The colorbar is required for a readable heatmap; it adds a second axes
+    # to the parent figure. Assert it so TDD actually drives that requirement
+    # (deleting the ax.figure.colorbar call must break this test).
+    assert len(ax.figure.axes) == 2
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -1051,7 +1055,7 @@ F1 panels are pure functions of synthetic input data, so they have no sourcing d
 
 1. **Raw PIT values (E1, E3, E5 → `pit_histogram`).** `diagnostics/marginal_pit.parquet` and `joint_mahalanobis.parquet` store only the KS scalar + noise floor, not the underlying PIT array. F2 must either (a) extend the marginal/joint PIT diagnostic writers to dump the raw PIT samples to parquet and re-run the relevant sweeps, or (b) recompute PIT from a trained model — which is blocked because `model.pt` has no `state_dict` (the C1/C3 weights gap). Option (a) is the recommended path.
 2. **Jacobian matrices (E4 → `jacobian_recovery_scatter`).** `diagnostics/jacobian_recovery.parquet` stores only `max_residual`/`norm_residual` scalars, not the trained `E[∂r/∂θ]` matrix or the truth `L⁻¹`. F2 must extend the `JacobianRecovery` diagnostic to persist both matrices, then re-run §8.3.
-3. **Full loss trajectory (E7 → `loss_trajectory_with_floor`).** `model.pt` stores only `loss_history_tail` (last 100 steps). E7's catastrophic-folding trajectory must be regenerated in-process from the `tests/ablation/test_trained_folding.py` recipe (already noted in the spec); the tail-100 window suffices for E6's `loss_bar_with_floor`.
+3. **Full loss trajectory (E7 → `loss_trajectory_with_floor`).** `model.pt` stores only `loss_history_tail` (last 100 steps). E7's catastrophic-folding trajectory must be regenerated in-process from the `tests/ablation/test_trained_folding.py` recipe (already noted in the spec); the tail-100 window suffices for E6's `loss_bar_with_floor`. **Verified present:** the `model.pt` written by `run.py` (lines ~489–492) stores `{"arch_metadata": trained.arch_metadata, "final_loss": ...}`, and `arch_metadata["loss_history_tail"]` is confirmed populated (length 100) in the §8.4 ablation run-dirs — so E6's tail-mean source exists; only E7's *full* trajectory needs regeneration.
 
 The F2 plan should open by resolving (1) and (2) — extend the diagnostic writers + a targeted re-run — before composing E1/E3/E4/E5. This is the single biggest F2 risk and is why it is flagged here at F1 close.
 
@@ -1064,3 +1068,11 @@ The F2 plan should open by resolving (1) and (2) — extend the diagnostic write
 - **Placeholder scan:** every step has complete runnable code and exact commands; no TBD/TODO.
 - **Type consistency:** the panel contract (`(ax, data..., *, kwargs) -> ax`) is uniform across all 11 functions and their tests. `noise_floor_band` (Task 1) and `diagonal_reference` (Task 1) are imported by `loss.py` (Task 4) and `recovery.py` (Task 5) at the exact paths created in Task 1. The `__init__.py` re-export names (Task 7) match the function names defined in Tasks 1–6 exactly, and `test_panels_exports.py` asserts that list. `boxplot_per_method` returns `ax` (not a tuple) consistently.
 - **F1 scope fidelity:** no figure builders (F2), no manifest entries, no manuscript integration. Only `panels/` is touched plus the contact-sheet dev tool. The data-sourcing gaps are documented, not solved.
+
+### Dual-review outcome (2026-05-28)
+
+Self-review + an independent agent review of this plan. Outcome:
+- **Reviewer Issue 1 (axhline ydata) — rejected after verification.** The reviewer claimed `ax.axhline(0.99).get_ydata()` returns `[0, 1]` (axes-coord transform), which would break `test_noise_floor_band_scalar_draws_one_line`. Verified empirically: `get_ydata()` returns `[0.99, 0.99]` (it is `get_xdata()` that returns `[0, 1]`). The test assertion is correct; no change.
+- **Reviewer Issue 2 (coverage_tile colorbar) — accepted.** Strengthened `test_coverage_tile_*` to also assert `len(ax.figure.axes) == 2`, so deleting the colorbar call now breaks the test (closes a TDD gap). Verified colorbar → `fig.axes == 2`.
+- **Reviewer Issue 5 (loss_history_tail unverified) — closed with evidence.** Confirmed `arch_metadata["loss_history_tail"]` is present (length 100) in the §8.4 ablation run-dirs; recorded in gap note 3. E6's source exists; only E7 needs regeneration.
+- Decomposition, panel contract, spec/figure coverage, and the data-sourcing gap analysis were all confirmed sound. Verified the matplotlib 3.10.5 artist-count facts the tests assert (hist/bar/scatter/pcolormesh/axhline/axhspan counts, `axison`, hex round-trip).
