@@ -3,3 +3,4 @@ _target_: cdsbi.flows.additive.AdditiveFlow1D
 hidden: ${budget.cdsbi_flow_hidden}
 dropout: 0.0
 layer_norm: false
+depth: 2  # hidden-layer count per UMNN MLP. Default 2 is the codebase convention.

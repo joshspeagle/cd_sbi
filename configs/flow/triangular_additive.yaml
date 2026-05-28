@@ -1,4 +1,5 @@
 name: triangular_additive
 _target_: cdsbi.flows.triangular_additive.TriangularAdditiveFlow
 hidden: ${budget.cdsbi_flow_hidden_d2}
+depth: 2  # hidden-layer count per UMNN MLP. Default 2 is the codebase convention.
 # d is injected by experiments.run._build_flow from simulator.d_theta.

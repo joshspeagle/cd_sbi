@@ -27,28 +27,36 @@ class UMNNBlock(nn.Module):
         bias_trainable: bool = True,
         dropout: float = 0.0,
         layer_norm: bool = False,
+        depth: int = 2,
     ):
         super().__init__()
         self.context_dim = context_dim
+        self.depth = depth
         in_dim = 1 + context_dim
 
-        def _make_mlp_layers(in_dim: int, hidden: int, dropout: float, layer_norm: bool) -> nn.Sequential:
+        def _make_mlp_layers(
+            in_dim: int, hidden: int, dropout: float, layer_norm: bool, depth: int,
+        ) -> nn.Sequential:
+            """Tanh MLP with `depth` hidden layers. Default depth=2 is the
+            codebase convention (matches v3 flows + NRE/LF2I head defaults)."""
+            assert depth >= 1, f"depth must be >= 1 (got {depth})"
             layers: list = [nn.Linear(in_dim, hidden)]
             if layer_norm:
                 layers.append(nn.LayerNorm(hidden))
             layers.append(nn.Tanh())
             if dropout > 0.0:
                 layers.append(nn.Dropout(dropout))
-            layers.append(nn.Linear(hidden, hidden))
-            if layer_norm:
-                layers.append(nn.LayerNorm(hidden))
-            layers.append(nn.Tanh())
-            if dropout > 0.0:
-                layers.append(nn.Dropout(dropout))
+            for _ in range(depth - 1):
+                layers.append(nn.Linear(hidden, hidden))
+                if layer_norm:
+                    layers.append(nn.LayerNorm(hidden))
+                layers.append(nn.Tanh())
+                if dropout > 0.0:
+                    layers.append(nn.Dropout(dropout))
             layers.append(nn.Linear(hidden, 1))
             return nn.Sequential(*layers)
 
-        self.mlp = _make_mlp_layers(in_dim, hidden, dropout, layer_norm)
+        self.mlp = _make_mlp_layers(in_dim, hidden, dropout, layer_norm, depth)
         # Zero-init final layer so g starts near identity-ish at init
         nn.init.zeros_(self.mlp[-1].weight)
         nn.init.zeros_(self.mlp[-1].bias)

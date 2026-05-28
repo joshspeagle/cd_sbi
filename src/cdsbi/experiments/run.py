@@ -84,10 +84,12 @@ def _build_flow(cfg: DictConfig, simulator) -> Any:
         # and context_features=d_theta. v1's loc_gauss_2d_iid is symmetric so
         # this is correct; revisit when an asymmetric target lands.
     if method_flow_label == "additive_umnn":
+        depth = int(OmegaConf.select(cfg, "flow.depth", default=2))
         if int(simulator.d_theta) == 1:
             return _instantiate(
                 "cdsbi.flows.additive.AdditiveFlow1D",
                 hidden=int(cfg.budget.cdsbi_flow_hidden),
+                depth=depth,
             )
         # d > 1: use the d-specific budget key if present (e.g.
         # cdsbi_flow_hidden_d2 for d=2). Fall back to the 1D value as a
@@ -101,8 +103,10 @@ def _build_flow(cfg: DictConfig, simulator) -> Any:
             "cdsbi.flows.triangular_additive.TriangularAdditiveFlow",
             d=d,
             hidden=budget_hidden,
+            depth=depth,
         )
     if method_flow_label == "triangular_additive":
+        depth = int(OmegaConf.select(cfg, "flow.depth", default=2))
         d = int(simulator.d_theta)
         d_key = f"cdsbi_flow_hidden_d{d}"
         budget_hidden = int(OmegaConf.select(
@@ -112,6 +116,7 @@ def _build_flow(cfg: DictConfig, simulator) -> Any:
             "cdsbi.flows.triangular_additive.TriangularAdditiveFlow",
             d=d,
             hidden=budget_hidden,
+            depth=depth,
         )
     # v3 flows all share the same constructor signature (hidden, theta_ref, depth)
     # and the same budget key (doubly_monotone_hidden). depth defaults to the

@@ -28,11 +28,13 @@ class TriangularAdditiveFlow(nn.Module, Flow):
         hidden: int = 32,
         dropout: float = 0.0,
         layer_norm: bool = False,
+        depth: int = 2,
     ):
         super().__init__()
         if d < 1:
             raise ValueError(f"d must be ≥ 1, got {d}")
         self.d = d
+        self.depth = depth
         # Per-coordinate UMNN pairs. Coord k has context dim 2*k (θ_<k, X_<k).
         self.a_blocks = nn.ModuleList()
         self.b_blocks = nn.ModuleList()
@@ -40,11 +42,11 @@ class TriangularAdditiveFlow(nn.Module, Flow):
             ctx_dim = 2 * k  # θ_<k concat X_<k
             self.a_blocks.append(
                 UMNNBlock(context_dim=ctx_dim, hidden=hidden, bias_trainable=True,
-                          dropout=dropout, layer_norm=layer_norm)
+                          dropout=dropout, layer_norm=layer_norm, depth=depth)
             )
             self.b_blocks.append(
                 UMNNBlock(context_dim=ctx_dim, hidden=hidden, bias_trainable=False,
-                          dropout=dropout, layer_norm=layer_norm)
+                          dropout=dropout, layer_norm=layer_norm, depth=depth)
             )
         # Per-coordinate α scalars (matches AdditiveFlow1D init convention).
         init_log_alpha = math.log(0.5 / math.log(2.0))
