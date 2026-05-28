@@ -1,8 +1,8 @@
 # CD-SBI Visualizations — Design Spec
 
 **Date:** 2026-05-28
-**Status:** Draft (post dual-review revision). Pending final user sign-off
-before implementation-plan handoff.
+**Status:** Approved by user 2026-05-28 (post dual-review revision).
+Ready for implementation-plan handoff (F0 first).
 **Source brainstorm:** Live session 2026-05-28 following the v3 manuscript
 close-out (§8.1–§8.5 complete, tables-only).
 
