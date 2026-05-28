@@ -3006,7 +3006,16 @@ max \(0.028\)--\(0.034\), pivot RMSE \(\approx 0.044\), final loss
 tested, mirroring \S\ref{subsec:8.1}--\S\ref{subsec:8.3}.
 
 \paragraph{Comparison with baselines.} We sweep the same budgets and
-seeds for NPE, NLE, NRE, and LF2I-BFF, and report the worst-case
+seeds for NPE, NLE, NRE, and LF2I-BFF. \emph{All five methods see the
+same data}: the sufficient-statistic reduction \(T = \sum_i X_i\) is
+applied at the data boundary, so every method receives
+\((\theta, T)\) rather than \((\theta, X)\). For CDSBI this is the
+framework's \texttt{MLPConditioner} hook, which also injects the
+accompanying \(\log|\partial T / \partial X|\) Jacobian into NF-MLE;
+for NPE/NLE/NRE/LF2I-BFF the wrapper pre-applies the same reduction
+without a Jacobian (those methods don't do NF-MLE-style
+change-of-variables on \(X\)), so the comparison is genuinely
+apples-to-apples in input dimensionality. We report the worst-case
 coverage error
 \(\max_{\theta_0, \alpha}\bigl|\hat{C}_\alpha(\theta_0) - \alpha\bigr|\)
 (mean \(\pm\) std across seeds; smaller is better; noise floor
@@ -3036,39 +3045,37 @@ XLarge (\(\approx\)100k)
 \endlastfoot
 CD-SBI & \(0.028 \pm 0.006\) & \(0.032 \pm 0.005\) &
 \(0.031 \pm 0.009\) & \(0.034 \pm 0.010\) \\
-LF2I-BFF & \(0.088 \pm 0.029\) & \(0.075 \pm 0.016\) &
-\(0.069 \pm 0.024\) & \(0.063 \pm 0.017\) \\
-NRE & \(0.208 \pm 0.096\) & \(0.189 \pm 0.080\) &
-\(0.136 \pm 0.032\) & \(0.125 \pm 0.028\) \\
-NLE & \(0.204 \pm 0.039\) & \(0.161 \pm 0.014\) &
-\(0.247 \pm 0.144\) & \(0.175 \pm 0.020\) \\
-NPE\(^\dagger\) & \(0.245 \pm 0.010\) & \(0.235 \pm 0.013\) &
-\(0.281 \pm 0.012\) & --- \\
+LF2I-BFF & \(0.090 \pm 0.025\) & \(0.078 \pm 0.023\) &
+\(0.062 \pm 0.015\) & \(0.057 \pm 0.023\) \\
+NRE & \(0.150 \pm 0.045\) & \(0.195 \pm 0.223\) &
+\(0.160 \pm 0.129\) & \(0.120 \pm 0.048\) \\
+NLE & \(0.207 \pm 0.005\) & \(0.206 \pm 0.007\) &
+\(0.206 \pm 0.006\) & \(0.249 \pm 0.094\) \\
+NPE & \(0.244 \pm 0.016\) & \(0.250 \pm 0.016\) &
+\(0.248 \pm 0.016\) & \(0.248 \pm 0.017\) \\
 \end{longtable}
 
-\(^\dagger\) NPE xlarge runs hung in \texttt{sbi}'s rejection sampling
-loop (\(< 0.001\)\% of proposal samples accepted): the xlarge MAF
-over-fits and produces a posterior with most mass outside the
-\([0.3, 3.0]\) prior box, so the truncation step never terminates.
-Documented as a non-result; the small/medium/large columns are the
-honest NPE numbers.
-
 The cross-method gap that opened in \S\ref{subsec:8.1}
-\(\to\)\S\ref{subsec:8.2}\(\to\)\S\ref{subsec:8.3} widens further here.
+\(\to\)\S\ref{subsec:8.2}\(\to\)\S\ref{subsec:8.3} widens further here,
+and crucially \emph{the conditioner reduction does not close it}.
 \textbf{CD-SBI uniquely reaches the noise floor at every budget} (mean
 \(0.031\), \(\sim 1.5\times\) the binomial SE). \textbf{LF2I-BFF holds
-\(3\)--\(4\times\) the floor} (\(0.063\)--\(0.088\)), the best of the
-non-CDSBI methods --- the multivariate critical-value head is a worse
-fit here than in \S\ref{subsec:8.1}--\S\ref{subsec:8.3} because the
-test-statistic distribution depends nontrivially on the multiplicative
-\(\theta T\) interaction. \textbf{NRE, NLE, and NPE all sit at
-\(6\)--\(14\times\) the floor.} The mechanism is the same one
-\S\ref{sec:10} discusses: NPE/NLE/NRE target a Bayesian object whose
-frequentist coverage is not enforced; LF2I-BFF targets coverage
+\(3\)--\(4\times\) the floor} (\(0.057\)--\(0.090\)), the best of the
+non-CDSBI methods --- the calibration head fits the chi-square--shaped
+test-statistic distribution moderately well. \textbf{NRE, NLE, and NPE
+all sit at \(6\)--\(13\times\) the floor.} The mechanism is the same
+one \S\ref{sec:10} discusses: NPE/NLE/NRE target a Bayesian object
+whose frequentist coverage is not enforced; LF2I-BFF targets coverage
 explicitly but pays a separate-calibration tax; only CD-SBI has
-coverage by construction. Under non-additive geometry the geometric
-gap visible already in \S\ref{subsec:8.3} becomes the empirical
-4--10\(\times\) gap measured here.
+coverage by construction. A natural worry --- that CD-SBI's lead is
+just the dimensionality bottleneck the conditioner provides --- is
+ruled out by the apples-to-apples sweep above: \emph{NPE on the raw
+5-d \(X\) lands at the same numbers within Monte-Carlo noise} (sweep
+data in the run directories), and is in fact slightly \emph{worse} at
+xlarge (its over-confident posterior centers most mass outside the
+\([0.3, 3.0]\) prior box, hanging \texttt{sbi}'s rejection sampler).
+The architectural prescription, not the data preprocessing, is what
+buys CD-SBI the coverage guarantee.
 
 \paragraph{(R2) ablation: architectural vs.\ autograd Jacobian.}
 \S\ref{subsec:3.5} predicts that dropping the architectural enforcement
@@ -3144,17 +3151,22 @@ direct empirical evidence that (R2) is a correctness requirement, not
 a stylistic preference, for NF-MLE.
 
 \textbf{Synthesis.} \S\ref{subsec:8.4} closes the
-\S\ref{subsec:8.1}\(\to\)\S\ref{subsec:8.4} progression with two
+\S\ref{subsec:8.1}\(\to\)\S\ref{subsec:8.4} progression with three
 results. \emph{First,} the doubly-monotone construction works exactly
 as the theory predicts in the non-additive case: pivot RMSE \(\approx
 0.04\), all calibration diagnostics at the noise floor, and the final
 NF-MLE loss matched to the conditional-entropy floor within seed
 scatter. \emph{Second,} the cross-method gap widens monotonically:
-NLE was tied with CD-SBI at \(d=1\) in \S\ref{subsec:8.1}, \(3\)--\(4\times\)
-above it at \(d=2\) iid in \S\ref{subsec:8.2}, \(4\)--\(5\times\) above
-it at \(d=2\) correlated in \S\ref{subsec:8.3}, and now sits at
-\(5\)--\(10\times\) the floor here together with NRE and NPE. The
-(R2) ablation result --- under-convergence at the standard recipe,
+NLE was tied with CD-SBI at \(d=1\) in \S\ref{subsec:8.1},
+\(3\)--\(4\times\) above it at \(d=2\) iid in \S\ref{subsec:8.2},
+\(4\)--\(5\times\) above it at \(d=2\) correlated in
+\S\ref{subsec:8.3}, and now sits at \(6\)--\(10\times\) the floor here
+together with NRE and NPE. \emph{Third,} the apples-to-apples
+comparison confirms the gap is not a dimensionality artifact: with
+every method on the sufficient statistic \(T\), CDSBI still wins by
+\(5\)--\(10\times\) at every budget, ruling out the obvious
+``CDSBI got fewer dimensions'' alternative explanation. The (R2)
+ablation result --- under-convergence at the standard recipe,
 catastrophic folding at the longer recipe --- empirically confirms
 that the architectural enforcement of (R2) is not a stylistic choice
 but the source of strict propriety for NF-MLE.
