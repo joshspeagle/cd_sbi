@@ -4,6 +4,7 @@ from __future__ import annotations
 import numpy as np
 
 from cdsbi.analysis.figures import style
+from cdsbi.analysis.figures.panels.primitives import noise_floor_band
 
 
 def _ordered(methods_present):
@@ -47,7 +48,7 @@ def cross_method_summary_log_y(ax, data, *, floor=None, ylabel="coverage error (
     ax.set_xticklabels(experiments)
     ax.set_ylabel(ylabel)
     if floor is not None:
-        ax.axhline(floor, ls="--", lw=1.0, color="0.5", label="noise floor")
+        noise_floor_band(ax, floor)
     return ax
 
 
