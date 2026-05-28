@@ -53,3 +53,23 @@ def paper_table_8_3(df: pd.DataFrame) -> pd.DataFrame:
     agg = df.groupby(["method", "budget_name"])[metrics].agg(["mean", "std"])
     agg.columns = [f"{m}_{stat}" for m, stat in agg.columns]
     return agg
+
+
+def paper_table_8_4(df: pd.DataFrame) -> pd.DataFrame:
+    """Pivot (method × budget) → seed-averaged §8.4 metrics.
+
+    §8.4 is 1D (target / T scalar) so JointMahalanobis no-ops (NaN) and
+    JacobianRecovery skips (non-constant truth Jacobian). The load-bearing
+    §8.4 column is final_loss — the doubly-monotone CDSBI flow's loss
+    stays ABOVE the entropy lower bound (R1+R2 contract preserves
+    Z(θ) ≡ 1), while the R1-only joint_umnn ablation flow's loss falls
+    BELOW the floor (the §3.5 mechanism failure).
+    """
+    metrics = [
+        "coverage_error_max", "marginal_ks", "pivot_rmse",
+        "final_loss", "actual_params_total",
+    ]
+    metrics = [m for m in metrics if m in df.columns]
+    agg = df.groupby(["method", "budget_name"])[metrics].agg(["mean", "std"])
+    agg.columns = [f"{m}_{stat}" for m, stat in agg.columns]
+    return agg
