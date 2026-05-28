@@ -45,12 +45,16 @@ def _build_flow(cfg: DictConfig, simulator) -> Any:
     method_flow_label = OmegaConf.select(cfg, "method.flow", default=None)
     hydra_flow_name = cfg.flow.name
 
-    # v3 flows (doubly_monotone, joint_umnn, joint_umnn_1d): when the experiment
-    # overrides /flow to one of these, respect it regardless of the method's
-    # default flow label. The flow YAMLs carry their own _target_ + hidden refs
-    # so the fast-path instantiation is sufficient.
+    # v3 flows (doubly_monotone, joint_umnn, joint_umnn_1d) need the same
+    # fast-path treatment as v0/v1/v2 flows: instantiate from cfg.flow's
+    # _target_ ONLY when the method also requests this flow (e.g. CDSBI
+    # whose method.flow is None / "additive_umnn" / "doubly_monotone").
+    # NPE/NLE/NRE/LF2I-BFF have method.flow set to "maf"/None and need their
+    # own flow architecture — they fall through to the slow path below.
     v3_flow_names = {"doubly_monotone", "joint_umnn", "joint_umnn_1d"}
-    if hydra_flow_name in v3_flow_names:
+    if hydra_flow_name in v3_flow_names and (
+        method_flow_label is None or method_flow_label == hydra_flow_name
+    ):
         flow_dict = OmegaConf.to_container(cfg.flow, resolve=True)
         target = flow_dict.pop("_target_")
         flow_dict.pop("name", None)
