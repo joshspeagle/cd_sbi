@@ -14,6 +14,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from cdsbi.flows.base import Flow, Guarantee
+from cdsbi.flows.doubly_monotone import _tanh_mlp
 
 
 _NODES_NP, _WEIGHTS_NP = np.polynomial.legendre.leggauss(12)
@@ -22,20 +23,14 @@ _NODES_NP, _WEIGHTS_NP = np.polynomial.legendre.leggauss(12)
 class JointUMNN1DFlow(nn.Module, Flow):
     monotonicity_guarantees = frozenset({Guarantee.R1})
 
-    def __init__(self, hidden: int = 16, theta_ref: float = -2.5):
+    def __init__(self, hidden: int = 16, theta_ref: float = -2.5, depth: int = 2):
         super().__init__()
         self.hidden = hidden
         self.theta_ref = theta_ref
-        self._integrand_mlp = nn.Sequential(
-            nn.Linear(2, hidden), nn.Tanh(),
-            nn.Linear(hidden, hidden), nn.Tanh(),
-            nn.Linear(hidden, 1),
-        )
-        self._b_mlp = nn.Sequential(
-            nn.Linear(1, hidden), nn.Tanh(),
-            nn.Linear(hidden, hidden), nn.Tanh(),
-            nn.Linear(hidden, 1),
-        )
+        self.depth = depth
+        # depth defaults to 2 per the codebase convention; configurable for capacity sweeps.
+        self._integrand_mlp = _tanh_mlp(in_dim=2, hidden=hidden, out_dim=1, depth=depth)
+        self._b_mlp = _tanh_mlp(in_dim=1, hidden=hidden, out_dim=1, depth=depth)
         nn.init.zeros_(self._integrand_mlp[-1].weight)
         nn.init.zeros_(self._integrand_mlp[-1].bias)
         nn.init.zeros_(self._b_mlp[-1].weight)

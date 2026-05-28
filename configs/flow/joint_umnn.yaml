@@ -1,3 +1,4 @@
 name: joint_umnn
 _target_: cdsbi.flows.joint_umnn.JointUMNNFlow
 hidden: ${budget.doubly_monotone_hidden}  # share budget with doubly-monotone for matched compare
+depth: 2  # hidden-layer count per MLP (integrand, b). Default 2 per codebase convention.

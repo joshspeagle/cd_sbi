@@ -62,3 +62,21 @@ def test_doubly_monotone_at_theta_ref_equals_b(seed):
     # b_umnn(T) is directly accessible
     b_T = flow._b_umnn(T)
     torch.testing.assert_close(r, b_T, atol=1e-5, rtol=0.0)
+
+
+def test_doubly_monotone_depth_is_configurable():
+    """depth controls the per-MLP layer count for α_net, b_umnn, β_umnn.
+    Default is 2 (the codebase convention); deeper depths add proportional
+    parameters and a depth=1 path is supported but discouraged (it was the
+    α-net-too-shallow bug)."""
+    from cdsbi.flows.doubly_monotone import DoublyMonotoneUMNN
+    n1 = sum(p.numel() for p in DoublyMonotoneUMNN(hidden=16, depth=1).parameters())
+    n2 = sum(p.numel() for p in DoublyMonotoneUMNN(hidden=16, depth=2).parameters())
+    n3 = sum(p.numel() for p in DoublyMonotoneUMNN(hidden=16, depth=3).parameters())
+    # Adding a hidden layer adds (hidden² + hidden) per MLP. With 3 MLPs
+    # (α_net, b_umnn's f_net, β_umnn's f_net), expect ~3 × hidden² growth.
+    assert n1 < n2 < n3, f"params don't grow with depth: {n1} {n2} {n3}"
+    expected_per_step = 3 * (16 * 16)
+    assert (n3 - n2) > 0.8 * expected_per_step, (
+        f"deeper layer added only {n3 - n2} params; expected ~{expected_per_step}"
+    )

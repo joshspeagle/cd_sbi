@@ -5,4 +5,4 @@ cdsbi_flow_hidden_d2: 76  # TriangularAdditiveFlow(d=2) actual=24640 (1.4%)
 maf_hidden: 76          # MAFAdapter actual=24628 (1.5%) — shared by NPE/NLE/LF2I-stage-1
 classifier_hidden: 156  # NRE MLP actual=25117 (0.5%)
 quantile_hidden: 24    # LF2I MultiQuantileMLP head actual=748; LF2I total=25865 (+3.5%, matched). Head grows monotonically with budget.
-doubly_monotone_hidden: 109  # v3 DoublyMonotoneUMNN actual=24966 (+0.1%, matched). §8.4 main flow.
+doubly_monotone_hidden: 89  # v3 DoublyMonotoneUMNN actual=24836 (-0.7%, matched). §8.4 main flow. Width retuned after α-net was deepened from 1 to 2 hidden layers.

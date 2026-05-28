@@ -23,6 +23,22 @@ from cdsbi.flows.base import Flow, Guarantee
 _NODES_NP, _WEIGHTS_NP = np.polynomial.legendre.leggauss(12)
 
 
+def _tanh_mlp(in_dim: int, hidden: int, out_dim: int, depth: int) -> nn.Sequential:
+    """Standard depth-d tanh MLP.
+
+    Codebase convention: depth=2 (matches UMNNBlock, the §8.4 reference
+    implementation, and the default in NRE/LF2I config groups). Exposed as
+    a parameter on the v3 flow classes so depth can be swept as a separate
+    architectural axis without touching the hidden width.
+    """
+    assert depth >= 1, f"depth must be >= 1 (got {depth})"
+    layers: list = [nn.Linear(in_dim, hidden), nn.Tanh()]
+    for _ in range(depth - 1):
+        layers.extend([nn.Linear(hidden, hidden), nn.Tanh()])
+    layers.append(nn.Linear(hidden, out_dim))
+    return nn.Sequential(*layers)
+
+
 class _MonotoneScalarUMNN(nn.Module):
     """A 1D monotone-increasing function of T via T → bias + ∫_0^T softplus(MLP(t)) dt.
 
@@ -30,15 +46,9 @@ class _MonotoneScalarUMNN(nn.Module):
     integral signature clean (we use both the value and the derivative).
     """
 
-    def __init__(self, hidden: int = 16):
+    def __init__(self, hidden: int = 16, depth: int = 2):
         super().__init__()
-        self.mlp = nn.Sequential(
-            nn.Linear(1, hidden),
-            nn.Tanh(),
-            nn.Linear(hidden, hidden),
-            nn.Tanh(),
-            nn.Linear(hidden, 1),
-        )
+        self.mlp = _tanh_mlp(in_dim=1, hidden=hidden, out_dim=1, depth=depth)
         nn.init.zeros_(self.mlp[-1].weight)
         nn.init.zeros_(self.mlp[-1].bias)
         self.bias = nn.Parameter(torch.zeros(1))
@@ -68,21 +78,21 @@ class _MonotoneScalarUMNN(nn.Module):
 class DoublyMonotoneUMNN(nn.Module, Flow):
     monotonicity_guarantees = frozenset({Guarantee.R1, Guarantee.R2})
 
-    def __init__(self, hidden: int = 16, theta_ref: float = 0.3):
+    def __init__(self, hidden: int = 16, theta_ref: float = 0.3, depth: int = 2):
         super().__init__()
         self.hidden = hidden
         self.theta_ref = theta_ref
+        self.depth = depth
         # b_umnn(T): scalar monotone-increasing function of T
-        self._b_umnn = _MonotoneScalarUMNN(hidden=hidden)
+        self._b_umnn = _MonotoneScalarUMNN(hidden=hidden, depth=depth)
         # β_umnn(T): scalar monotone-increasing function of T (parameter inside the integrand)
-        self._beta_umnn = _MonotoneScalarUMNN(hidden=hidden)
-        # α(t): scalar trainable bias on the θ-integrand
-        # Implemented as a small MLP for flexibility; for the §8.4 truth pivot the
-        # learned α should saturate at the value that makes ∂_θ r match
-        # ∂_θ Φ⁻¹(F_{χ²_{2n}}(2θT)) on average.
-        self._alpha_net = nn.Sequential(
-            nn.Linear(1, hidden), nn.Tanh(), nn.Linear(hidden, 1),
-        )
+        self._beta_umnn = _MonotoneScalarUMNN(hidden=hidden, depth=depth)
+        # α(t): unconstrained MLP of t (the θ variable). Depth defaults to
+        # 2 per the codebase convention; configurable for capacity sweeps.
+        # A 1-hidden-layer α-net was the earlier bug (caught by diffing
+        # against the §8.4 reference implementation): the α-net needs
+        # enough capacity to fit the χ²-CDF shape that ∂_θ r* implies.
+        self._alpha_net = _tanh_mlp(in_dim=1, hidden=hidden, out_dim=1, depth=depth)
         self.register_buffer("_nodes", torch.tensor(_NODES_NP, dtype=torch.float32))
         self.register_buffer("_weights", torch.tensor(_WEIGHTS_NP, dtype=torch.float32))
 

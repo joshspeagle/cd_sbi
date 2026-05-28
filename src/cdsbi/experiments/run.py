@@ -109,18 +109,21 @@ def _build_flow(cfg: DictConfig, simulator) -> Any:
             d=d,
             hidden=budget_hidden,
         )
-    # v3 flows all share the same 2-arg constructor (hidden, theta_ref) and the
-    # same budget key (doubly_monotone_hidden).
+    # v3 flows all share the same constructor signature (hidden, theta_ref, depth)
+    # and the same budget key (doubly_monotone_hidden). depth defaults to the
+    # codebase convention (2) unless the flow YAML overrides.
     v3_targets = {
         "doubly_monotone": "cdsbi.flows.doubly_monotone.DoublyMonotoneUMNN",
         "joint_umnn": "cdsbi.flows.joint_umnn.JointUMNNFlow",
         "joint_umnn_1d": "cdsbi.flows.joint_umnn_1d.JointUMNN1DFlow",
     }
     if method_flow_label in v3_targets:
+        depth = int(OmegaConf.select(cfg, "flow.depth", default=2))
         return _instantiate(
             v3_targets[method_flow_label],
             hidden=int(cfg.budget.doubly_monotone_hidden),
             theta_ref=float(simulator.theta_range[0]),
+            depth=depth,
         )
     raise ValueError(
         f"Unknown flow label '{method_flow_label}' in method.flow. "
