@@ -1059,6 +1059,11 @@ F1 panels are pure functions of synthetic input data, so they have no sourcing d
 
 The F2 plan should open by resolving (1) and (2) — extend the diagnostic writers + a targeted re-run — before composing E1/E3/E4/E5. This is the single biggest F2 risk and is why it is flagged here at F1 close.
 
+**F2 call-site notes (from the final F1 review):**
+- `coverage_tile(ax, theta0, alpha, error)` expects `error` with shape `(len(theta0), len(alpha))` — rows are the y-axis (θ₀), columns the x-axis (α), matching `pcolormesh`. F2 must slice the coverage parquet into that orientation.
+- `cross_method_summary_log_y` draws the floor via `noise_floor_band` with its default `label="noise floor"`; if an F2 legend needs a different label there, pass it at the builder level. `loss_*` panels already pass `label="entropy floor"`.
+- `loss_bar_with_floor` groups series in caller dict-insertion order (intentional — the R1+R2 vs R1-only ablation has no canonical method order); F2 passes the dict in display order.
+
 ---
 
 ## Self-review notes
