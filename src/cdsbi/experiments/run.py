@@ -73,6 +73,22 @@ def _build_flow(cfg: DictConfig, simulator) -> Any:
     # Slow path: method requests a different flow than the Hydra group default.
     # Build from first principles using cfg.budget to resolve hidden-size params.
     if method_flow_label == "maf":
+        # NPE models p(θ | X): the flow's features are θ-shaped, conditioned on X.
+        # NLE models p(X | θ): the flow's features are X-shaped, conditioned on θ.
+        # For symmetric d (v0/v1/v2 location-family targets), this distinction
+        # was moot. v3's ExponentialRate is the first asymmetric target
+        # (d_theta=1, d_x=5) — NLE here needs features=d_x, context_features=d_theta
+        # or nflows raises "Dimension 1 must be of size 1" deep in the permutation
+        # transform. Dispatch on cfg.method.name to get the right shape.
+        method_name = OmegaConf.select(cfg, "method.name", default="")
+        if method_name == "nle":
+            return _instantiate(
+                "cdsbi.flows.maf_adapter.MAFAdapter",
+                features=int(simulator.d_x),
+                context_features=int(simulator.d_theta),
+                hidden=int(cfg.budget.maf_hidden),
+                num_layers=2,
+            )
         return _instantiate(
             "cdsbi.flows.maf_adapter.MAFAdapter",
             features=int(simulator.d_theta),
@@ -80,9 +96,6 @@ def _build_flow(cfg: DictConfig, simulator) -> Any:
             hidden=int(cfg.budget.maf_hidden),
             num_layers=2,
         )
-        # TODO(v1+): for asymmetric d (d_x != d_theta), NLE wants features=d_x
-        # and context_features=d_theta. v1's loc_gauss_2d_iid is symmetric so
-        # this is correct; revisit when an asymmetric target lands.
     if method_flow_label == "additive_umnn":
         depth = int(OmegaConf.select(cfg, "flow.depth", default=2))
         if int(simulator.d_theta) == 1:
