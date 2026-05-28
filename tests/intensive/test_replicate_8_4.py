@@ -14,13 +14,16 @@ def test_replicate_8_4_cdsbi_matches_tolerance(tmp_path):
     """Run CDSBI on the doubly-monotone flow + ExponentialRate target across
     5 seeds; seed-averaged metrics within tolerance bands.
 
-    Tolerance bands per manuscript §8.4 with 3× headroom (the non-additive
-    target is harder than §8.1–§8.3; the doubly-monotone flow's seed-
-    averaged pivot RMSE consistently lands at 0.12–0.13, ~3× the
-    manuscript's lucky-single-seed 0.045 — same widening pattern v1/v2
-    documented for their respective §8.x sections):
-      - pivot_rmse mean ≤ 0.15 (manuscript single-seed: 0.045)
-      - coverage_error_max mean ≤ 0.07 (manuscript: < 0.015)
+    Tolerance bands per manuscript §8.4 with ~1.5× headroom for seed scatter
+    (matches the §8.1–§8.3 pattern). After the v3 architectural fixes
+    (deeper α-net, theta_ref at proposal center, T_ref=5.0 in the
+    MonotoneScalarUMNN integration baseline — all caught by diffing
+    against the §8.4 reference implementation), the doubly-monotone
+    flow's seed-averaged pivot RMSE lands at ~0.045, exactly matching
+    the manuscript's single-seed value.
+      - pivot_rmse mean ≤ 0.07 (manuscript single-seed: 0.045)
+      - coverage_error_max mean ≤ 0.04 (manuscript: < 0.015; sweep
+        averages stay ~2× the manuscript point estimate due to MC noise)
       - final_loss STAYS ABOVE the conditioner-adjusted entropy lower
         bound (the doubly-monotone contract: R1+R2 architectures
         preserve normalization; final_loss < bound would be a sign
@@ -44,8 +47,8 @@ def test_replicate_8_4_cdsbi_matches_tolerance(tmp_path):
 
     df = load_runs(str(out_dir / "*"))
     assert len(df) == 5
-    assert df["pivot_rmse"].mean() <= 0.15, f"pivot_rmse mean = {df['pivot_rmse'].mean()}"
-    assert df["coverage_error_max"].mean() <= 0.07, (
+    assert df["pivot_rmse"].mean() <= 0.07, f"pivot_rmse mean = {df['pivot_rmse'].mean()}"
+    assert df["coverage_error_max"].mean() <= 0.04, (
         f"coverage_error_max mean = {df['coverage_error_max'].mean()}"
     )
     # Final-loss check: doubly-monotone (R1+R2) must stay ABOVE the entropy

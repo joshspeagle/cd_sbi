@@ -40,14 +40,21 @@ def _tanh_mlp(in_dim: int, hidden: int, out_dim: int, depth: int) -> nn.Sequenti
 
 
 class _MonotoneScalarUMNN(nn.Module):
-    """A 1D monotone-increasing function of T via T → bias + ∫_0^T softplus(MLP(t)) dt.
+    """A 1D monotone-increasing function of T via T → bias + ∫_{T_ref}^T softplus(MLP(t)) dt.
 
     Self-contained quadrature; does not depend on v0's UMNNBlock to keep the
     integral signature clean (we use both the value and the derivative).
+    T_ref is the integration baseline — choose it near the typical T value
+    so the `bias` parameter has the interpretation of "value at typical T"
+    and the integral represents "deviation from typical." T_ref=0 (the
+    earlier default) integrated from 0 to T, making the integral large for
+    typical T values and the bias dominated; T_ref=5.0 (the §8.4 reference
+    implementation default) better matches optimization scales.
     """
 
-    def __init__(self, hidden: int = 16, depth: int = 2):
+    def __init__(self, hidden: int = 16, depth: int = 2, T_ref: float = 5.0):
         super().__init__()
+        self.T_ref = T_ref
         self.mlp = _tanh_mlp(in_dim=1, hidden=hidden, out_dim=1, depth=depth)
         nn.init.zeros_(self.mlp[-1].weight)
         nn.init.zeros_(self.mlp[-1].bias)
@@ -59,15 +66,17 @@ class _MonotoneScalarUMNN(nn.Module):
         return F.softplus(self.mlp(t)) + 1e-3  # strictly positive
 
     def forward(self, T: torch.Tensor) -> torch.Tensor:
-        """∫_0^T softplus(MLP(t)) dt + bias, with T positive."""
+        """bias + ∫_{T_ref}^T softplus(MLP(t)) dt. Integral can be negative
+        if T < T_ref (the integrand is positive, but the interval reverses)."""
         n = T.shape[0]
-        # Map [-1, 1] nodes to [0, T]
+        a = self.T_ref
+        # Map [-1, 1] nodes to [T_ref, T]
         u = self._nodes.view(1, -1, 1).expand(n, -1, 1)
         T_exp = T.view(n, 1, 1).expand(-1, u.size(1), -1)
-        t = 0.5 * T_exp * (u + 1.0)
+        t = a + 0.5 * (T_exp - a) * (u + 1.0)
         integrand = self._integrand(t)
         weights = self._weights.view(1, -1, 1)
-        integral = 0.5 * T * (weights * integrand).sum(dim=1)
+        integral = 0.5 * (T - a) * (weights * integrand).sum(dim=1)
         return self.bias + integral
 
     def derivative(self, T: torch.Tensor) -> torch.Tensor:

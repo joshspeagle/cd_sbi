@@ -1,5 +1,5 @@
 name: doubly_monotone
 _target_: cdsbi.flows.doubly_monotone.DoublyMonotoneUMNN
 hidden: ${budget.doubly_monotone_hidden}
-theta_ref: 0.3  # lower endpoint of the proposal support; integrand always over [theta_ref, theta]
+theta_ref: 1.65  # center of [0.3, 3.0]; matches §8.4 reference implementation. Lower endpoint was an earlier bug.
 depth: 2  # hidden-layer count per MLP (α_net, b_umnn, β_umnn). Default 2 is the codebase convention; sweep for capacity studies.

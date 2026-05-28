@@ -119,10 +119,19 @@ def _build_flow(cfg: DictConfig, simulator) -> Any:
     }
     if method_flow_label in v3_targets:
         depth = int(OmegaConf.select(cfg, "flow.depth", default=2))
+        # Default theta_ref: center of the proposal range (matches the §8.4
+        # reference implementation). Keeping the integral path centered on
+        # the mid-range reduces |theta - theta_ref| on average, which keeps
+        # the Gauss-Legendre quadrature error bounded. The lower-endpoint
+        # choice (which the manuscript prose suggests) was an earlier bug
+        # caught by diffing against the reference code.
+        a, b = simulator.theta_range
+        default_theta_ref = 0.5 * (a + b)
+        theta_ref = float(OmegaConf.select(cfg, "flow.theta_ref", default=default_theta_ref))
         return _instantiate(
             v3_targets[method_flow_label],
             hidden=int(cfg.budget.doubly_monotone_hidden),
-            theta_ref=float(simulator.theta_range[0]),
+            theta_ref=theta_ref,
             depth=depth,
         )
     raise ValueError(
