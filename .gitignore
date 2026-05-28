@@ -50,3 +50,12 @@ sbi-logs/
 .coverage
 .claude/
 *.tmp.*
+
+# Visualization suite outputs ARE tracked (override the global *.pdf rule above).
+# Use the ** form so nested figure subdirs (e.g. figures/section_8/e1.pdf) are
+# also un-ignored, not just files directly in figures/. PNGs are not globally
+# ignored, but negate them too for clarity / future-proofing.
+!figures/**/*.pdf
+!figures/**/*.png
+!figures/*.pdf
+!figures/*.png
