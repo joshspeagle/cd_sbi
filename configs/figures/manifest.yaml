@@ -1,0 +1,12 @@
+# CD-SBI figure manifest. Single source of truth binding figure id ->
+# data sources + builder + output paths. See
+# docs/superpowers/specs/2026-05-28-cd-sbi-visualizations-design.md
+_hello:
+  description: "Hello-world synthetic figure (F0 pipeline smoke)"
+  section: "infra"
+  source_runs: []
+  checkpoint_runs: []
+  builder: "cdsbi.analysis.figures.figures._hello:render"
+  output:
+    pdf: figures/_hello.pdf
+    png: figures/_hello.png
