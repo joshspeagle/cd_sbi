@@ -33,9 +33,12 @@ def test_write_gallery_creates_readme(tmp_path):
     text = out.read_text()
     assert "Hello-world synthetic figure" in text
     assert "Cross-method summary demo" in text
-    # PNG embed for each figure
-    assert "_hello.png" in text
-    assert "e8_demo.png" in text
+    # PNG embed for each figure, by BASENAME (link is relative to figures/README.md).
+    # Assert the full markdown embed, and that the full path is NOT used — so a
+    # regression from Path(...).name back to the full "figures/..." path is caught.
+    assert "![_hello](_hello.png)" in text
+    assert "![e8_demo](e8_demo.png)" in text
+    assert "figures/_hello.png" not in text
     # Source run listed for the data-bound figure
     assert "outputs/8_1_baseline_sweep/run" in text
     assert str(out) == path
