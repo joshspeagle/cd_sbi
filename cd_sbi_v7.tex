@@ -3175,8 +3175,10 @@ but the source of strict propriety for NF-MLE.
 
 The four experiments collectively establish that the population-level
 theory of Parts III--IV is reached at practical finite-sample budgets
-(\(N \in [5000, 10000]\), training time 2--4 min on CPU). Mapping
-experiments back to claims:
+(\(N \in [5000, 10000]\) per training run, 5 seeds at each of four
+matched-parameter budgets per section, wall \(\sim 30\) s to a few
+minutes per run on GPU). Mapping experiments back to claims, with
+seed-averaged numbers from the medium-budget sweep:
 
 \begin{longtable}[]{@{}
   >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
@@ -3191,22 +3193,27 @@ Empirical evidence
 \endhead
 \bottomrule\noalign{}
 \endlastfoot
-Theorem A: \(r^* = \theta - X\) uniquely calibrates in 1D & \S\ref{subsec:8.1}: RMSE
-0.030; slopes recovered to 1--2\%; coverage error \(< 0.01\) \\
+Theorem A: \(r^* = \theta - X\) uniquely calibrates in 1D &
+\S\ref{subsec:8.1}: pivot RMSE \(0.023 \pm 0.005\); coverage error max
+\(0.025 \pm 0.005\) (at the Monte-Carlo binomial floor) \\
 Triangular flow construction yields a valid CD pivot in \(d > 1\)
-(\S\ref{subsec:6.1}--6.2) & \S\ref{subsec:8.2}: joint Mahalanobis KS 0.011, coverage error
-\(< 0.01\) \\
-Theorem A-d: KR \(= L^{-1}(\theta - X)\) is the unique pivot in
-triangular class for Gaussian (\S\ref{subsec:6.3} corollary) & \S\ref{subsec:8.3}: recovered
-\(\mathbb{E}[J_\theta]\) matches \(L^{-1}\) to 1--2\%; coverage exact to
-within 1.5\% \\
-(R2) is a correctness requirement, not a stylistic preference & \S\ref{subsec:8.4}:
-doubly-monotone construction recovers \(r^*\) (RMSE 0.045);
-autograd-Jacobian ablation produces a loss \emph{below} truth and fails
-calibration \\
+(\S\ref{subsec:6.1}--6.2) & \S\ref{subsec:8.2}: joint Mahalanobis KS
+\(0.032 \pm 0.006\) (at the per-\(\theta_0\) noise floor); coverage
+error max \(0.020 \pm 0.004\) \\
+Theorem A-d: KR \(= L^{-1}(\theta - X)\) is the unique pivot in the
+triangular class for Gaussian (\S\ref{subsec:6.3} corollary) &
+\S\ref{subsec:8.3}: trained \(\mathbb{E}[J_\theta]\) matches \(L^{-1}\)
+to max-element residual \(0.032 \pm 0.019\) (well inside the 5\%
+tolerance); coverage error max \(0.025 \pm 0.007\) \\
+(R2) is a correctness requirement, not a stylistic preference &
+\S\ref{subsec:8.4}: doubly-monotone construction recovers \(r^*\)
+(RMSE \(0.044 \pm 0.004\), final NF-MLE loss \(0.985 \pm 0.027\) at the
+entropy floor); R1-only ablation under-converges to a loss
+\(\sim 0.4\) above the floor at the standard recipe and folds below
+the floor at the longer recipe captured as a regression test \\
 \end{longtable}
 
-Summary table:
+Summary table (medium-budget CDSBI, mean \(\pm\) std across 5 seeds):
 
 \begin{longtable}[]{@{}
   >{\raggedright\arraybackslash}p{(\columnwidth - 8\tabcolsep) * \real{0.2000}}
@@ -3220,9 +3227,9 @@ Experiment
 \end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
 Pivot RMSE
 \end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-Marg KS
+Marg PIT KS
 \end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
-Coverage error
+Coverage err max
 \end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
 Theoretical claim supported
 \end{minipage} \\
@@ -3230,15 +3237,21 @@ Theoretical claim supported
 \endhead
 \bottomrule\noalign{}
 \endlastfoot
-1D location-normal & 0.030 & 0.008 & \(< 0.01\) & Theorem A \\
-2D loc, \(\Sigma = I\) & 0.044 & 0.007, 0.006 & \(< 0.01\) & \S\ref{subsec:6.1}
-construction \\
-2D loc, \(\Sigma\) corr. & 0.27 (3\% rel.) & 0.010, 0.003 & \(< 0.015\)
-& Theorem A-d (Jacobian \(= L^{-1}\)) \\
-Exp-rate (doubly-mono) & 0.045 & 0.006 & \(< 0.015\) & (R2)
-sufficiency \\
-Exp-rate (autograd Jac, ablation) & 1.56 & 0.024 & up to 3.4\% & (R2)
-necessity \\
+1D location-normal & \(0.023 \pm 0.005\) & \(0.013 \pm 0.004\) &
+\(0.025 \pm 0.005\) & Theorem A \\
+2D loc, \(\Sigma = I\) & \(0.058 \pm 0.008\) & \(0.014/0.013\) &
+\(0.020 \pm 0.003\) & \S\ref{subsec:6.1} construction \\
+2D loc, \(\Sigma\) corr. & \(0.079 \pm 0.026\) & \(0.014/0.013\) &
+\(0.025 \pm 0.007\) & Theorem A-d (Jacobian \(=L^{-1}\)) \\
+Exp-rate (doubly-monotone) & \(0.044 \pm 0.004\) & \(0.013 \pm 0.003\)
+& \(0.032 \pm 0.004\) & (R2) sufficiency \\
+Exp-rate (R1-only ablation, standard recipe) & --- & ---
+& under-converges to NF-MLE loss \(\approx 1.40\) (entropy floor 0.99)
+& (R2) necessity, soft form \\
+Exp-rate (R1-only ablation, longer recipe) & --- & --- & NF-MLE loss
+falls \emph{below} entropy floor \((\approx 0.5)\); see
+\texttt{tests/ablation/test\_trained\_folding.py} & (R2) necessity,
+catastrophic form \\
 \end{longtable}
 
 The architectural prescription distilled across all four cases:
@@ -3715,14 +3728,23 @@ Theorem A-d: multivariate uniqueness within triangular class & Proven
 1D \\
 Corollary: KR \(= L^{-1}(\theta - X)\) for multivariate
 location-Gaussian & Proven (\S\ref{subsec:6.3}) & Verified empirically in \S\ref{subsec:8.3} \\
-Empirical: 1D location-normal & Validated (\S\ref{subsec:8.1}) & RMSE 0.030, coverage
-\(< 1\%\) error \\
-Empirical: 2D location, \(\Sigma = I\) & Validated (\S\ref{subsec:8.2}) & RMSE 0.044,
-joint Mahalanobis PASS \\
+Empirical: 1D location-normal & Validated (\S\ref{subsec:8.1}) &
+Sweep (5 seeds \(\times\) 4 budgets): RMSE \(0.023 \pm 0.005\),
+coverage error max \(0.025 \pm 0.005\) (at the binomial floor) \\
+Empirical: 2D location, \(\Sigma = I\) & Validated (\S\ref{subsec:8.2}) &
+Sweep: RMSE \(0.058 \pm 0.008\), joint Mahalanobis KS
+\(0.032 \pm 0.006\), coverage error max \(0.020 \pm 0.003\) \\
 Empirical: 2D location, \(\Sigma\) correlated, recovers \(L^{-1}\) &
-Validated (\S\ref{subsec:8.3}) & Jacobian within 1--2\% of KR; coverage exact \\
-Empirical: exponential rate doubly-monotone & Validated (\S\ref{subsec:8.4}) & RMSE
-0.045; autograd ablation produces direct evidence for (R2) \\
+Validated (\S\ref{subsec:8.3}) & Sweep: Jacobian max residual
+\(0.032 \pm 0.019\) (within 5\% tolerance); coverage error max
+\(0.025 \pm 0.007\) \\
+Empirical: exponential rate doubly-monotone & Validated
+(\S\ref{subsec:8.4}) & Sweep: RMSE \(0.044 \pm 0.004\), final NF-MLE
+loss \(0.985 \pm 0.027\) at the entropy floor; R1-only ablation
+under-converges or folds depending on training recipe; cross-method
+apples-to-apples (all methods on \(T = \sum X_i\)) confirms CDSBI's
+\(5\)--\(10 \times\) lead is from the architectural prescription, not
+dimensionality \\
 Uniqueness outside autoregressive triangular class & Open --- theoretical extension (\S\ref{subsec:11.1}) &
 Rotational ambiguity in dense flows; architectural enforcement avoids it \\
 KR ordering selection for unordered data & Open --- theoretical extension (\S\ref{subsec:11.2}) & Multiple valid
