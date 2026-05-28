@@ -433,6 +433,22 @@ def main(cfg: DictConfig) -> None:
         from cdsbi.methods.budget import validate_budget
 
         simulator = _build_simulator(cfg)
+        # For an apples-to-apples §8.4 comparison, give NPE/NLE/NRE/LF2I-BFF
+        # the same X → T = Σ X_i sufficient-statistic reduction CDSBI uses.
+        # CDSBI itself continues to use the BASE simulator + its own
+        # MLPConditioner inside the runner (NFMLELoss needs the
+        # log|∂T/∂X| Jacobian term in the loss; the wrapped simulator
+        # would hide that contribution). For non-CDSBI methods the
+        # Jacobian term is irrelevant — they don't do NF-MLE-style
+        # change-of-variables on X — so pre-reducing at the data
+        # boundary keeps the comparison clean.
+        if cfg.target.name == "exp_rate" and cfg.method.name != "cd_sbi":
+            from cdsbi.conditioners.mlp import MLPConditioner
+            from cdsbi.simulators._reduced import ReducedSimulator
+            _reduction = MLPConditioner(
+                input_dim=int(simulator.d_x), output_dim=1, mode="frozen_sum",
+            )
+            simulator = ReducedSimulator(simulator, _reduction)
         runner = _build_method(cfg, simulator)
         if cfg.method.name == "lf2i_bff":
             n_params = runner.n_params(
