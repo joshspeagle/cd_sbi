@@ -40,12 +40,13 @@ is the working one. The conda `pdflatex` at
 on this machine — its perl-based `mktexfmt` can't find
 `mktexlsr.pl` and bails before opening `pdflatex.fmt`.
 
-**Python codebase** (v0 + v1 + v2 landed; 175 fast tests + 3 intensive replication tests):
+**Python codebase** (v0 + v1 + v2 + v3 landed; ~201 fast tests + 4 intensive replication tests + opt-in (R2) ablation suite):
 
 ```bash
 pip install -e ".[dev]"               # install cdsbi package + dev deps
 pytest                                # fast tests (unit + integration + diagnostics)
 pytest -m intensive                   # opt-in full-budget replication (minutes)
+pytest -m ablation                    # opt-in (R2) ablation tests (mechanism + trained folding)
 python -m cdsbi.experiments.run experiment=8_1_replication seed=0   # single run
 python -m cdsbi.experiments.run -m experiment=8_3_baseline_sweep \
     method=cd_sbi,npe,nle,nre,lf2i_bff \
@@ -62,10 +63,10 @@ python -m cdsbi.experiments.run -m experiment=8_3_baseline_sweep \
 - `references/<bibkey>.md` — paper note per cited entry, built during round 2.
 - `reviews/round{1,2,3}/` — per-round critic reports and audit trail.
 - `docs/superpowers/specs/` — design specs.
-- `docs/superpowers/plans/` — implementation plans (v0, v1, v2 plans live here; v3 plan next).
-- `src/cdsbi/` — Python package (v0 + v1 + v2 landed). Six core layers + `confidence_set/`, `experiments/`, `analysis/`, `reproducibility/`.
+- `docs/superpowers/plans/` — implementation plans (v0, v1, v2, v3 plans live here; v4 plan next).
+- `src/cdsbi/` — Python package (v0 + v1 + v2 + v3 landed). Six core layers + `confidence_set/`, `experiments/`, `analysis/`, `reproducibility/`. v3 added `DoublyMonotoneUMNN`, `JointUMNNFlow`, `JointUMNN1DFlow`, `MLPConditioner`, `ReducedSimulator`.
 - `configs/` — Hydra config groups (target / flow / conditioner / method / training / budget / experiment).
-- `tests/` — `unit/`, `integration/`, `diagnostics/`, opt-in `intensive/` (3 replication tests: §8.1, §8.2, §8.3).
+- `tests/` — `unit/`, `integration/`, `diagnostics/`, opt-in `intensive/` (4 replication tests: §8.1, §8.2, §8.3, §8.4) and opt-in `ablation/` (3 tests: safety-check, trained-folding, 1D mechanism).
 - `LICENSE`, `README.md`, `.gitignore` — repo setup.
 
 ## Specs and plans
@@ -85,6 +86,7 @@ Active artifacts:
 - `docs/superpowers/plans/2026-05-25-cd-sbi-v0-experiment-infrastructure.md`
 - `docs/superpowers/plans/2026-05-26-cd-sbi-v1-multivariate-iid.md`
 - `docs/superpowers/plans/2026-05-27-cd-sbi-v2-correlated-sigma.md`
+- `docs/superpowers/plans/2026-05-27-cd-sbi-v3-r2-ablation.md`
 
 ## Manuscript status
 
@@ -162,27 +164,32 @@ per the round-3 fresh-reader verdicts.
   trailer. No `--no-verify`, no `--amend` on existing commits unless
   explicitly requested.
 
-## Codebase status (v0 + v1 + v2 done)
+## Codebase status (v0 + v1 + v2 + v3 done)
 
-All three phases are **implemented, test-passing, and reflected in the
-manuscript**. 175 fast tests pass in ~90s; 3 intensive replication tests
-clear their tolerance bands (§8.1 in ~5 min, §8.2 in ~16 min, §8.3 in
-~5 min wall on GPU). The cross-method sweep at each section runs 5
-methods × 4 budgets × 5 seeds = 100 runs.
+All four phases are **implemented, test-passing, and reflected in the
+manuscript**. ~201 fast tests pass in ~90s; 4 intensive replication tests
+clear their tolerance bands (§8.1 ~5 min, §8.2 ~16 min, §8.3 ~5 min,
+§8.4 ~5 min wall on GPU). The cross-method sweep at each section runs
+5 methods × 4 budgets × 5 seeds = 100 runs. v3 also adds a separate
+(R2) ablation sweep (R1-only `JointUMNNFlow` vs R1+R2 `DoublyMonotoneUMNN`).
 
-**Headline empirical result across v0 → v1 → v2 (coverage_error_max,
+**Headline empirical result across v0 → v1 → v2 → v3 (coverage_error_max,
 mean ± std; lower = better; noise floor ~0.02):**
 
-| Method | §8.1 (1D) | §8.2 (2D iid) | §8.3 (2D corr) |
-|---|---|---|---|
-| **CDSBI** | **0.025** | **0.025** | **0.025** ← at noise floor across all three |
-| NLE | 0.025 (tied) | 0.07–0.09 (3–4× floor) | 0.10–0.12 (4–5× floor) |
-| NPE | 0.06–0.07 | 0.05–0.10 | 0.05–0.09 |
-| LF2I-BFF | 0.06–0.07 | 0.11–0.12 | 0.11–0.14 |
-| NRE | 0.08–0.12 | 0.14–0.18 | 0.14–0.19 |
+| Method | §8.1 (1D) | §8.2 (2D iid) | §8.3 (2D corr) | §8.4 (exp rate, on T) |
+|---|---|---|---|---|
+| **CDSBI** | **0.025** | **0.025** | **0.025** | **0.028–0.034** ← at noise floor across all four |
+| LF2I-BFF | 0.06–0.07 | 0.11–0.12 | 0.11–0.14 | 0.06–0.09 (3–4× floor) |
+| NRE | 0.08–0.12 | 0.14–0.18 | 0.14–0.19 | 0.12–0.20 (6–10× floor) |
+| NLE | 0.025 (tied) | 0.07–0.09 | 0.10–0.12 | 0.21–0.25 (10–13× floor) |
+| NPE | 0.06–0.07 | 0.05–0.10 | 0.05–0.09 | 0.24–0.25 (12–13× floor) |
 
 The CDSBI → NLE gap widens monotonically as the data distribution gets
-more non-trivial — theory predicted this; v0 → v2 confirmed it empirically.
+more non-trivial — theory predicted this; v0 → v3 confirmed it empirically.
+§8.4 also flips the ordering of the non-CDSBI methods: LF2I-BFF moves
+ahead of NLE because its calibration head fits the χ²-shaped test
+statistic, whereas the Bayesian methods over-concentrate on a small
+region of the prior.
 
 **Per-phase summary:**
 
@@ -208,6 +215,23 @@ more non-trivial — theory predicted this; v0 → v2 confirmed it empirically.
   `jacobian_max_residual` aggregate column. Mid-execution perf fix
   dropped `PosteriorBasedProcedure` default `n_samples` 10000 → 2000
   (5× NPE wall speedup; coverage answer unchanged).
+- **v3 (§8.4).** Non-additive exponential-rate target with closed-form
+  truth pivot `r*(θ, T) = Φ⁻¹(F_{χ²_{10}}(2θT))` (sufficient statistic
+  `T = Σ X_i`, `n = 5`). New: `ExponentialRate` simulator,
+  `MLPConditioner` (frozen-sum X→T with `½ log 5` Jacobian — the
+  framework's first non-trivial `log_det_jac_input_contribution`),
+  `ReducedSimulator` (wraps non-CDSBI methods so they receive `(θ, T)`
+  for apples-to-apples comparison), `DoublyMonotoneUMNN` (§6.1 form 2 —
+  main flow, `{R1, R2}` architectural guarantees), `JointUMNNFlow`
+  (R1-only ablation flow), `JointUMNN1DFlow` (1D mechanism analog).
+  New `tests/ablation/` test category with `ablation` pytest marker:
+  safety-check (mismatched guarantees raise `MonotonicityMismatchError`
+  unless `allow_ablation=True`), trained-folding (R1-only longer-recipe
+  final loss falls below the entropy floor — the §3.5 mechanism failure
+  captured as a regression), 1D direct-construction mechanism. The
+  doubly-monotone arm reaches the entropy floor (final NF-MLE loss
+  0.985 ± 0.027 vs floor 0.99) across all budgets; the R1-only arm
+  under-converges to ~1.40 at the standard recipe.
 
 **Known caveats (still open; revisit at the relevant milestone):**
 
@@ -221,8 +245,10 @@ more non-trivial — theory predicted this; v0 → v2 confirmed it empirically.
   need proper volume estimation at higher d or for inferential use.
 - **Coverage diagnostic uses a fixed 5-point θ_0 grid.** Works at
   d ≤ 2; v6 high-d will need a θ_0-grid generation strategy.
-- **(R2) ablation tests deferred to v3** (§8.4 is where the §3.5
-  mechanism failure can be empirically demonstrated).
+- **(R2) ablation landed in v3** — `tests/ablation/test_trained_folding.py`
+  demonstrates the §3.5 mechanism failure (final loss drops below the
+  entropy floor under a longer training recipe; under-converges at the
+  standard recipe). Seed-fragile by design — see commit f1d17a7 notes.
 
 **Manuscript-to-code mapping:**
 - §8.1 numbers: `outputs/8_1_baseline_sweep/2026-05-27_00-57-31/` +
@@ -232,14 +258,11 @@ more non-trivial — theory predicted this; v0 → v2 confirmed it empirically.
   `2026-05-27_08-00-09/` (LF2I-BFF retune).
 - §8.3 numbers: `outputs/8_3_baseline_sweep/2026-05-27_11-18-28/`
   (non-NPE) + `2026-05-27_16-08-27/` (NPE re-run with `n_samples=2000`).
+- §8.4 numbers: `outputs/8_4_baseline_sweep/2026-05-28_12-05-31/`
+  (apples-to-apples 5-method × 4-budget × 5-seed sweep on `T`) +
+  `outputs/8_4_ablation/2026-05-27_23-55-59/` (R1+R2 vs R1-only sweep).
 
-**Next milestone:** v3 (§8.4 exponential rate + (R2) ablation). New
-code expected: `DoublyMonotoneUMNN`, `JointUMNNFlow`, `JointUMNN1DFlow`,
-`MLPConditioner` (X→T sufficient-statistic reduction with non-zero
-`log_det_jac_input_contribution`), and a new Ablation test category
-that empirically validates the §3.5 mechanism failure when (R2) is
-not enforced.
-
-After v3: v4 (SBI benchmark), v5 (§3.7 alt-loss), v6 (synthetic
-high-d), v7 (real-data astronomy), v8 (image/sequence). See spec §12
-for the full roadmap.
+**Next milestone:** v4 (SBI benchmark — Two Moons, SLCP, Gaussian
+Mixture, etc.). After v4: v5 (§3.7 alt-loss), v6 (synthetic high-d),
+v7 (real-data astronomy), v8 (image/sequence). See spec §12 for the
+full roadmap.
