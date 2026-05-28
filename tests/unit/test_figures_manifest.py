@@ -69,3 +69,17 @@ def test_missing_required_field_raises(tmp_path):
     bad = "x:\n  description: no builder here\n"
     with pytest.raises(KeyError):
         load_manifest(_write(tmp_path, bad))
+
+
+def test_shipped_manifest_builders_resolve():
+    """The real configs/figures/manifest.yaml must parse and every builder
+    reference must import to a real callable. The MANIFEST_YAML tests above use
+    os.path:join as a parse-only stand-in; this test guards the actual config so
+    a renamed/typo'd builder string is caught at the manifest layer, not only
+    in the render integration test."""
+    from cdsbi.analysis.figures.manifest import load_manifest
+    specs = load_manifest("configs/figures/manifest.yaml")
+    assert specs, "shipped manifest is empty"
+    for fig_id, spec in specs.items():
+        fn = spec.resolve_builder()
+        assert callable(fn), f"{fig_id} builder {spec.builder!r} did not resolve to a callable"
