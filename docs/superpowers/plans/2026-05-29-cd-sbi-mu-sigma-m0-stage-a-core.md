@@ -2,9 +2,30 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build the Stage-A core for the unknown-(μ, σ²) Gaussian target: the simulator (with closed-form joint pivot), the oracle sufficient-statistic conditioner, the non-additive autoregressive `TriangularDoublyMonotoneFlow`, wire them into the run CLI, and confirm a single CDSBI run recovers the closed-form pivot.
+> **⚠️ DESIGN REVISION (2026-05-29) — single-index monotone flow supersedes doubly-monotone.**
+> The originally-planned `TriangularDoublyMonotoneFlow` enforces `∂r/∂θ > 0`
+> **and** `∂r/∂feat > 0`, but scale parameters demand *opposite-sign*
+> monotonicity (`r_σ ↑` in `log σ` but `↓` in the data feature, because both
+> enter only through `s²/σ²`). This is intrinsic and not fixable by a sign flip
+> (the `b′ ± β′∫σ` coupling makes `∂r/∂feat` change sign across the support).
+> The architecture was redesigned to the **`SingleIndexMonotoneFlow`** —
+> `r_k = G_k(s_θk·softplus(p_θk(ctx))·θ_k + s_fk·softplus(p_fk(ctx))·feat_k + off_k(ctx); ctx)`
+> with `G_k` a monotone-increasing UMNN of the scalar index — which gives
+> **independent, globally-guaranteed** R1/R2 signs (no `theta_ref` restriction),
+> stays non-additive, and was numerically validated against the closed-form
+> truth (RMSE `r_σ`=0.0013, `r_μ`=0.035). The spec is the design of record
+> (§A.1/§A.2 + the dated revision note). Tasks below that reference the
+> doubly-monotone flow, the decreasing-`θ` pivot convention, or `(s², X̄)`
+> features are **superseded** — the corrected forms are summarized here and in
+> the spec; the as-built code is committed (flow `a2a0d1e`, wiring this commit).
+> Net per-task deltas: **T2** `r*` → increasing-`θ` convention; **T3**
+> conditioner → `(log s², X̄)`; **T4/T5** flow → `SingleIndexMonotoneFlow`;
+> **T6/T7** configs/wiring → inject per-coord `theta_signs`/`feat_signs`;
+> **T8** recovery smoke against the new flow.
 
-**Architecture:** New simulator `NormalUnknownMeanVar` (θ=(log σ, μ), n_iid=10, exact `r_star`). New oracle `SufficientStatConditioner` (X→(s², X̄), frozen, constant log-det). New flow `TriangularDoublyMonotoneFlow(d)` — autoregressive/triangular, each coordinate doubly-monotone in (θ_k, feat_k) via Gauss–Legendre quadrature and conditioned on (θ_{<k}, feat_{<k}); lower-triangular feature-Jacobian gives `log_det = Σ_k log|∂r_k/∂feat_k|` in closed form. Generalizes both `TriangularAdditiveFlow` (additive special case) and `DoublyMonotoneUMNN` (d=1 special case).
+**Goal:** Build the Stage-A core for the unknown-(μ, σ²) Gaussian target: the simulator (with closed-form joint pivot), the oracle sufficient-statistic conditioner, the non-additive autoregressive `SingleIndexMonotoneFlow`, wire them into the run CLI, and confirm a single CDSBI run recovers the closed-form pivot.
+
+**Architecture:** New simulator `NormalUnknownMeanVar` (θ=(log σ, μ), n_iid=10, exact `r_star`). New oracle `SufficientStatConditioner` (X→(log s², X̄), frozen, constant log-det). New flow `SingleIndexMonotoneFlow(d, theta_signs, feat_signs)` — autoregressive/triangular, each coordinate a monotone-increasing UMNN `G_k` of a signed single index `z_k = s_θk·softplus(p_θk(ctx))·θ_k + s_fk·softplus(p_fk(ctx))·feat_k + off_k(ctx)` conditioned on `ctx=(θ_{<k}, feat_{<k})`; fixed signs give `∂r_k/∂θ_k` sign `s_θk` and `∂r_k/∂feat_k` sign `s_fk` *globally*; lower-triangular feature-Jacobian gives `log_det = Σ_k log|∂r_k/∂feat_k|` in closed form. For `(μ, σ²)`: `s_θ=(+1,+1)`, `s_f=(−1,−1)`.
 
 **Tech Stack:** PyTorch (Gauss–Legendre quadrature, closed-form Jacobians), Hydra, pytest, numpy/scipy (closed-form pivot via χ²/Φ).
 
@@ -12,10 +33,10 @@
 
 ---
 
-## Conventions locked for M0
+## Conventions locked for M0 (as-built, single-index design)
 
-- **Parameter order `θ = (log σ, μ)`** (index 0 = log σ, index 1 = μ) — the forced KR order. **Feature order `(s², X̄)`** paired to it.
-- **Closed-form truth** (n = n_iid): `r*_σ = Φ⁻¹(F_{χ²_{n−1}}((n−1)s²/σ²))`, `r*_μ = √n(X̄−μ)/σ`, with `σ = exp(log σ)`. `(r*_σ, r*_μ) ~ 𝒩(0, I₂)` at θ₀.
+- **Parameter order `θ = (log σ, μ)`** (index 0 = log σ, index 1 = μ) — the forced KR order. **Feature order `(log s², X̄)`** paired to it (the σ-feature is `log s²` because `r*_σ` is single-index in `(log σ, log s²)`: `r*_σ = g(log s² − 2 log σ)`).
+- **Closed-form truth, increasing-`θ` convention** (n = n_iid): `r*_σ = Φ⁻¹(1 − F_{χ²_{n−1}}((n−1)s²/σ²))`, `r*_μ = √n(μ − X̄)/σ`, with `σ = exp(log σ)`. `(r*_σ, r*_μ) ~ 𝒩(0, I₂)` at θ₀. (Increasing in `θ`, decreasing in feature → signs `s_θ=(+1,+1)`, `s_f=(−1,−1)`.)
 - **Flow `forward(theta, context)`** signature (matches `Flow` protocol): `context` is the conditioner output (the features), shape `(n, d)`; returns `(r, log_det_jac_input)` with `r` shape `(n, d)`, `log_det` shape `(n,)`.
 - **Conditioner `encode(X) → (features, log_det_contrib)`** (matches `Conditioner` protocol); `log_det_contrib` shape `(n,)`.
 
@@ -25,20 +46,20 @@
 
 ```
 NEW
-  src/cdsbi/simulators/normal_unknown_mean_var.py   # NormalUnknownMeanVar
-  src/cdsbi/conditioners/sufficient_stat.py          # SufficientStatConditioner (oracle)
-  src/cdsbi/flows/triangular_doubly_monotone.py      # _CondMonotoneScalarUMNN + TriangularDoublyMonotoneFlow
+  src/cdsbi/simulators/normal_unknown_mean_var.py   # NormalUnknownMeanVar (theta_signs/feat_signs props)
+  src/cdsbi/conditioners/sufficient_stat.py          # SufficientStatConditioner (oracle, → (log s², X̄))
+  src/cdsbi/flows/single_index_monotone.py           # _CtxScalar + _MonotoneG + SingleIndexMonotoneFlow
   configs/target/normal_mu_sigma.yaml
-  configs/flow/triangular_doubly_monotone.yaml
+  configs/flow/single_index_monotone.yaml
   configs/conditioner/sufficient_stat.yaml
-  configs/experiment/mu_sigma_replication.yaml
+  configs/experiment/mu_sigma_replication.yaml       # also overrides method.flow=single_index_monotone
   tests/unit/test_normal_unknown_mean_var.py
   tests/unit/test_sufficient_stat_conditioner.py
-  tests/unit/test_triangular_doubly_monotone_flow.py
+  tests/unit/test_single_index_monotone_flow.py
   tests/integration/test_mu_sigma_smoke.py
 
 MODIFY
-  src/cdsbi/experiments/run.py    # _build_flow: triangular_doubly_monotone; conditioner build for the new target
+  src/cdsbi/experiments/run.py    # _build_flow: single_index_monotone (inject d + theta_signs/feat_signs); conditioner build
 ```
 
 No changes to existing simulators/flows/conditioners. `CDSBIRunner.fit`'s conditioner-param training is **M2** (the oracle conditioner here is frozen/zero-param, so M0 needs no fit change).
@@ -847,6 +868,11 @@ Insert, just before it, a dedicated branch (it needs `d`):
         target = flow_dict.pop("_target_")
         flow_dict.pop("name", None)
         flow_dict.setdefault("d", int(simulator.d_theta))
+        # R2 holds for θ_k ≥ theta_ref[k]; inject the simulator's per-coordinate
+        # prior lower bounds so R2 holds by construction across the proposal
+        # support (the NormalUnknownMeanVar exposes theta_lower).
+        if hasattr(simulator, "theta_lower"):
+            flow_dict.setdefault("theta_ref", list(simulator.theta_lower))
         return _instantiate(target, **flow_dict)
 ```
 
@@ -931,7 +957,10 @@ from cdsbi.methods.cd_sbi import CDSBIRunner
 def test_stage_a_recovers_pivot():
     torch.manual_seed(0)
     sim = NormalUnknownMeanVar()
-    flow = TriangularDoublyMonotoneFlow(d=2, hidden=32, depth=2)
+    # theta_ref = per-coord prior lower bounds so R2 holds across the support
+    # (default theta_ref=0.0 would violate R2 for the many in-support θ < 0).
+    flow = TriangularDoublyMonotoneFlow(d=2, hidden=32, depth=2,
+                                        theta_ref=list(sim.theta_lower))
     cond = SufficientStatConditioner(n_iid=sim.n_iid)
     runner = CDSBIRunner(flow=flow, conditioner=cond, loss=NFMLELoss())
     config = {"lr": 3e-3, "batch_size": 256, "n_steps": 5000, "n_train": 10000,
@@ -971,26 +1000,34 @@ git commit -m "test(intensive): Stage-A (μ,σ²) smoke — recovers closed-form
 
 ---
 
-## Self-review notes
+## Self-review notes (as-built, single-index design — supersedes the obsolete notes)
 
-- **Spec coverage (M0):** target sampling (Task 1) + closed-form `r*`/`log_prob`/entropy (Task 2) ✓; oracle `SufficientStatConditioner` with (s², X̄) order + constant log-det (Task 3) ✓; the non-additive autoregressive `TriangularDoublyMonotoneFlow` built up from the conditioned monotone scalar (Tasks 4–5) ✓; configs (Task 6) ✓; run-wiring incl. the flow-dispatch gotcha + `d` injection (Task 7) ✓; end-to-end Stage-A recovery smoke (Task 8) ✓. M1 (MarginalCDRecovery, 2-D coverage grid, full replication), M2–M4 are out of scope here.
-- **Placeholder scan:** every step has complete runnable code + exact commands; no TBD.
-- **Type consistency:** `θ=(log σ, μ)` index order and `features=(s², X̄)` order are consistent across simulator, conditioner, flow tests, and configs. `_SUFFICIENT_STAT_LOG_DET_CONST` is defined once in the simulator module and imported by the conditioner (single source). Flow `forward(theta, context)` and conditioner `encode(x)` match the `Flow`/`Conditioner` protocols. `entropy_lower_bound` uses the same log-det constant as the conditioner.
+- **Spec coverage (M0):** target sampling (Task 1) + closed-form increasing-`θ` `r*`/`log_prob`/entropy on the `(log s², X̄)` feature scale (Task 2) ✓; oracle `SufficientStatConditioner` with `(log s², X̄)` order + constant log-det (Task 3) ✓; the non-additive autoregressive `SingleIndexMonotoneFlow` (`G_k` monotone-increasing UMNN of a signed single index) (Tasks 4–5) ✓; configs (Task 6) ✓; run-wiring incl. the flow-dispatch gotcha + `d`/`theta_signs`/`feat_signs` injection (Task 7) ✓; end-to-end Stage-A recovery smoke (Task 8) ✓. M1 (MarginalCDRecovery, 2-D coverage grid, full replication), M2–M4 are out of scope here.
+- **Placeholder scan:** every committed file has complete code + tests; no TBD. (The doubly-monotone task *steps* above are superseded — see the top banner; the as-built code is the authority.)
+- **Type consistency:** `θ=(log σ, μ)` index order and `features=(log s², X̄)` order are consistent across simulator, conditioner, flow tests, and configs. `_SUFFICIENT_STAT_LOG_DET_CONST` is defined once in the simulator module and imported by the conditioner (single source). Flow `forward(theta, context)` and conditioner `encode(x)` match the `Flow`/`Conditioner` protocols. `entropy_lower_bound` uses the same `r*` convention and `(log s², X̄)` feature scale as `r_star`.
 - **Known follow-on (M2):** `CDSBIRunner.fit` optimizes only `self.flow.parameters()`; M0's oracle conditioner is zero-param so this is fine, but M2's learned `DeepSetsConditioner` requires the optimizer extension — flagged in the spec, not needed here.
-- **Risk:** the `triangular_doubly_monotone` flow-dispatch in `run.py` mirrors the `cb1e08e` guard; Task 7 Step 4 verifies `flow_class == TriangularDoublyMonotoneFlow` to catch the AdditiveFlow1D fallback that bit the F2 milestone.
 
-### Dual-review outcome (2026-05-29)
+### Dual-review outcome (2026-05-29, single-index redesign)
 
-Self-review + an independent agent review, both grounded in the code and the
-`doubly_monotone` template. **Math confirmed sound:** `r* ~ 𝒩(0,I₂)` via Basu
-(X̄ ⊥ s²); the feature-Jacobian is lower-triangular so `log|det| = Σ_k
-log(∂r_k/∂feat_k)` even though below-diagonal `∂r_k/∂feat_{<k}` are nonzero
-(determinant of a triangular matrix is the product of its diagonal); and
-`dr_dfeat = b' + β'·∫σ` is the correct diagonal term (validated at runtime by
-`test_flow_logdet_matches_autograd_feature_jacobian`). Minor edits applied:
-- removed dead `v_sorted` code in the cond-monotone test;
-- add `triangular_doubly_monotone` to `_build_flow`'s error-label string;
-- flow config notes `cdsbi_flow_hidden` is the 1-D key (d=2 budget calibration
-  deferred to M1);
-- smoke `n_steps` 3000 → 5000 (first run of a new architecture).
-No math-correctness or architectural issues; verdict was "ready with minor edits."
+Self-review + an independent agent review of commits `a2a0d1e` + `786b5e2`.
+**Verdict: APPROVE_WITH_NITS.** Math + architecture confirmed sound, all six
+correctness items verified analytically and numerically:
+- `∂r_k/∂θ_k = s_θk·softplus(p_θk)·G'_k` and `∂r_k/∂feat_k = s_fk·softplus(p_fk)·G'_k`
+  carry signs `s_θk`/`s_fk` **globally** (softplus > 0, `G'_k = softplus(MLP)+1e-3 > 0`);
+  no input can flip them. The `clamp_min(1e-12)` sits *after* `abs()`, so unlike the
+  obsolete doubly-monotone flow it cannot mask a sign error.
+- feature-Jacobian is lower-triangular (`ctx_k` holds only `feat_{<k}`) ⇒
+  `log|det| = Σ_k log|∂r_k/∂feat_k|`; matches autograd to 1e-3.
+- `_MonotoneG` integrates 0→z by Gauss–Legendre with the same `+1e-3` integrand
+  in `forward` and `derivative`, so `derivative == dG/dz` exactly; `G(0)=0`;
+  negative-`z` integration correct (`G(z)<0` for `z<0`).
+- `r*` increasing convention matches `theta_signs=(+1,+1)`, `feat_signs=(−1,−1)`;
+  `entropy_lower_bound` uses the same convention + `log s²` feature.
+- wiring: `_build_flow` injects `d`+signs; experiment config sets `method.flow`
+  (cb1e08e guard); no dangling `triangular_doubly_monotone` reference.
+
+Nits applied post-review: `SufficientStatConditioner.encode` asserts
+`x.shape[-1] == n_iid` (was a silent dead param); `run.py` assigns signs directly
+(not `setdefault`) since they are a fixed target property, not a tunable; this
+self-review block rewritten (the prior block described the obsolete design).
+Smoke recovers `r*` at RMSE 0.10 (band < 0.25).

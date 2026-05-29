@@ -55,7 +55,10 @@ class JointMahalanobis(Diagnostic):
             else:
                 x = simulator.sample_x_given_theta(theta_0, self.n_per_theta, rng)
             theta_vec = torch.tensor(list(theta_0), dtype=x.dtype).view(1, -1)
-            theta_t = theta_vec.expand_as(x)
+            # Expand theta over the batch dimension only; the feature dim of x
+            # may differ from d_theta when a conditioner reduces d_x → d_theta
+            # (e.g. SufficientStatConditioner: d_x=10, d_theta=2).
+            theta_t = theta_vec.expand(x.shape[0], -1)
             with torch.no_grad():
                 r = trained.procedure.pivot(theta_t, x)
             r_sq = r.pow(2).sum(dim=-1).cpu().numpy()

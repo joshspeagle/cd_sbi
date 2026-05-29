@@ -1,0 +1,35 @@
+# @package _global_
+defaults:
+  - override /target: normal_mu_sigma
+  - override /flow: single_index_monotone
+  - override /conditioner: sufficient_stat
+  - override /method: cd_sbi
+  - override /budget: medium
+
+# cd_sbi.yaml hardcodes flow: additive_umnn; run.py's _build_flow only fires
+# the Hydra flow-group override when method.flow agrees with it (the cb1e08e
+# guard). Override method.flow here so the experiment is self-contained and
+# the sweep need not pass method.flow=single_index_monotone on the CLI.
+method:
+  flow: single_index_monotone
+
+experiment:
+  name: mu_sigma_replication
+  n_eval: 6000
+  # 3×3 product grid over (log σ, μ): log σ ∈ {log 0.5, 0, log 2}, μ ∈ {−2, 0, 2}.
+  # Replaces the prior 5-point grid (addresses the fixed-5-point θ₀ caveat) so
+  # coverage / marginal-CD recovery span the heterogeneous (scale, location) box.
+  eval_thetas_interior:
+    - [-0.69, -2.0]
+    - [-0.69,  0.0]
+    - [-0.69,  2.0]
+    - [ 0.0,  -2.0]
+    - [ 0.0,   0.0]
+    - [ 0.0,   2.0]
+    - [ 0.69, -2.0]
+    - [ 0.69,  0.0]
+    - [ 0.69,  2.0]
+  eval_thetas_edge: []
+  alpha_grid: [0.5, 0.68, 0.9, 0.95]
+  n_eval_per_theta: 2000
+  joint_mahalanobis_n_per_theta: 2000

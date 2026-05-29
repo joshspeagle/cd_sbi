@@ -73,3 +73,17 @@ def paper_table_8_4(df: pd.DataFrame) -> pd.DataFrame:
     agg = df.groupby(["method", "budget_name"])[metrics].agg(["mean", "std"])
     agg.columns = [f"{m}_{stat}" for m, stat in agg.columns]
     return agg
+
+
+def paper_table_mu_sigma(df: pd.DataFrame) -> pd.DataFrame:
+    """Seed-averaged (μ,σ²) Stage-A table: coverage, pivot RMSE, joint Mahalanobis,
+    marginal-CD recovery (σ² χ² + μ t), entropy-floor loss."""
+    metrics = [
+        "coverage_error_max", "pivot_rmse", "joint_mahal_ks",
+        "marginal_cd_sigma_ks", "marginal_cd_mu_ks", "marginal_cd_mu_t_resid",
+        "final_loss", "actual_params_total",
+    ]
+    metrics = [m for m in metrics if m in df.columns]
+    agg = df.groupby(["method", "budget_name"])[metrics].agg(["mean", "std"])
+    agg.columns = [f"{m}_{stat}" for m, stat in agg.columns]
+    return agg

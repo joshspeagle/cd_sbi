@@ -1,0 +1,13 @@
+name: single_index_monotone
+_target_: cdsbi.flows.single_index_monotone.SingleIndexMonotoneFlow
+# d, theta_signs, and feat_signs are injected at wire-time (run.py) from the
+# simulator — the per-coord monotonicity signs are a property of the target,
+# not a tunable. Signs being fixed is what makes R1/R2 hold globally (no
+# theta_ref restriction), unlike the obsolete doubly-monotone flow.
+#
+# cdsbi_flow_hidden is the 1-D budget key; the d=2 single-index flow's
+# parameter count is NOT yet calibrated against the budget's target_params.
+# Adequate for M0 (correctness/recovery smoke); revisit budget calibration
+# (a per-flow d2 key) in M1's replication sweep.
+hidden: ${budget.cdsbi_flow_hidden}
+depth: 2

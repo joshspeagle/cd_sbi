@@ -51,6 +51,23 @@ def _build_flow(cfg: DictConfig, simulator) -> Any:
     # whose method.flow is None / "additive_umnn" / "doubly_monotone").
     # NPE/NLE/NRE/LF2I-BFF have method.flow set to "maf"/None and need their
     # own flow architecture — they fall through to the slow path below.
+    # single_index_monotone needs d AND the per-coordinate monotonicity signs
+    # (theta_signs / feat_signs) injected from the simulator. Signs are fixed by
+    # the target's known monotonicity, so R1/R2 hold globally with no theta_ref
+    # restriction (unlike the obsolete doubly-monotone flow).
+    if hydra_flow_name == "single_index_monotone" and (
+        method_flow_label is None or method_flow_label == hydra_flow_name
+    ):
+        flow_dict = OmegaConf.to_container(cfg.flow, resolve=True)
+        target = flow_dict.pop("_target_")
+        flow_dict.pop("name", None)
+        flow_dict.setdefault("d", int(simulator.d_theta))
+        # Signs are a fixed property of the target's monotonicity, not a tunable —
+        # always take them from the simulator (overwrite any stray YAML value).
+        flow_dict["theta_signs"] = list(simulator.theta_signs)
+        flow_dict["feat_signs"] = list(simulator.feat_signs)
+        return _instantiate(target, **flow_dict)
+
     v3_flow_names = {"doubly_monotone", "joint_umnn", "joint_umnn_1d"}
     if hydra_flow_name in v3_flow_names and (
         method_flow_label is None or method_flow_label == hydra_flow_name
@@ -159,7 +176,8 @@ def _build_flow(cfg: DictConfig, simulator) -> Any:
     raise ValueError(
         f"Unknown flow label '{method_flow_label}' in method.flow. "
         "Expected one of: 'maf', 'additive_umnn', 'triangular_additive', "
-        "'doubly_monotone', 'joint_umnn', 'joint_umnn_1d'."
+        "'doubly_monotone', 'joint_umnn', 'joint_umnn_1d', "
+        "'single_index_monotone'."
     )
 
 
@@ -177,10 +195,16 @@ def _build_method(cfg: DictConfig, simulator) -> Any:
         from cdsbi.losses.nfmle import NFMLELoss
         flow = _build_flow(cfg, simulator)
         allow_ablation = bool(OmegaConf.select(cfg, "method.allow_ablation", default=False))
-        # Conditioner dispatch: exp_rate uses MLPConditioner(frozen_sum) to reduce
-        # X ∈ R^{n_iid} to the sufficient statistic T = Σ X_i with the
-        # accompanying log|∂T/∂X|; all other targets pass X through unchanged.
-        if cfg.target.name == "exp_rate":
+        # Conditioner dispatch: an explicit non-identity cfg.conditioner
+        # (sufficient_stat now, learned summaries later) is built generically;
+        # else exp_rate's frozen-sum reduction; else Identity passthrough.
+        cond_name = OmegaConf.select(cfg, "conditioner.name", default="identity")
+        if cond_name not in ("identity", None):
+            cond_cfg = OmegaConf.to_container(cfg.conditioner, resolve=True)
+            cond_target = cond_cfg.pop("_target_")
+            cond_cfg.pop("name", None)
+            conditioner = _instantiate(cond_target, **cond_cfg)
+        elif cfg.target.name == "exp_rate":
             from cdsbi.conditioners.mlp import MLPConditioner
             conditioner = MLPConditioner(
                 input_dim=int(simulator.d_x),
@@ -297,6 +321,7 @@ def _run_diagnostics(cfg: DictConfig, trained, simulator, eval_data, rd: RunDir)
     from cdsbi.diagnostics.coverage import Coverage
     from cdsbi.diagnostics.jacobian_recovery import JacobianRecovery
     from cdsbi.diagnostics.joint_mahalanobis import JointMahalanobis
+    from cdsbi.diagnostics.marginal_cd_recovery import MarginalCDRecovery
     from cdsbi.diagnostics.marginal_pit import MarginalPIT
     from cdsbi.diagnostics.pivot_rmse import PivotRMSE
     from cdsbi.diagnostics.set_size import SetSize
@@ -337,6 +362,10 @@ def _run_diagnostics(cfg: DictConfig, trained, simulator, eval_data, rd: RunDir)
                 cfg, "experiment.jacobian_recovery_tol", default=0.05,
             )),
         )),
+        ("marginal_cd_recovery", MarginalCDRecovery(
+            theta_0_grid=list(cfg.experiment.eval_thetas_interior),
+            n_per_theta=int(cfg.experiment.n_eval_per_theta),
+        )),
     ]
     # F6: precompute r = procedure.pivot(theta, x) once for pivot-based
     # procedures and share it across PivotRMSE / MarginalPIT / ConditionalPIT
@@ -370,7 +399,7 @@ def _run_diagnostics(cfg: DictConfig, trained, simulator, eval_data, rd: RunDir)
     diag_results = {}
     diag_dir = rd.path / "diagnostics"
     diag_dir.mkdir(exist_ok=True)
-    x_sharing_names = {"coverage", "set_size", "joint_mahalanobis"}
+    x_sharing_names = {"coverage", "set_size", "joint_mahalanobis", "marginal_cd_recovery"}
     for name, diag in diagnostics:
         if name in x_sharing_names:
             result = diag(
@@ -444,6 +473,14 @@ def _write_index_row(cfg: DictConfig, rd: RunDir, trained, diag_results, config_
         jac_df = pd.read_parquet(jac_path)
         if "max_residual" in jac_df.columns and len(jac_df):
             row["jacobian_max_residual"] = float(jac_df["max_residual"].iloc[0])
+    mcd_path = rd.path / "diagnostics" / "marginal_cd_recovery.parquet"
+    if mcd_path.exists():
+        mcd_df = pd.read_parquet(mcd_path)
+        for col, out in [("sigma_ks", "marginal_cd_sigma_ks"),
+                         ("mu_ks", "marginal_cd_mu_ks"),
+                         ("mu_t_resid", "marginal_cd_mu_t_resid")]:
+            if col in mcd_df.columns and len(mcd_df):
+                row[out] = float(mcd_df[col].mean())
     pd.DataFrame([row]).to_parquet(rd.path / "index_row.parquet")
 
 

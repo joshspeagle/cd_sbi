@@ -1,0 +1,3 @@
+name: normal_mu_sigma
+_target_: cdsbi.simulators.normal_unknown_mean_var.NormalUnknownMeanVar
+n_iid: 10
