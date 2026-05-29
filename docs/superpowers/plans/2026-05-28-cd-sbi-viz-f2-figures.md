@@ -430,7 +430,7 @@ def write_jacobian_raw(run_dir: Path, j_emp, j_true) -> None:
 
 
 def write_coverage(run_dir: Path, theta0_list, alpha_list) -> None:
-    """Write a diagnostics/coverage.parquet matching the real schema
+    """Write a d=1 diagnostics/coverage.parquet matching the real schema
     (theta_0_0, alpha, nominal, empirical, ...), empirical = nominal + small noise."""
     import numpy as _np
     diag = run_dir / "diagnostics"
@@ -440,6 +440,24 @@ def write_coverage(run_dir: Path, theta0_list, alpha_list) -> None:
     for t in theta0_list:
         for a in alpha_list:
             rows.append({"theta_0_0": float(t), "alpha": float(a), "nominal": float(a),
+                         "empirical": float(a) + rng.normal(0, 0.01), "n_eval": 2000})
+    pd.DataFrame(rows).to_parquet(diag / "coverage.parquet")
+
+
+def write_coverage_2d(run_dir: Path, grid_points, alpha_list) -> None:
+    """Write a d=2 coverage.parquet (theta_0_0, theta_0_1, alpha, nominal, empirical).
+
+    `grid_points` is a list of (t0, t1) tuples — mirrors the real §8.2/§8.3 grid
+    where several points share a first coordinate."""
+    import numpy as _np
+    diag = run_dir / "diagnostics"
+    diag.mkdir(parents=True, exist_ok=True)
+    rng = _np.random.default_rng(0)
+    rows = []
+    for (t0, t1) in grid_points:
+        for a in alpha_list:
+            rows.append({"theta_0_0": float(t0), "theta_0_1": float(t1),
+                         "alpha": float(a), "nominal": float(a),
                          "empirical": float(a) + rng.normal(0, 0.01), "n_eval": 2000})
     pd.DataFrame(rows).to_parquet(diag / "coverage.parquet")
 ```
@@ -487,7 +505,7 @@ def test_load_coverage_curve(tmp_path):
     assert list(nominal) == [0.5, 0.68, 0.9, 0.95]
 
 
-def test_load_coverage_tile(tmp_path):
+def test_load_coverage_tile_d1(tmp_path):
     from cdsbi.analysis.figures.data_io.figure_data import load_coverage_tile
     rd = tmp_path / "run"; rd.mkdir()
     write_coverage(rd, theta0_list=[-2.0, 0.0, 2.0], alpha_list=[0.5, 0.68, 0.9, 0.95])
@@ -495,6 +513,20 @@ def test_load_coverage_tile(tmp_path):
     assert theta0.shape == (3,) and alpha.shape == (4,)
     assert error.shape == (3, 4)             # rows=θ_0, cols=α
     assert (error >= 0).all()
+    assert list(theta0) == [-2.0, 0.0, 2.0]  # d=1 row axis is the θ_0 value
+
+
+def test_load_coverage_tile_d2_does_not_conflate_shared_first_coord(tmp_path):
+    """The §8.2 grid shares first coords ([-3,-3] & [-3,0]); the tile must keep
+    them as distinct rows, not collapse on theta_0_0."""
+    from tests.figures_fixtures import write_coverage_2d
+    from cdsbi.analysis.figures.data_io.figure_data import load_coverage_tile
+    rd = tmp_path / "run2"; rd.mkdir()
+    grid = [(-3.0, -3.0), (-3.0, 0.0), (0.0, 0.0), (3.0, 0.0), (3.0, 3.0)]
+    write_coverage_2d(rd, grid, alpha_list=[0.5, 0.68, 0.9, 0.95])
+    theta0, alpha, error = load_coverage_tile(str(rd))
+    assert error.shape == (5, 4)             # 5 distinct grid points, not 3
+    assert list(theta0) == [0.0, 1.0, 2.0, 3.0, 4.0]  # d>1 -> grid-point index axis
 
 
 def test_load_loss_tail_mean(tmp_path):
@@ -568,19 +600,27 @@ def load_coverage_curve(run_dir: str) -> tuple[np.ndarray, np.ndarray]:
 
 
 def load_coverage_tile(run_dir: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """(theta0, alpha, error) where error[i,j] = |empirical - nominal| at (θ_0_i, α_j).
+    """(theta0, alpha, error), error[i,j] = |empirical-nominal| at (grid point i, α_j).
 
-    Uses the first θ_0 coordinate (theta_0_0) as the row axis; adequate for the
-    d≤2 sections (each θ_0 grid point gets a row).
+    Keys rows on the FULL θ_0 grid point (every theta_0_* column), so d>1 grids
+    whose points share a first coordinate (e.g. §8.2's [[-3,-3],[-3,0],...]) are
+    NOT conflated. For d=1 the row axis is the θ_0 value; for d>1 it is the
+    grid-point index 0..G-1 (a numeric axis pcolormesh can use — the builder may
+    relabel ticks with the tuples).
     """
     df = pd.read_parquet(Path(run_dir) / "diagnostics" / "coverage.parquet")
-    theta0 = np.sort(df["theta_0_0"].unique())
+    theta_cols = sorted(c for c in df.columns if c.startswith("theta_0_"))
     alpha = np.sort(df["alpha"].unique())
-    error = np.zeros((len(theta0), len(alpha)))
-    for i, t in enumerate(theta0):
+    grid = df[theta_cols].drop_duplicates().sort_values(theta_cols).to_numpy()
+    G = grid.shape[0]
+    theta_arr = df[theta_cols].to_numpy()
+    error = np.zeros((G, len(alpha)))
+    for i in range(G):
+        mask_i = np.all(theta_arr == grid[i], axis=1)
         for j, a in enumerate(alpha):
-            sub = df[(df["theta_0_0"] == t) & (df["alpha"] == a)]
+            sub = df[mask_i & (df["alpha"] == a)]
             error[i, j] = float((sub["empirical"] - sub["nominal"]).abs().mean())
+    theta0 = grid[:, 0] if len(theta_cols) == 1 else np.arange(G, dtype=float)
     return theta0, alpha, error
 
 
@@ -596,7 +636,7 @@ def load_loss_tail_mean(run_dir: str) -> float:
 - [ ] **Step 5: Run tests to verify they pass**
 
 Run: `pytest tests/unit/test_figure_data_loaders.py -v`
-Expected: PASS (5 passed)
+Expected: PASS (6 passed)
 
 - [ ] **Step 6: Commit**
 
@@ -649,13 +689,11 @@ def main():
                f"run_dir={run_dir}", *extra]
         print("RUN:", " ".join(cmd))
         subprocess.run(cmd, check=True)
-    # E7 folding trajectory: reuse the recipe documented in
-    # tests/ablation/test_trained_folding.py, capturing the FULL loss list,
-    # and write it to outputs/figure_data/8_4_folding/folding_trajectory.parquet.
-    # (Implementer: import/replicate that test's training setup; this is a
-    # regen utility, not production code.)
+    # E7 folding tail: rerun the EXACT recipe from
+    # tests/ablation/test_trained_folding.py and save the persisted
+    # loss_history_tail (last 100 steps — the folded regime) to a parquet.
     from tools._folding_regen import regen_folding
-    regen_folding("outputs/figure_data/8_4_folding/folding_trajectory.parquet")
+    regen_folding("outputs/figure_data/8_4_folding")
     print("done")
 
 
@@ -665,7 +703,56 @@ if __name__ == "__main__":
 
 - [ ] **Step 2: Write the folding regen helper**
 
-Read `tests/ablation/test_trained_folding.py` to recover the R1-only flow + longer training recipe it uses. Create `tools/_folding_regen.py` with a `regen_folding(out_path)` function that builds the same R1-only `JointUMNN1DFlow` (or the flow that test uses), trains it under the same longer recipe **capturing the full per-step loss list**, and writes a parquet with columns `step, loss`. Mirror the test's construction exactly so the trajectory matches the regression case (dips below the entropy floor ~0.99). Use the seed the test documents as folding-prone.
+`CDSBIRunner.fit()` only persists `loss_history_tail` (the last 100 steps) — not a full per-step trajectory. That tail already shows the folded regime (loss below the entropy floor), so E7 plots the **final-100-steps** trajectory rather than the full climb (honest, and avoids modifying the production runner). Create `tools/_folding_regen.py` reusing the test's exact setup:
+
+```python
+"""Regenerate the E7 catastrophic-folding loss tail from the test recipe.
+
+CDSBIRunner.fit persists only loss_history_tail (last 100 steps); that window
+already sits below the entropy floor (the folding signature E7 shows), so we
+save it as-is. No runner changes.
+"""
+from __future__ import annotations
+
+from pathlib import Path
+
+import pandas as pd
+import torch
+
+from cdsbi.flows.joint_umnn import JointUMNNFlow
+from cdsbi.conditioners.mlp import MLPConditioner
+from cdsbi.losses.nfmle import NFMLELoss
+from cdsbi.methods.cd_sbi import CDSBIRunner
+from cdsbi.simulators.exp_rate import ExponentialRate
+
+SEED = 2  # the folding-prone seed documented in test_trained_folding.py
+
+
+def regen_folding(out_dir: str) -> str:
+    """Run the R1-only folding recipe; write <out_dir>/folding_tail.parquet."""
+    torch.manual_seed(SEED)
+    sim = ExponentialRate()
+    flow = JointUMNNFlow(hidden=16, theta_ref=sim.theta_range[0])
+    conditioner = MLPConditioner(input_dim=sim.n_iid, output_dim=1, mode="frozen_sum")
+    runner = CDSBIRunner(flow=flow, conditioner=conditioner, loss=NFMLELoss(),
+                         allow_ablation=True)
+    config = {"lr": 5e-3, "batch_size": 256, "n_steps": 4000, "n_train": 30000,
+              "optimizer": "adamw", "fresh_batch": False}
+    trained = runner.fit(simulator=sim, config=config, seed=SEED)
+    tail = list(trained.arch_metadata["loss_history_tail"])
+    floor = float(sim.entropy_lower_bound())
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    # `step` is the absolute step index of the tail window (n_steps - 100 .. n_steps-1).
+    start = config["n_steps"] - len(tail)
+    df = pd.DataFrame({"step": range(start, start + len(tail)), "loss": tail,
+                       "entropy_floor": floor})
+    path = out / "folding_tail.parquet"
+    df.to_parquet(path)
+    return str(path)
+```
+
+This is a regen utility, not production code; it reuses the test's exact flow/conditioner/recipe/seed so the saved tail reproduces the regression's folded regime.
 
 - [ ] **Step 3: Run the regen**
 
@@ -673,7 +760,7 @@ Run:
 ```bash
 python tools/regen_figure_data.py
 ```
-Expected: four `outputs/figure_data/8_{1,2,3,4}_cdsbi/` run-dirs exist, each with `diagnostics/coverage.parquet`, `diagnostics/marginal_pit_raw.parquet` (and for 8_2/8_3: `joint_mahalanobis_raw.parquet`; for 8_3: `jacobian_recovery_raw.parquet`), plus `model.pt`; and `outputs/figure_data/8_4_folding/folding_trajectory.parquet`.
+Expected: four `outputs/figure_data/8_{1,2,3,4}_cdsbi/` run-dirs exist, each with `diagnostics/coverage.parquet`, `diagnostics/marginal_pit_raw.parquet` (and for 8_2/8_3: `joint_mahalanobis_raw.parquet`; for 8_3: `jacobian_recovery_raw.parquet`), plus `model.pt`; and `outputs/figure_data/8_4_folding/folding_tail.parquet`.
 
 - [ ] **Step 4: Verify the raw companions exist and are well-formed**
 
@@ -683,10 +770,10 @@ python -c "
 import pandas as pd, glob
 for p in sorted(glob.glob('outputs/figure_data/8_*_cdsbi/diagnostics/*_raw.parquet')):
     print(p, '->', list(pd.read_parquet(p).columns), len(pd.read_parquet(p)))
-print('folding:', pd.read_parquet('outputs/figure_data/8_4_folding/folding_trajectory.parquet').shape)
+print('folding:', pd.read_parquet('outputs/figure_data/8_4_folding/folding_tail.parquet').shape)
 "
 ```
-Expected: PIT-raw under 8_1/8_2/8_3/8_4; jacobian-raw under 8_3 (9 rows for 3×3? no — d=2 → 4 rows); joint-mahalanobis-raw under 8_2/8_3; folding trajectory with `step,loss`.
+Expected: PIT-raw under 8_1/8_2/8_3/8_4; jacobian-raw under 8_3 (d=2 → 4 rows); joint-mahalanobis-raw under 8_2/8_3; folding tail with `step,loss,entropy_floor` (~100 rows).
 
 - [ ] **Step 5: Commit the regen tooling**
 
@@ -1078,8 +1165,7 @@ from cdsbi.analysis.figures.manifest import FigureSpec
 from cdsbi.analysis.figures.data_io.figure_data import (
     load_pit_values, load_coverage_curve, load_loss_tail_mean,
 )
-
-ENTROPY_FLOOR = 0.99
+from cdsbi.simulators.exp_rate import ExponentialRate
 
 
 def render(spec: FigureSpec):
@@ -1090,6 +1176,7 @@ def render(spec: FigureSpec):
     u = load_pit_values(run)
     nominal, empirical = load_coverage_curve(run)
     loss = load_loss_tail_mean(run)
+    entropy_floor = float(ExponentialRate().entropy_lower_bound())
 
     fig, (ax_pit, ax_cov, ax_loss) = plt.subplots(1, 3, figsize=(10.5, 3.0))
     panels.pit_histogram(ax_pit, u, bins=20); ax_pit.set_title("Marginal PIT")
@@ -1098,7 +1185,7 @@ def render(spec: FigureSpec):
                           color=style.METHOD_STYLE["cd_sbi"]["color"], marker="o")
     ax_cov.set_title("Coverage")
     panels.loss_bar_with_floor(ax_loss, {"CD-SBI": np.array([loss])},
-                               floor=ENTROPY_FLOOR, group_labels=["medium"])
+                               floor=entropy_floor, group_labels=["medium"])
     ax_loss.set_title("Final loss vs entropy floor")
     fig.tight_layout()
     return fig
@@ -1115,18 +1202,31 @@ def render(spec: FigureSpec):
 **Files:** Create `e6_r2_ablation_bars.py`; modify manifest + smoke test. `loss_bar_with_floor` comparing R1+R2 vs R1-only tail-mean loss across the four budgets, floor at 0.99. Source: the existing `outputs/8_4_ablation/2026-05-27_23-55-59/` sweep (run-dirs carry `model.pt` with `loss_history_tail`; the two arms are distinguished by flow in the run-dir name / index_row).
 
 - [ ] **Step 1: Failing smoke test** — append (fixture: two arms × 4 budgets of run-dirs with loss tails). Assert `len(fig.axes[0].patches) == 8` and one floor line.
-- [ ] **Step 2–4:** implement a builder that, for each arm (R1+R2 = `doubly_monotone`, R1-only = `joint_umnn`) and each budget, reads `load_loss_tail_mean` over the matching run-dirs and calls `loss_bar_with_floor({"R1+R2": [...4...], "R1 only": [...4...]}, floor=0.99, group_labels=["S","M","L","XL"])`. The builder maps run-dirs to (arm, budget) by parsing the run-dir name (`flow=`/`budget=` tokens) — reuse the token-parse helper pattern from E2.
+- [ ] **Step 2–4:** implement a builder that, for each arm (R1+R2 = `doubly_monotone`, R1-only = `joint_umnn`) and each budget, reads `load_loss_tail_mean` over the matching run-dirs and calls `loss_bar_with_floor({"R1+R2": [...4...], "R1 only": [...4...]}, floor=float(ExponentialRate().entropy_lower_bound()), group_labels=["S","M","L","XL"])` (import `from cdsbi.simulators.exp_rate import ExponentialRate`). The builder maps run-dirs to (arm, budget) by parsing the run-dir name (`flow=`/`budget=` tokens) — reuse the token-parse helper pattern from E2.
 - [ ] **Step 5:** Manifest entry (`section: "8.4"`, source the ablation sweep dir).
 - [ ] **Step 6–7:** Render + visual acceptance. **Message:** "R1+R2 sits at the floor at every budget; R1-only stays ~0.4 above — (R2) is load-bearing."
 - [ ] **Step 8:** Commit + `visual:` line.
 
 ## Task B7: E7 — §8.4 catastrophic folding
 
-**Files:** Create `e7_catastrophic_folding.py`; modify manifest + smoke test. `loss_trajectory_with_floor` of the R1-only longer-recipe run, dipping below the floor. Source: `outputs/figure_data/8_4_folding/folding_trajectory.parquet` (Task A5).
+**Files:** Create `e7_catastrophic_folding.py`; modify manifest + smoke test. `loss_trajectory_with_floor` of the R1-only folding run's final-100-step tail, sitting below the entropy floor. Source: the **directory** `outputs/figure_data/8_4_folding/` (A5), inside which the builder reads `folding_tail.parquet` (columns `step, loss, entropy_floor`) — keeping the run-dir convention (source_runs are dirs, not files).
 
-- [ ] **Step 1: Failing smoke test** — append (fixture writes a `folding_trajectory.parquet` with `step,loss` dipping below 0.99). Assert single panel, `len(ax.lines) == 2` (trajectory + floor).
-- [ ] **Step 2–4:** builder reads the parquet (`pd.read_parquet`, columns `step,loss`) and calls `loss_trajectory_with_floor(ax, {"R1 only (long recipe)": loss}, floor=0.99)`. NOTE: the source is a single parquet file, not a run-dir; the builder reads `spec.source_runs[0]` as a parquet path. Document this in the builder docstring.
-- [ ] **Step 5:** Manifest entry (`section: "8.4"`, source `outputs/figure_data/8_4_folding/folding_trajectory.parquet`).
+- [ ] **Step 1: Failing smoke test** — append (fixture: create `<dir>/folding_tail.parquet` with `step,loss,entropy_floor`, loss dipping below the floor). Assert single panel, `len(ax.lines) == 2` (trajectory + floor line).
+
+```python
+def test_e7_returns_trajectory_with_floor(tmp_path):
+    from cdsbi.analysis.figures.figures.e7_catastrophic_folding import render
+    import pandas as pd, numpy as np
+    d = tmp_path / "8_4_folding"; d.mkdir()
+    steps = np.arange(3900, 4000)
+    pd.DataFrame({"step": steps, "loss": 0.6 + 0.0 * steps, "entropy_floor": 0.99}).to_parquet(d / "folding_tail.parquet")
+    fig = render(_spec(source_runs=[str(d)], section="8.4"))
+    assert len(fig.axes) == 1
+    assert len(fig.axes[0].lines) == 2
+```
+
+- [ ] **Step 2–4:** builder reads `Path(spec.source_runs[0]) / "folding_tail.parquet"`, takes `floor = float(df["entropy_floor"].iloc[0])`, and calls `loss_trajectory_with_floor(ax, {"R1 only (long recipe, final 100 steps)": df["loss"].to_numpy()}, floor=floor)`; set x-tick context via `ax.set_xlabel("training step (final 100)")`. Builder docstring notes the source is a folding-regen dir, the loss is the persisted tail window, and the floor comes from the parquet.
+- [ ] **Step 5:** Manifest entry (`section: "8.4"`, source `outputs/figure_data/8_4_folding`).
 - [ ] **Step 6–7:** Render + visual acceptance. **Message:** "without architectural (R2), training folds the density and the loss drops below the entropy floor — impossible for a valid density."
 - [ ] **Step 8:** Commit + `visual:` line.
 
@@ -1183,7 +1283,7 @@ The manuscript `cd_sbi_v7.tex` is tables-only today. Insert the 10 figures with 
 - [ ] **Step 1:** Insert E1 + E2 in §8.1. After the §8.1 cross-method coverage table, add:
 
 ```latex
-\begin{figure}[t]
+\begin{figure}[htbp]
 \centering
 \includegraphics[width=\linewidth]{figures/e1_loc_normal_calibration.pdf}
 \caption{\S\ref{subsec:8.1} CDSBI calibration in the 1-D location-normal model:
@@ -1192,7 +1292,7 @@ along the diagonal (right), at the medium budget.}
 \label{fig:e1}
 \end{figure}
 
-\begin{figure}[t]
+\begin{figure}[htbp]
 \centering
 \includegraphics[width=0.6\linewidth]{figures/e2_loc_normal_cross_method.pdf}
 \caption{\S\ref{subsec:8.1} coverage by method (medium budget). CDSBI sits on
@@ -1203,7 +1303,7 @@ the diagonal; the Bayesian and ratio baselines deviate.}
 
 - [ ] **Step 2:** Insert E3 in §8.2 (after the §8.2 joint-diagnostics discussion), `\includegraphics[width=\linewidth]{figures/e3_joint_diagnostics.pdf}`, caption referencing joint Mahalanobis PIT + coverage tile, `\label{fig:e3}`.
 - [ ] **Step 3:** Insert E4 in §8.3, `\includegraphics[width=0.55\linewidth]{figures/e4_jacobian_recovery.pdf}`, caption referencing Theorem A-d / KR uniqueness, `\label{fig:e4}`.
-- [ ] **Step 4:** Insert E5, E6, E7 in §8.4 — E5 after the calibration table, E6 + E7 in the ablation paragraph. Captions: E5 doubly-monotone calibration + entropy floor; E6 R1+R2 vs R1-only across budgets; E7 catastrophic folding below the floor. Labels `fig:e5`, `fig:e6`, `fig:e7`.
+- [ ] **Step 4:** Insert E5, E6, E7 in §8.4 — E5 after the calibration table, E6 + E7 in the ablation paragraph. All `[htbp]`. Captions: E5 doubly-monotone calibration + entropy floor; E6 R1+R2 vs R1-only across budgets; E7 catastrophic folding (final 100 steps) below the floor. Labels `fig:e5`, `fig:e6`, `fig:e7`. Because §8.4 now holds 3 figures plus its tables, add a `\clearpage` at the end of §8.4 (before §8.5) so the float queue drains and figures don't spill into §8.5.
 - [ ] **Step 5:** Add a `\ref{fig:eN}` sentence-level cross-reference in each section's prose so figures aren't orphaned (LaTeX warns on unreferenced floats only if `\label` unused, but a textual reference aids the reader). E.g. in §8.1: "(Fig.~\ref{fig:e1})".
 - [ ] **Step 6:** Build: `/usr/bin/pdflatex cd_sbi_v7 && /usr/bin/bibtex cd_sbi_v7 && /usr/bin/pdflatex cd_sbi_v7 && /usr/bin/pdflatex cd_sbi_v7`. Expected: clean build, no missing-figure errors, no undefined `\ref`.
 - [ ] **Step 7:** Commit: `git add cd_sbi_v7.tex && git commit -m "manuscript(8.1-8.4): insert empirical figures E1-E7"`.
@@ -1215,7 +1315,7 @@ the diagonal; the Bayesian and ratio baselines deviate.}
 - [ ] **Step 1:** In §8.5 (synthesis), after the claims/summary tables, insert E8, E9, E10:
 
 ```latex
-\begin{figure}[t]
+\begin{figure}[htbp]
 \centering
 \includegraphics[width=0.7\linewidth]{figures/e8_headline_summary.pdf}
 \caption{Worst-case coverage error (log scale) by method across the four
@@ -1225,7 +1325,7 @@ Monte-Carlo floor (band).}
 \label{fig:e8}
 \end{figure}
 
-\begin{figure}[t]
+\begin{figure}[htbp]
 \centering
 \includegraphics[width=0.6\linewidth]{figures/e9_budget_saturation.pdf}
 \caption{Coverage error vs parameter budget (\S\ref{subsec:8.2}). CDSBI
@@ -1233,7 +1333,7 @@ saturates at the floor by the smallest budget tested.}
 \label{fig:e9}
 \end{figure}
 
-\begin{figure}[t]
+\begin{figure}[htbp]
 \centering
 \includegraphics[width=\linewidth]{figures/e10_per_experiment_boxplots.pdf}
 \caption{Per-experiment distribution of worst-case coverage error across
@@ -1263,3 +1363,14 @@ seeds and budgets. CDSBI is at the floor with low variance throughout.}
 - **Visual acceptance:** every figure (B1–B10) has an explicit controller `Read`-the-PNG step with a figure-specific message check, per the spec protocol; B11 + the gallery view close the loop.
 - **Placeholder caution:** Tasks B6–B10 give the algorithm + exact panel calls + manifest/section but compress the boilerplate test/commit steps (identical in shape to B1–B5's fully-spelled versions) to keep the plan readable; the builder logic and data sources are concrete. A2/A3 reuse A1's `_write_raw_companion`. A5 Step 2 (folding regen) requires reading `test_trained_folding.py` to mirror its recipe — flagged explicitly as a regen utility, not invented code.
 - **F2 scope fidelity:** no F3 conceptual figures (C1–C6), no model-weights work; only the empirical catalogue + its data + manuscript insertion.
+
+### Dual-review outcome (2026-05-28)
+
+Self-review + an independent agent review of this plan. Applied:
+- **`load_coverage_tile` d>1 conflation (material) — fixed.** Verified d=2 `coverage.parquet` has both `theta_0_0` and `theta_0_1` with 5 distinct grid points sharing first coords; the loader now keys rows on the full θ_0 tuple (grid-point index axis for d>1) and a d=2 regression test (`test_load_coverage_tile_d2_*`) locks it.
+- **E7 full-trajectory not available (material) — fixed.** `CDSBIRunner.fit` persists only `loss_history_tail` (100 steps); E7 now plots that tail (already below the floor) from a concrete `tools/_folding_regen.py` that reuses the test's exact recipe — no production-runner change. Floor read from the parquet / `ExponentialRate.entropy_lower_bound()`.
+- **E7 source_runs convention (material) — fixed.** `source_runs` stays a directory; the builder reads `folding_tail.parquet` inside it.
+- **Entropy floor hard-coding — fixed.** E5/E6/E7 use `ExponentialRate().entropy_lower_bound()` (or the parquet value), not a literal 0.99.
+- **LaTeX float congestion (minor) — fixed.** Figures use `[htbp]`; a `\clearpage` ends §8.4.
+- **Rejected — E6 patch count.** The reviewer claimed `loss_bar_with_floor`'s floor adds a Patch making the count 9; verified it calls `noise_floor_band` with no `halfwidth` → `axhline` (a Line), so 8 bars / 1 line is correct (the F1 loss test already proved this). Assertion unchanged.
+- Verified non-issues: the `run_dir=` override does pin the output dir (`run.py:419` uses `HydraConfig...output_dir`, `hydra.run.dir: ${run_dir}`); `PivotBasedProcedure` is subclassable for the Phase-A fakes.
