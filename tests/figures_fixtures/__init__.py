@@ -113,3 +113,15 @@ def write_coverage_2d(run_dir: Path, grid_points, alpha_list) -> None:
                          "alpha": float(a), "nominal": float(a),
                          "empirical": float(a) + rng.normal(0, 0.01), "n_eval": 2000})
     pd.DataFrame(rows).to_parquet(diag / "coverage.parquet")
+
+
+def write_joint_mahalanobis_raw(run_dir: Path, r_sq_dict) -> None:
+    """Write a diagnostics/joint_mahalanobis_raw.parquet (theta_0_repr, r_sq).
+
+    `r_sq_dict` maps a θ_0-repr string to a 1-D array of squared pivot norms."""
+    import numpy as _np
+    diag = run_dir / "diagnostics"
+    diag.mkdir(parents=True, exist_ok=True)
+    frames = [pd.DataFrame({"theta_0_repr": k, "r_sq": _np.asarray(v)})
+              for k, v in r_sq_dict.items()]
+    pd.concat(frames, ignore_index=True).to_parquet(diag / "joint_mahalanobis_raw.parquet")

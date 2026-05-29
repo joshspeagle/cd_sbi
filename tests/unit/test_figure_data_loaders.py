@@ -5,8 +5,20 @@ import numpy as np
 
 from tests.figures_fixtures import (
     make_run_dir, write_marginal_pit_raw, write_jacobian_raw, write_coverage,
-    write_coverage_2d,
+    write_coverage_2d, write_joint_mahalanobis_raw,
 )
+
+
+def test_load_joint_mahalanobis_sq(tmp_path):
+    from cdsbi.analysis.figures.data_io.figure_data import load_joint_mahalanobis_sq
+    rd = tmp_path / "run"; rd.mkdir()
+    rng = np.random.default_rng(0)
+    r_sq = {"[0.0, 0.0]": rng.chisquare(2, 300), "[2.0, -1.0]": rng.chisquare(2, 300)}
+    write_joint_mahalanobis_raw(rd, r_sq)
+    out = load_joint_mahalanobis_sq(str(rd))
+    assert set(out.keys()) == {"[0.0, 0.0]", "[2.0, -1.0]"}
+    assert out["[0.0, 0.0]"].shape == (300,)
+    assert (out["[0.0, 0.0]"] >= 0).all()
 
 
 def test_load_pit_values(tmp_path):
