@@ -4,7 +4,7 @@
 
 **Goal:** Validate the Stage-A `(μ, σ²)` pivot end-to-end: add the `MarginalCDRecovery` diagnostic (σ²→χ² direct, μ→Student-t via nuisance marginalization), switch the coverage θ₀-grid to a 2-D product grid, add a `paper_table_mu_sigma` aggregator, and add an intensive replication test asserting the pivot reaches the entropy floor and calibrates.
 
-**Architecture:** M0 left a trained single-index pivot that recovers `r*` (RMSE 0.10). M1 adds the inferentially-primary marginal-CD checks. The σ² marginal CD reads off `r_σ` directly (`Φ(r_σ) = 1 − F_{χ²_{n−1}}((n−1)s²/σ²)`). The μ marginal CD is **not** `Φ(r_μ)` — it requires integrating the nuisance σ out of the joint confidence density, yielding the Student-`t_{n−1}` CD. The marginalization is **numerically validated to machine precision** against the closed-form truth (see "Validated marginalization" below). All other diagnostics (`Coverage`, `JointMahalanobis`, `MarginalPIT`, `PivotRMSE`) already consume `eval_thetas_interior` and need no code change — only a config-grid change.
+**Architecture:** M0 left a trained single-index pivot that recovers `r*` (RMSE 0.10). M1 adds the inferentially-primary marginal-CD checks. The σ² marginal CD reads off `r_σ` directly (`Φ(r_σ) = 1 − F_{χ²_{n−1}}((n−1)s²/σ²)`). The μ marginal CD is **not** `Φ(r_μ)` — it requires integrating the nuisance σ out of the joint confidence density, yielding the Student-`t_{n−1}` CD. The marginalization **identity** is numerically validated against the closed-form truth (see "Validated marginalization" below); the diagnostic's grid implementation recovers it to ≈ 1e-4. All other diagnostics (`Coverage`, `JointMahalanobis`, `MarginalPIT`, `PivotRMSE`) already consume `eval_thetas_interior` and need no code change — only a config-grid change.
 
 **Tech Stack:** PyTorch (autograd for `∂r_σ/∂log σ`), numpy/scipy (`chi2`, `t`, `norm`, `kstest`), pandas (diagnostic parquet → index-row reduction), Hydra, pytest.
 
@@ -22,7 +22,7 @@ For X with `n_iid` replicates, θ = (log σ, μ), the trained flow produces a jo
   ```
   H_μ(μ₀|X) = ∫_{log σ} φ(r_σ(log σ;X)) · |∂r_σ/∂log σ| · Φ(r_μ((log σ, μ₀);X)) d log σ
   ```
-  (the inner μ-integral `∫_{μ'≤μ₀} φ(r_μ)·∂r_μ/∂μ dμ' = Φ(r_μ(μ₀))` because `r_μ` is monotone in μ and → ±∞). With the closed-form `r*` this equals `F_{t_{n−1}}(√n(μ₀−X̄)/s)` to **machine precision** (verified: per-X residual max = 0.0000, KS-vs-uniform = 0.0145, identical to the analytic-t KS). The naive `Φ(r*_μ at truth)` is *also* uniform but is **not** the usable marginal — it secretly conditions on the true σ.
+  (the inner μ-integral `∫_{μ'≤μ₀} φ(r_μ)·∂r_μ/∂μ dμ' = Φ(r_μ(μ₀))` because `r_μ` is monotone in μ and → ±∞). With the closed-form `r*` this equals `F_{t_{n−1}}(√n(μ₀−X̄)/s)` **exactly** as an identity; both the analytic Gauss–Hermite check (per-X residual max ≈ 1e-4) and the diagnostic's finite-difference/trapezoid grid implementation (per-X residual max ≈ 1e-4, KS-vs-uniform = 0.0144, matching the analytic-t KS) confirm it. The naive `Φ(r*_μ at truth)` is *also* uniform but is **not** the usable marginal — it secretly conditions on the true σ.
 
 **Diagnostic implementation note.** For the *trained* pivot, evaluate on a fixed-X, swept-`log σ` grid (μ held at μ₀): get `r_σ(log σ)` and `r_μ(log σ, μ₀)` from `trained.procedure.pivot`, get `∂r_σ/∂log σ` by autograd, and Riemann-sum the formula over a wide `log σ` grid. Reference numpy prototype (closed-form, the test oracle):
 ```python
@@ -321,47 +321,53 @@ def test_mu_branch_recovers_student_t_with_oracle():
 Run: `pytest tests/unit/test_marginal_cd_recovery.py::test_mu_branch_recovers_student_t_with_oracle -v`
 Expected: FAIL — `KeyError: 'mu_ks'`.
 
-- [ ] **Step 3: Implement the μ marginalization**
+- [ ] **Step 3: Implement the μ marginalization (finite-difference, device-safe)**
 
-Add a helper and extend `__call__`. The marginalization grids `log σ` over a wide band (cover the prior + tails), evaluates the trained pivot at `(log σ_grid, μ₀)` for each X, takes `∂r_σ/∂log σ` by autograd, and Riemann-sums `Σ_k φ(r_σ,k)·|∂r_σ/∂log σ_k|·Φ(r_μ,k)·Δ`.
+Add a helper and extend `__call__`. The marginalization grids `log σ` over a wide band (cover the prior + tails), evaluates the trained pivot at `(log σ_grid, μ₀)` for each X, computes `∂r_σ/∂log σ` by **finite differences along the grid** (`torch.gradient`), and Riemann-sums `Σ_k φ(r_σ,k)·|∂r_σ/∂log σ_k|·Φ(r_μ,k)·Δ`.
+
+**Why finite differences, not autograd:** `cd_sbi.py`'s `pivot_fn` does `theta = theta.to(device)` internally, so a `requires_grad_` leaf built outside is detached from the graph on GPU (`theta.to('cuda')` returns a new non-leaf) — `torch.autograd.grad` then raises "does not require grad". Finite differences over the 257-pt grid is the literal discretization of the validated integral, runs entirely under `torch.no_grad()` (device- and memory-safe), and recovers the t-CD to residual ≈ 1e-4 (verified vs the closed-form). It also lets us chunk X rows trivially.
 
 ```python
-    def _marginalize_mu(self, proc, simulator, theta_0, x, sc, lc):
-        """H_μ(μ₀|X) for each row of x, by integrating the joint CD over log σ."""
-        n = x.shape[0]
+    def _marginalize_mu(self, proc, simulator, theta_0, x, sc, lc, chunk=256):
+        """H_μ(μ₀|X) for each row of x, by integrating the joint CD over log σ.
+        Finite-difference ∂r_σ/∂logσ on a fixed grid; no autograd (pivot_fn moves
+        devices, which would detach an external grad leaf on GPU)."""
         mu0 = float(theta_0[lc])
-        # log σ grid: wide band around the prior scale range
         lo, hi = simulator.log_sigma_range
-        grid = torch.linspace(lo - 2.0, hi + 2.0, 257, dtype=x.dtype)   # (K,)
+        grid = torch.linspace(lo - 2.0, hi + 2.0, 257, dtype=x.dtype, device=x.device)  # (K,)
         K = grid.shape[0]
-        d_logsigma = float(grid[1] - grid[0])
-        # build (n*K, d_theta) θ with scale coord swept, location coord = μ₀
-        theta = torch.empty(n, K, 2, dtype=x.dtype)
-        theta[:, :, sc] = grid.view(1, K)
-        theta[:, :, lc] = mu0
-        theta = theta.reshape(n * K, 2).requires_grad_(True)
-        x_rep = x.repeat_interleave(K, dim=0)                            # (n*K, n_iid)
-        r = proc.pivot(theta, x_rep)                                     # (n*K, 2)
-        r_sigma = r[:, sc]
-        (dr_sigma,) = torch.autograd.grad(r_sigma.sum(), theta, create_graph=False)
-        dr_sigma_dlogsigma = dr_sigma[:, sc].reshape(n, K)
-        r_sigma = r_sigma.detach().reshape(n, K)
-        r_mu = r[:, lc].detach().reshape(n, K)
-        phi = torch.exp(-0.5 * r_sigma ** 2) / np.sqrt(2 * np.pi)
-        Phi_mu = 0.5 * (1.0 + torch.erf(r_mu / np.sqrt(2.0)))
-        integrand = phi * dr_sigma_dlogsigma.abs() * Phi_mu             # (n, K)
-        return (integrand.sum(dim=1) * d_logsigma).detach().cpu().numpy()
+        out = []
+        with torch.no_grad():
+            for start in range(0, x.shape[0], chunk):
+                xb = x[start:start + chunk]                       # (b, n_iid)
+                b = xb.shape[0]
+                theta = torch.empty(b, K, 2, dtype=x.dtype, device=x.device)
+                theta[:, :, sc] = grid.view(1, K)
+                theta[:, :, lc] = mu0
+                theta = theta.reshape(b * K, 2)
+                x_rep = xb.repeat_interleave(K, dim=0)            # (b*K, n_iid)
+                r = proc.pivot(theta, x_rep)                      # (b*K, 2)
+                r_sigma = r[:, sc].reshape(b, K)
+                r_mu = r[:, lc].reshape(b, K)
+                # finite-diff dr_σ/dlogσ along the grid axis
+                dr = torch.gradient(r_sigma, spacing=(grid,), dim=1)[0]   # (b, K)
+                phi = torch.exp(-0.5 * r_sigma ** 2) / np.sqrt(2 * np.pi)
+                Phi_mu = 0.5 * (1.0 + torch.erf(r_mu / np.sqrt(2.0)))
+                # trapezoid in logσ via torch.trapezoid (handles the Δ exactly)
+                integ = phi * dr.abs() * Phi_mu                   # (b, K)
+                H = torch.trapezoid(integ, grid, dim=1)           # (b,)
+                out.append(H.detach().cpu().numpy())
+        return np.concatenate(out)
 ```
 
 In `__call__`, after computing the σ² metrics for a θ₀, add:
 ```python
             lc = spec["location_coord"]
-            H_mu = self._marginalize_mu(proc, simulator, theta_0, x, sc, lc)
-            H_mu = np.clip(H_mu, 0.0, 1.0)
+            H_mu = np.clip(self._marginalize_mu(proc, simulator, theta_0, x, sc, lc), 0.0, 1.0)
             mu_ks = float(kstest(H_mu, "uniform").statistic)
             mu_t_resid = float(np.abs(H_mu - analytic["mu_pit"].numpy()).max())
 ```
-and extend the appended row dict with `"mu_ks": mu_ks, "mu_t_resid": mu_t_resid`. Update `passed` to also require `(df["mu_ks"] <= 2.0 * floor).all()`. Note `_marginalize_mu` must NOT be under `torch.no_grad()` (it needs autograd) — move the σ² `proc.pivot` call's `no_grad` to wrap only the σ² evaluation, or recompute; simplest: drop the outer `no_grad` and `.detach()` the σ² pivot output explicitly.
+and extend the appended row dict with `"mu_ks": mu_ks, "mu_t_resid": mu_t_resid`. Update `passed` to also require `(df["mu_ks"] <= 2.0 * floor).all()`. The σ² `proc.pivot` call in `__call__` keeps its `torch.no_grad()` — no conflict, since `_marginalize_mu` owns its own `no_grad` block and uses no autograd.
 
 - [ ] **Step 4: Run to verify pass**
 
@@ -442,6 +448,11 @@ In the diagnostics-construction block (where `Coverage`, `JointMahalanobis`, etc
 and add the import at the top with the other diagnostics:
 ```python
 from cdsbi.diagnostics.marginal_cd_recovery import MarginalCDRecovery
+```
+
+Also add `"marginal_cd_recovery"` to the `x_sharing_names` set (`run.py:397`) so the diagnostic reuses the pre-drawn X|θ₀ (shared with `coverage`/`joint_mahalanobis`) instead of re-sampling — this makes the X comparable across diagnostics and the `repr([float(v) for v in theta_0])` key lookup load-bearing (it matches run.py's `str(list(map(float, list(theta_0))))`, verified identical):
+```python
+    x_sharing_names = {"coverage", "set_size", "joint_mahalanobis", "marginal_cd_recovery"}
 ```
 
 - [ ] **Step 2: Add index-row reduction**
@@ -638,5 +649,5 @@ git commit -m "test(intensive): (μ,σ²) Stage-A replication — recovery + mar
 - **Spec coverage (§A.3):** PivotRMSE/MarginalPIT/JointMahalanobis already exist and consume the grid (no change) ✓; `MarginalCDRecovery` σ²-direct + μ-Student-t (Tasks 1–3) ✓; 2-D product coverage grid (Task 4) ✓; runner wiring + table (Tasks 5–6) ✓; intensive replication with entropy-floor + calibration (Task 7) ✓. `JacobianRecovery` correctly no-ops (no `r_star_jacobian`) — spec confirms this; nothing to do.
 - **Placeholder scan:** all steps carry runnable code + exact commands + expected output. No TBD.
 - **Type consistency:** the diagnostic uses the `Diagnostic` protocol `(trained, simulator, eval_data, x_per_theta) -> DiagnosticResult`; `marginal_cd_spec` keys (`scale_coord`/`location_coord`) and `analytic_marginal_cd_pit` keys (`sigma_pit`/`mu_pit`) are referenced identically in Tasks 1/2/3; index-row columns (`marginal_cd_sigma_ks`/`marginal_cd_mu_ks`/`marginal_cd_mu_t_resid`) match between Task 5 (write) and Tasks 6/7 (read).
-- **Risk — μ marginalization grid width/resolution.** `_marginalize_mu` uses a 257-pt `log σ` grid over `[lo−2, hi+2]`; the oracle test (`mu_t_resid < 0.02`) guards this. If a trained pivot's `r_σ` saturates outside the band, the integral underflows — the test would catch it. Autograd over an `(n·K, 2)` batch (e.g. 2000·257 ≈ 5·10⁵ rows) is memory-heavy at `n_per_theta=2000`; if OOM, chunk over X rows inside `_marginalize_mu` (documented fallback).
+- **Risk — μ marginalization grid width/resolution.** `_marginalize_mu` uses a 257-pt `log σ` grid over `[lo−2, hi+2]`; the oracle test (`mu_t_resid < 0.02`) guards this. If a trained pivot's `r_σ` saturates outside the band, the integral underflows — the test would catch it. The finite-difference implementation runs under `torch.no_grad()` and chunks X rows (`chunk=256`), so memory is bounded (no autograd backward graph) — this resolves the GPU-autograd break and the OOM concern the plan review raised. Device-safe because the grid/theta tensors are built on `x.device`.
 - **Known follow-on (M2):** unchanged from M0 — `fit()` optimizer extension for the learned `DeepSetsConditioner` is M2, not needed here.
