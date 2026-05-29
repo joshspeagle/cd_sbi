@@ -549,7 +549,7 @@ satisfying (R1) (\(\partial_\theta r^* = +1\)) and (R2)
 (\(\partial_X r^* = -1\)). The induced CD
 \(H_{r^*}(\theta; X) = \Phi(\theta - X)\) recovers the textbook one. The
 framework we develop is: find the analogue of \(r^*\) when no closed
-form is available, by training a neural surrogate.
+form is available, by training a neural surrogate (Fig.~\ref{fig:c1}).
 
 \paragraph{Regularity conditions at a glance.} The manuscript accumulates
 additional regularity conditions on \(r\) as we move from \(C^1\) to
@@ -596,6 +596,16 @@ specialization of (R2): \(r_k\) depends on \(X\) only through
 \(X_{\le k}\) with strict monotonicity in \(X_k\). \\
 \end{longtable}
 
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\linewidth]{figures/c1_pivot_picture.pdf}
+\caption{The pivot picture. Left: the data \(X \mid \theta_0\) shift with
+\(\theta_0\). Right: the location-normal pivot \(r^*(\theta_0; X) = \theta_0 - X\)
+maps every conditional onto the same \(\mathcal{N}(0, 1)\) (solid curve) ---
+pointwise calibration with no prior.}
+\label{fig:c1}
+\end{figure}
+
 \subsection{The role of (R1): why monotonicity in \(\theta\) is needed}\label{subsec:2.3}
 
 Calibration alone gives an object with the right marginal frequentist
@@ -620,7 +630,7 @@ Without (R1), the calibration manifold is large: any composition of
 itself --- sign flips in each coordinate, non-monotone measure-preserving
 rearrangements in 1D, and the entire orthogonal group \(O(d)\) in
 \(d > 1\) (since \(\mathcal{N}(0, I_d)\) is rotation-invariant) --- stays
-in \(\mathcal{M}\). The ambiguity is infinite-dimensional in general; see
+in \(\mathcal{M}\) (Fig.~\ref{fig:c2}). The ambiguity is infinite-dimensional in general; see
 \S\ref{subsec:3.3} for the explicit characterization. (R1) in 1D
 eliminates the sign-flip and non-monotone-rearrangement ambiguities. In
 \(d > 1\), (R1) eliminates the coordinate-wise sign-flip ambiguity but
@@ -628,6 +638,16 @@ eliminates the sign-flip and non-monotone-rearrangement ambiguities. In
 structure of \S\ref{sec:6} is what selects the unique Knothe--Rosenblatt
 representative within the rotation orbit; see \S\ref{subsec:11.1} for
 the related open problem outside the autoregressive class.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.6\linewidth]{figures/c2_r1_failure.pdf}
+\caption{Why (R1) is needed. A pivot non-monotone in \(\theta\) is hit by a
+level \(r = c\) at two parameter values, so the implied confidence
+distribution's quantile inverse is multi-valued and the confidence set is
+non-connected.}
+\label{fig:c2}
+\end{figure}
 
 \subsection{The role of (R2): why invertibility in \(X\) is needed}\label{subsec:2.4}
 
@@ -665,8 +685,19 @@ valid model can undercut. The ablation undercuts it, which is
 mathematically impossible unless its \(\hat p_r\) is not a normalized
 density. So the loss \(0.56 < 0.88\) is the smoking-gun evidence that
 the autograd Jacobian is silently letting \(\hat p_r\) accumulate mass
-greater than one in the folded regions. Enforcing (R2) architecturally
+greater than one in the folded regions (Fig.~\ref{fig:c3}). Enforcing (R2) architecturally
 is what keeps \(\hat p_r\) inside the space of valid densities.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.6\linewidth]{figures/c3_r2_folding.pdf}
+\caption{Why (R2) is needed. Where the pivot folds in \(X\)
+(\(\partial r / \partial X < 0\), shaded), the change of variables
+double-counts mass and \(Z(\theta) > 1\): the induced surrogate is
+unnormalized. Architectural monotonicity in \(X\) rules this out by
+construction.}
+\label{fig:c3}
+\end{figure}
 
 \medskip\hrule\medskip
 
@@ -790,12 +821,22 @@ fails, and the loss becomes unbounded below; the formal version is in
 Second, this is what is meant by \textbf{strict propriety}: a loss is
 \emph{strictly proper} for a target \(\mathcal{M}\) if its
 population-level minimum over the class of admissible \(r\) is attained
-exactly on \(\mathcal{M}\) and nowhere else. The term comes from the
+exactly on \(\mathcal{M}\) and nowhere else (Fig.~\ref{fig:c4}). The term comes from the
 scoring-rule literature \citep{GneitingRaftery2007}; strict propriety
 for the calibration manifold means we do not need auxiliary
 independence or sharpness penalties, because the per-sample log-density
 target already encodes both calibration \emph{and} the implied sharpness
 of \(\hat p_r\) at every \(\theta\).
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.6\linewidth]{figures/c4_entropy_floor.pdf}
+\caption{Strict propriety. By Gibbs's inequality the population NF-MLE loss is
+bounded below by the conditional entropy \(\mathbb{E}_\rho[H(X \mid \theta)]\)
+(dashed), with equality exactly at the true density --- so minimizing the loss
+drives the surrogate onto the calibration manifold.}
+\label{fig:c4}
+\end{figure}
 
 \subsection{The role of architectural constraints in selecting from \(\mathcal{M}\)}\label{subsec:3.3}
 
@@ -1896,7 +1937,17 @@ is monotone-in-\(\theta\) and monotone-in-\(X\) coordinatewise, in the
 autoregressive sense; the Jacobians in \(\theta\) and in \(X\) are
 both \(2 \times 2\) lower-triangular. This is exactly the architecture
 used in the \S\ref{subsec:8.2} (\(\Sigma = I_2\)) and \S\ref{subsec:8.3}
-(\(\Sigma\) correlated) experiments.
+(\(\Sigma\) correlated) experiments (Fig.~\ref{fig:c5}).
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.85\linewidth]{figures/c5_kr_structure.pdf}
+\caption{The triangular (Knothe--Rosenblatt) architectural class: component
+\(r_k\) depends on \(\theta_{1:k}\) (left) \emph{and} on \(X_{1:k}\) (right),
+so both \(\partial_\theta r\) and \(\partial_X r\) are lower-triangular ---
+giving a tractable Jacobian and an invertible, measure-preserving map.}
+\label{fig:c5}
+\end{figure}
 
 \subsection{Jacobian structure and computational properties}\label{subsec:6.2}
 
@@ -3571,7 +3622,7 @@ loss (SNL).
 CD-SBI's specific contribution is therefore the architectural recipe
 (monotone in \(\theta\) + monotone in \(X\) + triangular structure for
 multivariate) that converts the standard SNL training objective into a
-procedure whose output is a frequentist CD by construction.
+procedure whose output is a frequentist CD by construction (Fig.~\ref{fig:c6}).
 
 \paragraph{Connection to the implicit-likelihood-ratio tradition.}
 CD-SBI also relates to the implicit-likelihood-ratio (LR) tradition
@@ -3589,6 +3640,15 @@ to the \emph{signed-root log-likelihood ratio}: the signed square root
 which is asymptotically \(\mathcal{N}(0, 1)\) under \(P_\theta\) and is
 the standard frequentist pivot for one-parameter exponential families.
 The connection is developed in \citet[ch.~5]{SchwederHjort2016}.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.85\linewidth]{figures/c6_sbi_position.pdf}
+\caption{CD-SBI in the SBI landscape. It shares the NF-MLE loss with SNL and
+the confidence-set target with LF2I/WALDO, but is the single-stage method whose
+output has frequentist coverage by construction.}
+\label{fig:c6}
+\end{figure}
 
 \medskip\hrule\medskip
 
