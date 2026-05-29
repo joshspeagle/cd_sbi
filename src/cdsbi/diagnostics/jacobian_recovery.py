@@ -100,5 +100,9 @@ class JacobianRecovery(Diagnostic):
         return DiagnosticResult(
             name=self.name, value=df, passed=passed, noise_floor=self.max_residual_tol,
             n_samples=int(self.n_points),
-            meta={"d": d, "tol": self.max_residual_tol},
+            meta={
+                "d": d, "tol": self.max_residual_tol,
+                "J_emp_mean": J_emp_mean.cpu().numpy(),
+                "J_true": (J_true.cpu().numpy() if hasattr(J_true, "cpu") else np.asarray(J_true)),
+            },
         )

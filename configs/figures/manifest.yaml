@@ -10,3 +10,120 @@ _hello:
   output:
     pdf: figures/_hello.pdf
     png: figures/_hello.png
+
+e1_loc_normal_calibration:
+  description: "§8.1 CDSBI 1-D calibration: marginal PIT + coverage curve"
+  section: "8.1"
+  source_runs:
+    - outputs/figure_data/8_1_cdsbi
+  checkpoint_runs: []
+  builder: "cdsbi.analysis.figures.figures.e1_loc_normal_calibration:render"
+  output:
+    pdf: figures/e1_loc_normal_calibration.pdf
+    png: figures/e1_loc_normal_calibration.png
+
+e2_loc_normal_cross_method:
+  description: "§8.1 cross-method coverage curves (5 methods, medium budget)"
+  section: "8.1"
+  source_runs:
+    - outputs/8_1_baseline_sweep/2026-05-27_00-57-31
+  checkpoint_runs: []
+  builder: "cdsbi.analysis.figures.figures.e2_loc_normal_cross_method:render"
+  output:
+    pdf: figures/e2_loc_normal_cross_method.pdf
+    png: figures/e2_loc_normal_cross_method.png
+
+e3_joint_diagnostics:
+  description: "§8.2 joint Mahalanobis PIT + coverage-error tile"
+  section: "8.2"
+  source_runs:
+    - outputs/figure_data/8_2_cdsbi
+  checkpoint_runs: []
+  builder: "cdsbi.analysis.figures.figures.e3_joint_diagnostics:render"
+  output:
+    pdf: figures/e3_joint_diagnostics.pdf
+    png: figures/e3_joint_diagnostics.png
+
+e4_jacobian_recovery:
+  description: "§8.3 trained Jacobian vs L⁻¹ (KR uniqueness)"
+  section: "8.3"
+  source_runs:
+    - outputs/figure_data/8_3_cdsbi
+  checkpoint_runs: []
+  builder: "cdsbi.analysis.figures.figures.e4_jacobian_recovery:render"
+  output:
+    pdf: figures/e4_jacobian_recovery.pdf
+    png: figures/e4_jacobian_recovery.png
+
+e5_exp_rate_calibration:
+  description: "§8.4 doubly-monotone calibration: PIT + coverage + loss-vs-floor"
+  section: "8.4"
+  source_runs:
+    - outputs/figure_data/8_4_cdsbi
+  checkpoint_runs: []
+  builder: "cdsbi.analysis.figures.figures.e5_exp_rate_calibration:render"
+  output:
+    pdf: figures/e5_exp_rate_calibration.pdf
+    png: figures/e5_exp_rate_calibration.png
+
+e6_r2_ablation_bars:
+  description: "§8.4 (R2) ablation: R1+R2 vs R1-only tail-mean loss across budgets"
+  section: "8.4"
+  source_runs:
+    - outputs/8_4_baseline_sweep/2026-05-27_20-20-16
+    - outputs/8_4_ablation/2026-05-27_23-55-59
+  checkpoint_runs: []
+  builder: "cdsbi.analysis.figures.figures.e6_r2_ablation_bars:render"
+  output:
+    pdf: figures/e6_r2_ablation_bars.pdf
+    png: figures/e6_r2_ablation_bars.png
+
+e7_catastrophic_folding:
+  description: "§8.4 catastrophic folding: R1-only loss below the entropy floor"
+  section: "8.4"
+  source_runs:
+    - outputs/figure_data/8_4_folding
+  checkpoint_runs: []
+  builder: "cdsbi.analysis.figures.figures.e7_catastrophic_folding:render"
+  output:
+    pdf: figures/e7_catastrophic_folding.pdf
+    png: figures/e7_catastrophic_folding.png
+
+e8_headline_summary:
+  description: "Cross-method coverage_error_max (log-y) across §8.1-§8.4"
+  section: "8.5"
+  source_runs:
+    - outputs/8_1_baseline_sweep
+    - outputs/8_2_baseline_sweep
+    - outputs/8_3_baseline_sweep
+    - outputs/8_4_baseline_sweep
+  checkpoint_runs: []
+  builder: "cdsbi.analysis.figures.figures.e8_headline_summary:render"
+  output:
+    pdf: figures/e8_headline_summary.pdf
+    png: figures/e8_headline_summary.png
+
+e9_budget_saturation:
+  description: "§8.2 coverage_error_max vs parameter budget, per method"
+  section: "8.5"
+  source_runs:
+    - outputs/8_2_baseline_sweep
+  checkpoint_runs: []
+  builder: "cdsbi.analysis.figures.figures.e9_budget_saturation:render"
+  output:
+    pdf: figures/e9_budget_saturation.pdf
+    png: figures/e9_budget_saturation.png
+
+e10_per_experiment_boxplots:
+  description: "Per-experiment coverage_error_max boxplots (seeds × budgets)"
+  section: "8.5"
+  source_runs:
+    - outputs/8_1_baseline_sweep
+    - outputs/8_2_baseline_sweep
+    - outputs/8_3_baseline_sweep
+    - outputs/8_4_baseline_sweep
+  checkpoint_runs: []
+  builder: "cdsbi.analysis.figures.figures.e10_per_experiment_boxplots:render"
+  output:
+    pdf: figures/e10_per_experiment_boxplots.pdf
+    png: figures/e10_per_experiment_boxplots.png
