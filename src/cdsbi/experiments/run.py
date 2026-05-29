@@ -51,20 +51,19 @@ def _build_flow(cfg: DictConfig, simulator) -> Any:
     # whose method.flow is None / "additive_umnn" / "doubly_monotone").
     # NPE/NLE/NRE/LF2I-BFF have method.flow set to "maf"/None and need their
     # own flow architecture — they fall through to the slow path below.
-    # triangular_doubly_monotone needs d AND per-coordinate theta_ref injected
-    # (R2 holds for θ_k ≥ theta_ref[k]; inject the simulator's prior lower bounds
-    # so R2 holds by construction across the full support).
-    if hydra_flow_name == "triangular_doubly_monotone" and (
+    # single_index_monotone needs d AND the per-coordinate monotonicity signs
+    # (theta_signs / feat_signs) injected from the simulator. Signs are fixed by
+    # the target's known monotonicity, so R1/R2 hold globally with no theta_ref
+    # restriction (unlike the obsolete doubly-monotone flow).
+    if hydra_flow_name == "single_index_monotone" and (
         method_flow_label is None or method_flow_label == hydra_flow_name
     ):
         flow_dict = OmegaConf.to_container(cfg.flow, resolve=True)
         target = flow_dict.pop("_target_")
         flow_dict.pop("name", None)
         flow_dict.setdefault("d", int(simulator.d_theta))
-        # R2 holds for θ_k ≥ theta_ref[k]; inject the simulator's per-coordinate
-        # prior lower bounds so R2 holds by construction across the support.
-        if hasattr(simulator, "theta_lower"):
-            flow_dict.setdefault("theta_ref", list(simulator.theta_lower))
+        flow_dict.setdefault("theta_signs", list(simulator.theta_signs))
+        flow_dict.setdefault("feat_signs", list(simulator.feat_signs))
         return _instantiate(target, **flow_dict)
 
     v3_flow_names = {"doubly_monotone", "joint_umnn", "joint_umnn_1d"}
@@ -176,7 +175,7 @@ def _build_flow(cfg: DictConfig, simulator) -> Any:
         f"Unknown flow label '{method_flow_label}' in method.flow. "
         "Expected one of: 'maf', 'additive_umnn', 'triangular_additive', "
         "'doubly_monotone', 'joint_umnn', 'joint_umnn_1d', "
-        "'triangular_doubly_monotone'."
+        "'single_index_monotone'."
     )
 
 

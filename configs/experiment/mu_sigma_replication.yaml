@@ -1,10 +1,17 @@
 # @package _global_
 defaults:
   - override /target: normal_mu_sigma
-  - override /flow: triangular_doubly_monotone
+  - override /flow: single_index_monotone
   - override /conditioner: sufficient_stat
   - override /method: cd_sbi
   - override /budget: medium
+
+# cd_sbi.yaml hardcodes flow: additive_umnn; run.py's _build_flow only fires
+# the Hydra flow-group override when method.flow agrees with it (the cb1e08e
+# guard). Override method.flow here so the experiment is self-contained and
+# the sweep need not pass method.flow=single_index_monotone on the CLI.
+method:
+  flow: single_index_monotone
 
 experiment:
   name: mu_sigma_replication
