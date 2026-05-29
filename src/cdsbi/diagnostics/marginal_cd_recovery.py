@@ -29,6 +29,35 @@ class MarginalCDRecovery:
         return DiagnosticResult(self.name, value=pd.DataFrame(), passed=True,
                                 noise_floor=0.0, n_samples=0, meta={"reason": reason})
 
+    def _marginalize_mu(self, proc, simulator, theta_0, x, sc, lc, chunk=256):
+        """H_μ(μ₀|X) for each row of x, by integrating the joint CD over log σ.
+        Finite-difference ∂r_σ/∂logσ on a fixed grid; no autograd (pivot_fn moves
+        devices, which would detach an external grad leaf on GPU)."""
+        mu0 = float(theta_0[lc])
+        lo, hi = simulator.log_sigma_range
+        grid = torch.linspace(lo - 2.0, hi + 2.0, 257, dtype=x.dtype, device=x.device)  # (K,)
+        K = grid.shape[0]
+        out = []
+        with torch.no_grad():
+            for start in range(0, x.shape[0], chunk):
+                xb = x[start:start + chunk]                       # (b, n_iid)
+                b = xb.shape[0]
+                theta = torch.empty(b, K, 2, dtype=x.dtype, device=x.device)
+                theta[:, :, sc] = grid.view(1, K)
+                theta[:, :, lc] = mu0
+                theta = theta.reshape(b * K, 2)
+                x_rep = xb.repeat_interleave(K, dim=0)            # (b*K, n_iid)
+                r = proc.pivot(theta, x_rep)                      # (b*K, 2)
+                r_sigma = r[:, sc].reshape(b, K)
+                r_mu = r[:, lc].reshape(b, K)
+                dr = torch.gradient(r_sigma, spacing=(grid,), dim=1)[0]   # (b, K)
+                phi = torch.exp(-0.5 * r_sigma ** 2) / np.sqrt(2 * np.pi)
+                Phi_mu = 0.5 * (1.0 + torch.erf(r_mu / np.sqrt(2.0)))
+                integ = phi * dr.abs() * Phi_mu                   # (b, K)
+                H = torch.trapezoid(integ, grid, dim=1)           # (b,)
+                out.append(H.detach().cpu().numpy())
+        return np.concatenate(out)
+
     def __call__(self, trained, simulator, eval_data=None, x_per_theta=None) -> DiagnosticResult:
         proc = getattr(trained, "procedure", None)
         if proc is None or not hasattr(proc, "pivot"):
@@ -51,12 +80,17 @@ class MarginalCDRecovery:
             analytic = simulator.analytic_marginal_cd_pit(theta_0, x)
             sigma_ks = float(kstest(sigma_pit, "uniform").statistic)
             sigma_chi2_resid = float(np.abs(sigma_pit - analytic["sigma_pit"].numpy()).max())
+            lc = spec["location_coord"]
+            H_mu = np.clip(self._marginalize_mu(proc, simulator, theta_0, x, sc, lc), 0.0, 1.0)
+            mu_ks = float(kstest(H_mu, "uniform").statistic)
+            mu_t_resid = float(np.abs(H_mu - analytic["mu_pit"].numpy()).max())
             rows.append({
                 "theta_0": key, "sigma_ks": sigma_ks,
                 "sigma_chi2_resid": sigma_chi2_resid, "noise_floor": floor,
+                "mu_ks": mu_ks, "mu_t_resid": mu_t_resid,
             })
         df = pd.DataFrame(rows)
-        passed = bool((df["sigma_ks"] <= 2.0 * floor).all())
+        passed = bool((df["sigma_ks"] <= 2.0 * floor).all() and (df["mu_ks"] <= 2.0 * floor).all())
         return DiagnosticResult(self.name, value=df, passed=passed,
                                 noise_floor=floor, n_samples=self.n_per_theta,
                                 meta={"scale_coord": sc})
