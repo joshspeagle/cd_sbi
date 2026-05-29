@@ -40,7 +40,7 @@ is the working one. The conda `pdflatex` at
 on this machine — its perl-based `mktexfmt` can't find
 `mktexlsr.pl` and bails before opening `pdflatex.fmt`.
 
-**Python codebase** (v0 + v1 + v2 + v3 landed; ~201 fast tests + 4 intensive replication tests + opt-in (R2) ablation suite):
+**Python codebase** (v0 + v1 + v2 + v3 + unknown-(μ,σ²) Stage A landed; ~289 fast tests + 5 intensive replication tests + opt-in (R2) ablation suite):
 
 ```bash
 pip install -e ".[dev]"               # install cdsbi package + dev deps
@@ -73,7 +73,7 @@ python tools/regen_figure_data.py                          # re-run CDSBI figure
 - `reviews/round{1,2,3}/` — per-round critic reports and audit trail.
 - `docs/superpowers/specs/` — design specs.
 - `docs/superpowers/plans/` — implementation plans (v0, v1, v2, v3 plans live here; v4 plan next).
-- `src/cdsbi/` — Python package (v0 + v1 + v2 + v3 landed). Six core layers + `confidence_set/`, `experiments/`, `analysis/`, `reproducibility/`. v3 added `DoublyMonotoneUMNN`, `JointUMNNFlow`, `JointUMNN1DFlow`, `MLPConditioner`, `ReducedSimulator`.
+- `src/cdsbi/` — Python package (v0 + v1 + v2 + v3 + (μ,σ²) Stage A landed). Six core layers + `confidence_set/`, `experiments/`, `analysis/`, `reproducibility/`. v3 added `DoublyMonotoneUMNN`, `JointUMNNFlow`, `JointUMNN1DFlow`, `MLPConditioner`, `ReducedSimulator`. (μ,σ²) Stage A added `NormalUnknownMeanVar`, `SingleIndexMonotoneFlow`, `SufficientStatConditioner`, `MarginalCDRecovery`.
 - `configs/` — Hydra config groups (target / flow / conditioner / method / training / budget / experiment).
 - `tests/` — `unit/`, `integration/`, `diagnostics/`, opt-in `intensive/` (4 replication tests: §8.1, §8.2, §8.3, §8.4) and opt-in `ablation/` (3 tests: safety-check, trained-folding, 1D mechanism).
 - `src/cdsbi/analysis/figures/` — visualization suite (F0 infra + F1 panels + F2 empirical + F3 conceptual). Manifest-driven (`configs/figures/manifest.yaml`); builders are pure `render(spec) -> Figure` composing F1 panels; the render CLI owns all disk IO. matplotlib/Agg via `style.apply_style()`.
@@ -290,7 +290,42 @@ region of the prior.
   (apples-to-apples 5-method × 4-budget × 5-seed sweep on `T`) +
   `outputs/8_4_ablation/2026-05-27_23-55-59/` (R1+R2 vs R1-only sweep).
 
-**Next milestone:** v4 (SBI benchmark — Two Moons, SLCP, Gaussian
-Mixture, etc.). After v4: v5 (§3.7 alt-loss), v6 (synthetic high-d),
-v7 (real-data astronomy), v8 (image/sequence). See spec §12 for the
-full roadmap.
+## Unknown-(μ, σ²) Gaussian — Stage A landed (M0 + M1)
+
+A separate research track (the first target with a **scale/nuisance**
+parameter): `NormalUnknownMeanVar` (θ = (log σ, μ), `n_iid=10` replicates per
+observation X ∈ ℝ¹⁰, `d_theta=2`). Spec:
+`docs/superpowers/specs/2026-05-29-cd-sbi-unknown-mean-variance-design.md`
+(Stage A = oracle summary; Stage B = learned summary, M2+). Plans:
+`docs/superpowers/plans/2026-05-29-cd-sbi-mu-sigma-m{0,1}-*.md`.
+
+- **M0 (Stage-A core).** Key finding: a **doubly-monotone** flow (∂r/∂θ>0 AND
+  ∂r/∂feat>0) **cannot** represent a scale parameter — `r_σ` must increase in
+  θ(log σ) but decrease in the data feature (both enter via `s²/σ²`). Fixed by
+  the new **`SingleIndexMonotoneFlow`** (`single_index_monotone.py`): per-coord
+  `r_k = G_k(s_θk·softplus(p_θk(ctx))·θ_k + s_fk·softplus(p_fk(ctx))·feat_k +
+  off_k(ctx); ctx)`, `G_k` a monotone-increasing UMNN of the index → independent,
+  globally-guaranteed R1/R2 signs (no `θ_ref` restriction), non-additive. Signs
+  injected from the simulator at wire-time (`theta_signs`/`feat_signs`). Oracle
+  `SufficientStatConditioner` → `(log s², X̄)`; increasing-θ pivot convention
+  `r*_σ=Φ⁻¹(1−F_{χ²}((n−1)s²/σ²))`, `r*_μ=√n(μ−X̄)/σ`. Recovery smoke RMSE 0.10.
+- **M1 (Stage-A diagnostics).** New **`MarginalCDRecovery`** diagnostic: σ²-CD
+  reads off `Φ(r_σ)` (direct χ²); μ-CD requires **marginalizing the σ nuisance**
+  out of the joint confidence density (finite-difference integration over log σ)
+  → recovers the **Student-`t_{n−1}`** CD. Primary metric = KS of each PIT vs U;
+  secondary = 95th-pct per-X residual vs the analytic CD. 2-D 3×3 product
+  coverage θ₀-grid; `paper_table_mu_sigma`. Intensive 5-seed replication
+  (`experiment=mu_sigma_replication`): pivot_rmse 0.042, coverage 0.026, σ²/μ KS
+  0.020, μ-resid p95 0.017, final_loss 0.904 at the entropy floor (H=0.921),
+  JointMahalanobis 5/5.
+- **Flow dispatch:** `mu_sigma_replication.yaml` sets `method.flow=
+  single_index_monotone` itself (the cb1e08e guard) so the experiment is
+  self-contained.
+
+**Next milestone:** M2 (Stage-B — learned DeepSets summary `s_φ(X):ℝ¹⁰→ℝ²` +
+`fit()` optimizer extension for conditioner params; the "can a learned non-square
+summary live in the NF-MLE calibration machinery" investigation). Then M3
+(Stage-B cheat/regularity investigation), M4 (optional baselines + manuscript).
+The separate v-track roadmap: v4 (SBI benchmark — Two Moons, SLCP, Gaussian
+Mixture), v5 (§3.7 alt-loss), v6 (synthetic high-d), v7 (real-data astronomy),
+v8 (image/sequence). See spec §12 for the full roadmap.
