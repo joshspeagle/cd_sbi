@@ -6,12 +6,43 @@ run.py when the diagnostics carry raw arrays in their result.meta (F2 Phase A).
 """
 from __future__ import annotations
 
+import glob
+import os
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 from cdsbi.analysis.figures.data_io.checkpoints import load_checkpoint
+
+
+def load_sweep(sweep_root: str) -> pd.DataFrame:
+    """Aggregate index rows across ALL timestamp dirs under a sweep root.
+
+    The repo splits a section's runs across multiple timestamped sweep dirs
+    (method-specific re-runs). This globs every run-dir under `sweep_root`
+    (handling both <root>/<timestamp>/<run-dir> and a flat <root>/<run-dir>
+    layout), keeps only STATUS==OK runs, and deduplicates on
+    (method, budget_name, seed) keeping the LATEST path (re-runs supersede).
+    """
+    rundirs = set()
+    for pat in (os.path.join(sweep_root, "*", "index_row.parquet"),
+                os.path.join(sweep_root, "*", "*", "index_row.parquet")):
+        for p in glob.glob(pat):
+            rundirs.add(os.path.dirname(p))
+    rows = []
+    for rd in sorted(rundirs):
+        status = os.path.join(rd, "STATUS")
+        if os.path.exists(status) and open(status).read().strip() != "OK":
+            continue
+        df = pd.read_parquet(os.path.join(rd, "index_row.parquet"))
+        df["_src"] = rd
+        rows.append(df)
+    if not rows:
+        return pd.DataFrame()
+    alldf = pd.concat(rows, ignore_index=True).sort_values("_src")
+    keys = [c for c in ("method", "budget_name", "seed") if c in alldf.columns]
+    return alldf.drop_duplicates(keys, keep="last").drop(columns=["_src"])
 
 
 def load_pit_values(run_dir: str, coord: int = 0) -> np.ndarray:

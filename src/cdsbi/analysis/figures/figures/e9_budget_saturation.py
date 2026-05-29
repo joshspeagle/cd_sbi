@@ -3,13 +3,13 @@ from __future__ import annotations
 
 from cdsbi.analysis.figures import style, panels
 from cdsbi.analysis.figures.manifest import FigureSpec
-from cdsbi.analysis.figures.data_io.aggregates import load_aggregates
+from cdsbi.analysis.figures.data_io.figure_data import load_sweep
 
 
 def render(spec: FigureSpec):
     style.apply_style()
     import matplotlib.pyplot as plt
-    df = load_aggregates(spec.source_runs)
+    df = load_sweep(spec.source_runs[0])
     series = {}
     for m, g in df.groupby("method"):
         gg = (g.groupby("budget_name")

@@ -93,10 +93,10 @@ e8_headline_summary:
   description: "Cross-method coverage_error_max (log-y) across §8.1-§8.4"
   section: "8.5"
   source_runs:
-    - outputs/8_1_baseline_sweep/2026-05-27_00-57-31
-    - outputs/8_2_baseline_sweep/2026-05-27_04-36-58
-    - outputs/8_3_baseline_sweep/2026-05-27_11-18-28
-    - outputs/8_4_baseline_sweep/2026-05-27_20-20-16
+    - outputs/8_1_baseline_sweep
+    - outputs/8_2_baseline_sweep
+    - outputs/8_3_baseline_sweep
+    - outputs/8_4_baseline_sweep
   checkpoint_runs: []
   builder: "cdsbi.analysis.figures.figures.e8_headline_summary:render"
   output:
@@ -107,7 +107,7 @@ e9_budget_saturation:
   description: "§8.2 coverage_error_max vs parameter budget, per method"
   section: "8.5"
   source_runs:
-    - outputs/8_2_baseline_sweep/2026-05-27_04-36-58
+    - outputs/8_2_baseline_sweep
   checkpoint_runs: []
   builder: "cdsbi.analysis.figures.figures.e9_budget_saturation:render"
   output:
@@ -118,10 +118,10 @@ e10_per_experiment_boxplots:
   description: "Per-experiment coverage_error_max boxplots (seeds × budgets)"
   section: "8.5"
   source_runs:
-    - outputs/8_1_baseline_sweep/2026-05-27_00-57-31
-    - outputs/8_2_baseline_sweep/2026-05-27_04-36-58
-    - outputs/8_3_baseline_sweep/2026-05-27_11-18-28
-    - outputs/8_4_baseline_sweep/2026-05-27_20-20-16
+    - outputs/8_1_baseline_sweep
+    - outputs/8_2_baseline_sweep
+    - outputs/8_3_baseline_sweep
+    - outputs/8_4_baseline_sweep
   checkpoint_runs: []
   builder: "cdsbi.analysis.figures.figures.e10_per_experiment_boxplots:render"
   output:

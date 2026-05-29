@@ -4,8 +4,8 @@ from __future__ import annotations
 import numpy as np
 
 from tests.figures_fixtures import (
-    make_run_dir, write_marginal_pit_raw, write_jacobian_raw, write_coverage,
-    write_coverage_2d, write_joint_mahalanobis_raw,
+    make_run_dir, make_sweep, write_marginal_pit_raw, write_jacobian_raw,
+    write_coverage, write_coverage_2d, write_joint_mahalanobis_raw,
 )
 
 
@@ -75,3 +75,29 @@ def test_load_loss_tail_mean(tmp_path):
                       coverage_error_max=0.03, final_loss=0.99,
                       loss_history_tail=[1.1, 1.0, 0.99, 0.99])
     assert abs(load_loss_tail_mean(str(rd)) - np.mean([1.1, 1.0, 0.99, 0.99])) < 1e-9
+
+
+def test_load_sweep_dedups_and_handles_timestamp_layer(tmp_path):
+    """load_sweep aggregates across timestamp dirs, dedups (method,budget,seed)
+    keeping the latest, and also works on a flat sweep layout."""
+    from cdsbi.analysis.figures.data_io.figure_data import load_sweep
+    import pandas as pd
+    sweep = tmp_path / "8_x_baseline_sweep"
+    # two timestamp dirs; the later one re-runs cd_sbi/medium/seed0
+    for ts, cov in (("2026-01-01_00-00-00", 0.20), ("2026-01-02_00-00-00", 0.05)):
+        rd = sweep / ts / "method=cd_sbi,budget=medium,seed=0"
+        rd.mkdir(parents=True)
+        (rd / "STATUS").write_text("OK")
+        pd.DataFrame([{"method": "cd_sbi", "budget_name": "medium", "seed": 0,
+                       "coverage_error_max": cov}]).to_parquet(rd / "index_row.parquet")
+    df = load_sweep(str(sweep))
+    assert len(df) == 1                       # deduped to one row
+    assert float(df["coverage_error_max"].iloc[0]) == 0.05   # kept the later re-run
+
+
+def test_load_sweep_flat_layout(tmp_path):
+    from cdsbi.analysis.figures.data_io.figure_data import load_sweep
+    sweep = make_sweep(tmp_path / "flat")     # run-dirs directly under root
+    df = load_sweep(str(sweep))
+    assert set(df["method"]) == {"cd_sbi", "npe"}
+    assert len(df) == 4

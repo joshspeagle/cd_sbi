@@ -33,6 +33,12 @@ def render(spec: FigureSpec):
         for rd in glob.glob(str(Path(root) / "*")):
             if not os.path.isdir(rd) or not (Path(rd) / "model.pt").exists():
                 continue
+            # Both arms are CDSBI runs (R1+R2 = doubly_monotone, R1-only =
+            # joint_umnn). The R1+R2 sweep dir also holds the 4 baseline
+            # methods — filter to method=cd_sbi so we average only the
+            # doubly-monotone arm, not unrelated NPE/NLE/NRE/LF2I losses.
+            if "method=cd_sbi" not in Path(rd).name:
+                continue
             b = _budget_of(rd)
             if b in per_budget:
                 per_budget[b].append(load_loss_tail_mean(rd))
