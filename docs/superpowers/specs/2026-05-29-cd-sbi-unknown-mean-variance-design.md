@@ -45,22 +45,36 @@ This milestone is a two-stage investigation (A → B in one spec):
 ### The exact closed-form joint pivot (validation anchor)
 
 Sufficient statistic `(X̄, s²)`; under normality `X̄ ⊥ s²` (Basu), giving an
-**exact** `𝒩(0, I₂)` pivot at the true θ₀:
+**exact** `𝒩(0, I₂)` pivot at the true θ₀. We adopt the **increasing-in-θ
+convention** (so the flow can represent `r*` directly and PivotRMSE compares
+without a sign flip):
 
-- `r*_σ(θ; X) = Φ⁻¹( F_{χ²_{n_iid−1}}( (n_iid−1) s² / σ² ) )`  — uses `(σ², s²)`
-- `r*_μ(θ; X) = √n_iid · (X̄ − μ) / σ`  — uses `(μ, σ; X̄)`
+- `r*_σ(θ; X) = Φ⁻¹( 1 − F_{χ²_{n_iid−1}}( (n_iid−1) s² / σ² ) )`  — uses `(σ², s²)`
+- `r*_μ(θ; X) = √n_iid · (μ − X̄) / σ`  — uses `(μ, σ; X̄)`
 
 Properties that drive the architecture:
 
 - **Autoregressive / triangular, forced order σ → μ.** `r*_σ` is self-contained;
   `r*_μ` depends on `log σ` (the *earlier* coordinate). The scale must come first.
-- **Non-additive.** `r*_μ` couples `μ` and `σ` multiplicatively (`/σ`), so the
-  additive `TriangularAdditiveFlow` (§8.2/8.3, `r = a(θ) − b(X)`) **cannot**
-  represent it. Requires a doubly-monotone (UMNN-integrand) construction.
-- **Monotone as required:** `r*_μ` ↓ in μ (R1), ↑ in X̄ (R2); `r*_σ` ↓ in log σ
-  (R1), ↑ in s² (R2).
+- **Opposite-sign monotonicity in θ vs. the data (the key architectural driver).**
+  Each coordinate is monotone *increasing in θ* but *decreasing in its data
+  feature* — and these signs are intrinsic, not a convention choice: `σ²` and
+  `s²` enter only through the ratio `s²/σ²`, so any calibrated `r_σ` must move
+  oppositely in the two. Concretely (this convention): `r*_σ` ↑ in `log σ` (R1,
+  `s_θ=+1`), ↓ in `log s²` (R2, `s_f=−1`); `r*_μ` ↑ in μ (R1, `s_θ=+1`), ↓ in X̄
+  (R2, `s_f=−1`). A flow that forces *both* monotonicities to the same sign
+  (e.g. `DoublyMonotoneUMNN`'s increasing-increasing form) **cannot represent
+  this** — verified empirically (RMSE ≈ 1.2). See §A.2.
+- **`r*_σ` is single-index in `(log σ, log s²)`.** `r*_σ = g(log s² − 2 log σ)`
+  for a monotone `g` (verified: constant along that level set). This is why the
+  σ-feature is **`log s²`**, not `s²` — and what makes the single-index
+  architecture (§A.2) exact. `r*_μ = √n·exp(−log σ)·(μ − X̄)` is single-index in
+  `(μ − X̄)` with a ctx-dependent slope.
+- **Non-additive.** The multiplicative `exp(−log σ)` scale and the nonlinear
+  `g` link both put the model outside the additive class.
 - **Marginals are textbook CDs:** μ → Student-`t_{n_iid−1}`, σ² → χ²-based —
-  the Schweder–Hjort UMP(U) confidence distributions, recoverable and checkable.
+  the Schweder–Hjort UMP(U) confidence distributions (see §A.3 for the
+  asymmetric recovery: σ² direct from `r_σ`, μ via nuisance-marginalization).
 
 Note `r*_μ` uses the *parameter* σ (a component of θ), not the data `s²` — the
 pivot is a function of `(θ, X)`, so this is legitimate and clean.
@@ -72,36 +86,54 @@ pivot is a function of `(θ, X)`, so this is legitimate and clean.
 ### A.1 Oracle summary conditioner
 
 `SufficientStatConditioner` — frozen, zero-parameter `Conditioner` mapping
-`X ∈ ℝ^{n_iid} → features = (s², X̄) ∈ ℝ²` (order paired to θ's (log σ, μ)).
-`encode(X) → (features, log_det_contrib)`. The `(X̄, s²)` reduction's volume
-factor is **θ-independent** (the discarded `p(X | X̄, s²)` is θ-free by
-sufficiency), so it does not affect the NF-MLE argmin; we set
-`log_det_contrib` to a constant (chosen so the reported loss is comparable to
-the conditional-entropy floor, mirroring §8.4's cosmetic `½ log n`). The exact
-constant is derived in the plan; getting it "wrong" only shifts the loss scale,
-not the optimum.
+`X ∈ ℝ^{n_iid} → features = (log s², X̄) ∈ ℝ²` (order paired to θ's (log σ, μ)).
+**The σ-feature is `log s²`** (not `s²`) — this is what makes `r_σ` single-index
+(§ target) and the §A.2 architecture exact; `(log s², X̄)` is a bijective
+reparam of `(s², X̄)`, still minimal sufficient. `encode(X) → (features,
+log_det_contrib)`. The reduction's volume factor is **θ-independent** (the
+discarded `p(X | s², X̄)` is θ-free by sufficiency), so it does not affect the
+NF-MLE argmin; we set `log_det_contrib` to a constant (mirroring §8.4's cosmetic
+`½ log n`). A wrong constant only shifts the loss scale, not the optimum.
 
-### A.2 The non-additive autoregressive flow
+### A.2 The single-index monotone autoregressive flow
 
-New flow `TriangularDoublyMonotoneFlow(d)` — the natural generalization that
-subsumes both existing multivariate pieces:
+New flow `SingleIndexMonotoneFlow(d, *, theta_signs, feat_signs)`. The
+`DoublyMonotoneUMNN`-style "increasing-in-both" form was tried and **fails**
+here: this target needs *opposite-sign* monotonicity (↑ in θ, ↓ in feat), and
+that form's `∂r/∂feat = b′ ± β′∫σ` cannot be sign-guaranteed against the
+non-additive coupling (empirically RMSE ≈ 1.2). The single-index form solves
+this cleanly — **validated** by prototype-fitting the closed-form truth
+(RMSE `r_σ = 0.0013`, `r_μ = 0.035`):
 
-- Autoregressive/triangular like `TriangularAdditiveFlow`: coordinate `k`'s
-  pivot `r_k` is conditioned on `(θ_{<k}, features_{<k})`.
-- Each coordinate is **doubly-monotone** like `DoublyMonotoneUMNN` (§6.1 form 2):
-  `r_k = b_k(feat_k) + ∫_{θ_ref}^{θ_k} softplus(α_k(t) + β_k(feat_k)) dt`, where
-  `b_k, β_k` are monotone-increasing UMNNs of `feat_k` and `α_k`, `β_k`, `b_k`
-  are additionally conditioned on `(θ_{<k}, features_{<k})`. This gives R1
-  (`∂r_k/∂θ_k = softplus(·) > 0`) and R2 (`∂r_k/∂feat_k > 0`) architecturally,
-  while being **non-additive** (the multiplicative coupling the truth needs).
-- `monotonicity_guarantees = {R1, R2}`.
-- For (μ, σ²): coord 0 = `r_σ(log σ; s²)`; coord 1 = `r_μ(μ; X̄)` conditioned on
-  `log σ` (and, allowed but unused-by-truth, `s²`). The flow class contains the
-  closed-form truth, so Stage A should recover it.
+Per coordinate `k` (with `ctx_k = (θ_{<k}, features_{<k})`):
+```
+z_k = s_θk · softplus(p_θk(ctx_k)) · θ_k
+    + s_fk · softplus(p_fk(ctx_k)) · feat_k
+    + off_k(ctx_k)
+r_k = G_k(z_k ; ctx_k)            # G_k a monotone-increasing UMNN of the index z_k
+```
+- `s_θk, s_fk ∈ {+1, −1}` are **fixed per-coordinate, per-variable signs** set
+  from the target's known monotonicity (here `s_θ = (+1, +1)`, `s_f = (−1, −1)`).
+- `p_θk, p_fk` (→ positive magnitudes via `softplus`), `off_k`, and `G_k` are
+  MLP/UMNN functions of `ctx_k` (autoregressive). The ctx-dependent magnitude is
+  what supplies the multiplicative scale (`r_μ`'s `√n·exp(−log σ)`).
+- **R1/R2 by construction, with independent signs, *globally*:**
+  `∂r_k/∂θ_k = s_θk·softplus(p_θk)·G′_k` (sign `s_θk`, strictly monotone) and
+  `∂r_k/∂feat_k = s_fk·softplus(p_fk)·G′_k` (sign `s_fk`, strictly monotone),
+  since `G′_k = softplus(·) > 0` everywhere. No `θ_ref`-in-support restriction
+  (the index `z_k` absorbs the baseline; `G_k` integrates from `z=0`), which
+  also removes the wide-θ-range initialization blow-up the doubly-monotone form
+  hit at `θ_ref = −5`.
+- `monotonicity_guarantees = {R1, R2}` — honest, because each derivative has a
+  fixed sign by construction (a "monotone" guarantee is sign-agnostic, as in
+  `TriangularAdditiveFlow` where `∂r/∂X < 0`).
+- Lower-triangular feature-Jacobian (`r_k` depends only on `feat_{≤k}`), so
+  `log|det ∂r/∂feat| = Σ_k log|∂r_k/∂feat_k| = Σ_k [log softplus(p_fk) + log G′_k]`
+  — closed form.
 
-This is the first genuinely **non-additive multivariate** flow in the repo;
-`TriangularAdditiveFlow` is its additive special case and `DoublyMonotoneUMNN`
-its `d=1` special case (note this in the flow docstring).
+The fixed signs are passed at wire-time (like `d`); for (μ, σ²) the simulator
+exposes them. (For future targets with unknown monotonicity signs, trying both
+or a learnable-sign mechanism is out of scope — here the signs are known.)
 
 ### A.3 Stage-A validation (all against the closed-form truth)
 
@@ -200,10 +232,12 @@ makes the learned summary calibrate.
 
 **In scope:**
 - `NormalUnknownMeanVar` simulator (θ=(log σ, μ), n_iid=10, closed-form
-  `r_star`, `log_prob`, MC `entropy_lower_bound`).
-- `SufficientStatConditioner` (oracle, Stage A) + `DeepSetsConditioner`
-  (learned, Stage B), both implementing the `Conditioner` protocol.
-- `TriangularDoublyMonotoneFlow` (non-additive autoregressive, d=2).
+  `r_star` in the increasing-θ convention, `log_prob`, MC `entropy_lower_bound`,
+  and `theta_signs`/`feat_signs` + per-coord lower bounds exposed for the flow).
+- `SufficientStatConditioner` (oracle, Stage A; X → (log s², X̄)) +
+  `DeepSetsConditioner` (learned, Stage B), both implementing `Conditioner`.
+- `SingleIndexMonotoneFlow` (single-index monotone autoregressive, d=2, fixed
+  per-coordinate (θ, feat) signs; non-additive; R1/R2 guaranteed globally).
 - `CDSBIRunner.fit` extension to train conditioner params.
 - `MarginalCDRecovery` diagnostic; 2-D θ₀-grid coverage; Stage-B sufficiency +
   floor-integrity checks.
@@ -226,8 +260,8 @@ not a benchmark.
 ## Decomposition (milestones for the plan)
 
 - **M0 — target + oracle + flow (Stage A core):** `NormalUnknownMeanVar`,
-  `SufficientStatConditioner`, `TriangularDoublyMonotoneFlow`, wire into `run`,
-  unit tests + a single-run smoke. Validate PivotRMSE/PIT against `r*`.
+  `SufficientStatConditioner` (→ (log s², X̄)), `SingleIndexMonotoneFlow`, wire
+  into `run`, unit tests + a single-run smoke. Validate PivotRMSE/PIT against `r*`.
 - **M1 — Stage A diagnostics + replication:** `MarginalCDRecovery`, 2-D coverage
   grid, intensive replication test (Stage A reaches the floor + calibrates).
 - **M2 — Stage B summary + fit change:** `DeepSetsConditioner`, `fit()` optimizer
@@ -265,3 +299,24 @@ not a benchmark.
   fixes it. Either outcome is a valid, documented result.
 - All new code unit-tested; Stage A + Stage B replication tests under the
   `intensive` marker; fast suite green.
+
+## Design revision — single-index flow (2026-05-29)
+
+The Stage-A flow was originally specced as `TriangularDoublyMonotoneFlow`
+(`DoublyMonotoneUMNN` generalized to d=2, increasing in both θ and feat). During
+M0 execution this was found to be **architecturally unable to represent the
+target**: a scale parameter forces *opposite-sign* monotonicity (↑ in θ, ↓ in
+the data feature, because `σ²` and `s²` enter only through `s²/σ²`), and the
+doubly-monotone form's `∂r/∂feat = b′ ± β′∫σ` cannot be sign-guaranteed against
+the non-additive coupling (trained RMSE ≈ 1.2; the flow learned an orthogonal
+pivot). It also blew up at init for the wide μ-range (`θ_ref = −5` → integrals
+~10).
+
+Replaced by `SingleIndexMonotoneFlow` (§A.2): each coordinate is a monotone UMNN
+`G_k` of a signed linear *index* of `(θ_k, feat_k)` with ctx-conditioned positive
+magnitudes. This gives **independent, globally-guaranteed R1/R2 signs** (fixed
+`s_θk, s_fk`), stays non-additive, and supplies the multiplicative scale via the
+ctx-conditioned index weights. Numerically validated by prototype-fitting the
+closed-form truth: RMSE `r_σ = 0.0013`, `r_μ = 0.035`. The σ-feature changed to
+`log s²` (makes `r_σ` single-index), and `r*` is now stated in the increasing-θ
+convention. The M0 plan and the already-landed T2/T3/T5 code are revised to match.
