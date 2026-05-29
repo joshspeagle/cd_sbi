@@ -1,10 +1,14 @@
 """TriangularDoublyMonotoneFlow — non-additive autoregressive doubly-monotone flow.
 
-Coordinate k: r_k = b_k(feat_k; ctx_k) + ∫_{θ_ref}^{θ_k} softplus(α_k(t; ctx_k)
+Coordinate k: r_k = b_k(feat_k; ctx_k) + ∫_{θ_ref[k]}^{θ_k} softplus(α_k(t; ctx_k)
 + β_k(feat_k; ctx_k)) dt,  with ctx_k = (θ_{<k}, feat_{<k}). Each coordinate is
-R1 (∂r_k/∂θ_k = softplus(·) > 0) and R2 (∂r_k/∂feat_k > 0) by construction. The
-feature-Jacobian is lower-triangular (r_k depends only on feat_{≤k}), so
-log|det ∂r/∂feat| = Σ_k log(∂r_k/∂feat_k), computed in closed form by the same
+R1 (∂r_k/∂θ_k = softplus(·) > 0) and R2 (∂r_k/∂feat_k > 0) by construction.
+R2 (∂r_k/∂feat_k > 0) holds by construction for θ_k ≥ theta_ref[k]; set
+theta_ref to each coordinate's prior lower bound so R2 holds across the proposal
+support. The log-det uses |·| so the change-of-variables magnitude is correct
+even where the flow is evaluated outside the support. The feature-Jacobian is
+lower-triangular (r_k depends only on feat_{≤k}), so
+log|det ∂r/∂feat| = Σ_k log|∂r_k/∂feat_k|, computed in closed form by the same
 quadrature as the forward pass.
 
 Generalizes TriangularAdditiveFlow (additive special case) and
@@ -103,7 +107,13 @@ class TriangularDoublyMonotoneFlow(nn.Module, Flow):
             raise ValueError(f"d must be ≥ 1, got {d}")
         self.d = d
         self.depth = depth
-        self.theta_ref = theta_ref
+        if isinstance(theta_ref, (int, float)):
+            tref = torch.full((d,), float(theta_ref))
+        else:
+            tref = torch.as_tensor(list(theta_ref), dtype=torch.float32)
+            if tref.shape != (d,):
+                raise ValueError(f"theta_ref must be a scalar or length-{d} sequence, got {tref.shape}")
+        self.register_buffer("_theta_ref", tref)
         self._alpha = nn.ModuleList()   # α_k: MLP([t, ctx_k]) → 1
         self._beta = nn.ModuleList()    # β_k: monotone-increasing in feat_k, cond on ctx_k
         self._b = nn.ModuleList()       # b_k: monotone-increasing in feat_k, cond on ctx_k
@@ -130,13 +140,13 @@ class TriangularDoublyMonotoneFlow(nn.Module, Flow):
         )
         feats = context
         n = theta.shape[0]
-        a = self.theta_ref
         K = self._nodes.shape[0]
         u = self._nodes.view(1, -1, 1).expand(n, -1, 1)      # (n, K, 1)
         weights = self._weights.view(1, -1, 1)
         r_cols: List[torch.Tensor] = []
         logdet_terms: List[torch.Tensor] = []
         for k in range(self.d):
+            a = self._theta_ref[k]
             theta_k = theta[:, k:k + 1]
             feat_k = feats[:, k:k + 1]
             ctx_k = None if k == 0 else torch.cat([theta[:, :k], feats[:, :k]], dim=-1)  # (n, 2k)
@@ -159,7 +169,7 @@ class TriangularDoublyMonotoneFlow(nn.Module, Flow):
             sig_integral = 0.5 * (theta_k - a) * (weights * sig).sum(dim=1)     # (n, 1)
             dr_dfeat = b_prime + beta_prime * sig_integral           # (n, 1)
             r_cols.append(r_k)
-            logdet_terms.append(torch.log(dr_dfeat.clamp_min(1e-12)).squeeze(-1))
+            logdet_terms.append(torch.log(dr_dfeat.abs().clamp_min(1e-12)).squeeze(-1))
         r = torch.cat(r_cols, dim=-1)                                # (n, d)
         log_det = torch.stack(logdet_terms, dim=-1).sum(dim=-1)      # (n,)
         return r, log_det

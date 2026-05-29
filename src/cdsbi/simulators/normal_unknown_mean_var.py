@@ -10,7 +10,7 @@ with σ = exp(log σ); (r*_σ, r*_μ) ~ N(0, I₂) at the true θ₀.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional, Tuple
 
 import numpy as np
@@ -36,6 +36,12 @@ class NormalUnknownMeanVar:
     @property
     def d_x(self) -> int:
         return self.n_iid
+
+    @property
+    def theta_lower(self) -> Tuple[float, float]:
+        """Per-coordinate prior lower bounds (log σ_min, μ_min) — the autoregressive
+        flow's theta_ref, so R2 holds by construction across the support."""
+        return (self.log_sigma_range[0], self.mu_range[0])
 
     def _draw_theta(self, n: int, rng: np.random.Generator) -> np.ndarray:
         log_sigma = rng.uniform(*self.log_sigma_range, size=(n, 1))

@@ -77,8 +77,27 @@ def test_flow_logdet_matches_autograd_feature_jacobian():
 def test_flow_monotone_in_features_per_coord():
     from cdsbi.flows.triangular_doubly_monotone import TriangularDoublyMonotoneFlow
     torch.manual_seed(3)
-    flow = TriangularDoublyMonotoneFlow(d=2, hidden=16)
-    theta = torch.randn(1, 2).expand(40, 2).contiguous()
+    # theta_ref below the fixed theta so we are in the R2-guaranteed regime (θ ≥ ref)
+    flow = TriangularDoublyMonotoneFlow(d=2, hidden=16, theta_ref=[-4.0, -4.0])
+    theta = torch.zeros(40, 2)  # θ = 0 ≥ theta_ref → R2 must hold
+    # r_0 strictly increasing in feat_0
     fe = torch.zeros(40, 2); fe[:, 0] = torch.linspace(-3, 3, 40)
     r, _ = flow.forward(theta, context=fe)
     assert torch.all(r[1:, 0] - r[:-1, 0] > 0)
+    # r_1 strictly increasing in feat_1 (the previously-untested coordinate)
+    fe = torch.zeros(40, 2); fe[:, 1] = torch.linspace(-3, 3, 40)
+    r, _ = flow.forward(theta, context=fe)
+    assert torch.all(r[1:, 1] - r[:-1, 1] > 0)
+
+
+def test_flow_r2_holds_in_support_many_samples():
+    """∂r_k/∂feat_k > 0 for all coords at random in-support theta (R2 by construction)."""
+    from cdsbi.flows.triangular_doubly_monotone import TriangularDoublyMonotoneFlow
+    torch.manual_seed(7)
+    flow = TriangularDoublyMonotoneFlow(d=2, hidden=16, theta_ref=[-4.0, -4.0])
+    theta = torch.rand(200, 2) * 3.0      # θ ∈ [0,3]^2, all ≥ theta_ref=-4 → in support
+    feats = torch.randn(200, 2, requires_grad=True)
+    r, _ = flow.forward(theta, context=feats)
+    for k in range(2):
+        (g,) = torch.autograd.grad(r[:, k].sum(), feats, retain_graph=True)
+        assert torch.all(g[:, k] > 0), f"R2 violated for coord {k}: min ∂r/∂feat = {float(g[:,k].min())}"
