@@ -10,3 +10,58 @@ _hello:
   output:
     pdf: figures/_hello.pdf
     png: figures/_hello.png
+
+e1_loc_normal_calibration:
+  description: "§8.1 CDSBI 1-D calibration: marginal PIT + coverage curve"
+  section: "8.1"
+  source_runs:
+    - outputs/figure_data/8_1_cdsbi
+  checkpoint_runs: []
+  builder: "cdsbi.analysis.figures.figures.e1_loc_normal_calibration:render"
+  output:
+    pdf: figures/e1_loc_normal_calibration.pdf
+    png: figures/e1_loc_normal_calibration.png
+
+e2_loc_normal_cross_method:
+  description: "§8.1 cross-method coverage curves (5 methods, medium budget)"
+  section: "8.1"
+  source_runs:
+    - outputs/8_1_baseline_sweep/2026-05-27_00-57-31
+  checkpoint_runs: []
+  builder: "cdsbi.analysis.figures.figures.e2_loc_normal_cross_method:render"
+  output:
+    pdf: figures/e2_loc_normal_cross_method.pdf
+    png: figures/e2_loc_normal_cross_method.png
+
+e3_joint_diagnostics:
+  description: "§8.2 joint Mahalanobis PIT + coverage-error tile"
+  section: "8.2"
+  source_runs:
+    - outputs/figure_data/8_2_cdsbi
+  checkpoint_runs: []
+  builder: "cdsbi.analysis.figures.figures.e3_joint_diagnostics:render"
+  output:
+    pdf: figures/e3_joint_diagnostics.pdf
+    png: figures/e3_joint_diagnostics.png
+
+e4_jacobian_recovery:
+  description: "§8.3 trained Jacobian vs L⁻¹ (KR uniqueness)"
+  section: "8.3"
+  source_runs:
+    - outputs/figure_data/8_3_cdsbi
+  checkpoint_runs: []
+  builder: "cdsbi.analysis.figures.figures.e4_jacobian_recovery:render"
+  output:
+    pdf: figures/e4_jacobian_recovery.pdf
+    png: figures/e4_jacobian_recovery.png
+
+e5_exp_rate_calibration:
+  description: "§8.4 doubly-monotone calibration: PIT + coverage + loss-vs-floor"
+  section: "8.4"
+  source_runs:
+    - outputs/figure_data/8_4_cdsbi
+  checkpoint_runs: []
+  builder: "cdsbi.analysis.figures.figures.e5_exp_rate_calibration:render"
+  output:
+    pdf: figures/e5_exp_rate_calibration.pdf
+    png: figures/e5_exp_rate_calibration.png
