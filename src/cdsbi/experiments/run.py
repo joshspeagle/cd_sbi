@@ -321,6 +321,7 @@ def _run_diagnostics(cfg: DictConfig, trained, simulator, eval_data, rd: RunDir)
     from cdsbi.diagnostics.coverage import Coverage
     from cdsbi.diagnostics.jacobian_recovery import JacobianRecovery
     from cdsbi.diagnostics.joint_mahalanobis import JointMahalanobis
+    from cdsbi.diagnostics.marginal_cd_recovery import MarginalCDRecovery
     from cdsbi.diagnostics.marginal_pit import MarginalPIT
     from cdsbi.diagnostics.pivot_rmse import PivotRMSE
     from cdsbi.diagnostics.set_size import SetSize
@@ -361,6 +362,10 @@ def _run_diagnostics(cfg: DictConfig, trained, simulator, eval_data, rd: RunDir)
                 cfg, "experiment.jacobian_recovery_tol", default=0.05,
             )),
         )),
+        ("marginal_cd_recovery", MarginalCDRecovery(
+            theta_0_grid=list(cfg.experiment.eval_thetas_interior),
+            n_per_theta=int(cfg.experiment.n_eval_per_theta),
+        )),
     ]
     # F6: precompute r = procedure.pivot(theta, x) once for pivot-based
     # procedures and share it across PivotRMSE / MarginalPIT / ConditionalPIT
@@ -394,7 +399,7 @@ def _run_diagnostics(cfg: DictConfig, trained, simulator, eval_data, rd: RunDir)
     diag_results = {}
     diag_dir = rd.path / "diagnostics"
     diag_dir.mkdir(exist_ok=True)
-    x_sharing_names = {"coverage", "set_size", "joint_mahalanobis"}
+    x_sharing_names = {"coverage", "set_size", "joint_mahalanobis", "marginal_cd_recovery"}
     for name, diag in diagnostics:
         if name in x_sharing_names:
             result = diag(
@@ -468,6 +473,14 @@ def _write_index_row(cfg: DictConfig, rd: RunDir, trained, diag_results, config_
         jac_df = pd.read_parquet(jac_path)
         if "max_residual" in jac_df.columns and len(jac_df):
             row["jacobian_max_residual"] = float(jac_df["max_residual"].iloc[0])
+    mcd_path = rd.path / "diagnostics" / "marginal_cd_recovery.parquet"
+    if mcd_path.exists():
+        mcd_df = pd.read_parquet(mcd_path)
+        for col, out in [("sigma_ks", "marginal_cd_sigma_ks"),
+                         ("mu_ks", "marginal_cd_mu_ks"),
+                         ("mu_t_resid", "marginal_cd_mu_t_resid")]:
+            if col in mcd_df.columns and len(mcd_df):
+                row[out] = float(mcd_df[col].mean())
     pd.DataFrame([row]).to_parquet(rd.path / "index_row.parquet")
 
 
