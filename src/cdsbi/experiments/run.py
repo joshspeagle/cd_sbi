@@ -62,8 +62,10 @@ def _build_flow(cfg: DictConfig, simulator) -> Any:
         target = flow_dict.pop("_target_")
         flow_dict.pop("name", None)
         flow_dict.setdefault("d", int(simulator.d_theta))
-        flow_dict.setdefault("theta_signs", list(simulator.theta_signs))
-        flow_dict.setdefault("feat_signs", list(simulator.feat_signs))
+        # Signs are a fixed property of the target's monotonicity, not a tunable —
+        # always take them from the simulator (overwrite any stray YAML value).
+        flow_dict["theta_signs"] = list(simulator.theta_signs)
+        flow_dict["feat_signs"] = list(simulator.feat_signs)
         return _instantiate(target, **flow_dict)
 
     v3_flow_names = {"doubly_monotone", "joint_umnn", "joint_umnn_1d"}
