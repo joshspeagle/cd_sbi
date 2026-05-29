@@ -34,6 +34,7 @@ class MarginalPIT(Diagnostic):
             return DiagnosticResult(
                 name=self.name, value=float(ks_stat),
                 passed=ks_stat <= floor, noise_floor=floor, n_samples=u.size,
+                meta={"pit_u": u, "d": 1},
             )
         rows = []
         for k in range(d):
@@ -46,10 +47,12 @@ class MarginalPIT(Diagnostic):
                 "passed": ks_stat <= floor,
                 "n_samples": int(u_k.size),
             })
+        import numpy as _np
+        u_all = _np.column_stack([norm.cdf(r_np[:, k]) for k in range(d)])
         import pandas as pd
         df = pd.DataFrame(rows)
         return DiagnosticResult(
             name=self.name, value=df,
             passed=bool(df["passed"].all()), noise_floor=floor,
-            n_samples=r_np.shape[0], meta={"d": int(d)},
+            n_samples=r_np.shape[0], meta={"d": int(d), "pit_u": u_all},
         )

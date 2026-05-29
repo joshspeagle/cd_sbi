@@ -259,6 +259,39 @@ def _fit_config(cfg: DictConfig, method_name: str) -> dict:
     raise ValueError(method_name)
 
 
+def _write_raw_companion(name: str, result, diag_dir) -> None:
+    """Persist raw figure-sourcing arrays a diagnostic carries in result.meta.
+
+    Keeps the main <name>.parquet a compact summary while making raw PIT
+    values / Mahalanobis r² / Jacobian matrices available to the figure suite.
+    """
+    meta = result.meta or {}
+    if name == "marginal_pit" and "pit_u" in meta:
+        u = np.asarray(meta["pit_u"])
+        if u.ndim == 1:
+            df = pd.DataFrame({"u": u})
+        else:
+            df = pd.DataFrame({f"u{k}": u[:, k] for k in range(u.shape[1])})
+        df.to_parquet(diag_dir / "marginal_pit_raw.parquet")
+    elif name == "joint_mahalanobis" and "r_sq" in meta:
+        frames = [
+            pd.DataFrame({"theta_0_repr": k, "r_sq": v})
+            for k, v in meta["r_sq"].items()
+        ]
+        pd.concat(frames, ignore_index=True).to_parquet(
+            diag_dir / "joint_mahalanobis_raw.parquet"
+        )
+    elif name == "jacobian_recovery" and "J_emp_mean" in meta:
+        J_emp = np.asarray(meta["J_emp_mean"])
+        J_true = np.asarray(meta["J_true"])
+        d = J_emp.shape[0]
+        rows = [
+            {"i": i, "j": j, "j_emp": float(J_emp[i, j]), "j_true": float(J_true[i, j])}
+            for i in range(d) for j in range(d)
+        ]
+        pd.DataFrame(rows).to_parquet(diag_dir / "jacobian_recovery_raw.parquet")
+
+
 def _run_diagnostics(cfg: DictConfig, trained, simulator, eval_data, rd: RunDir):
     from cdsbi.diagnostics.conditional_pit import ConditionalPIT
     from cdsbi.diagnostics.coverage import Coverage
@@ -356,6 +389,7 @@ def _run_diagnostics(cfg: DictConfig, trained, simulator, eval_data, rd: RunDir)
                 "n_samples": result.n_samples,
             }])
         df.to_parquet(diag_dir / f"{name}.parquet")
+        _write_raw_companion(name, result, diag_dir)
         diag_results[name] = result
     return diag_results
 
