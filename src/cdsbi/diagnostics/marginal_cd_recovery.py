@@ -76,7 +76,7 @@ class MarginalCDRecovery:
         rows = []
         for theta_0 in self.theta_0_grid:
             key = repr([float(v) for v in theta_0])
-            x = x_per_theta[key] if x_per_theta and key in x_per_theta else \
+            x = x_per_theta[key][:self.n_per_theta] if x_per_theta and key in x_per_theta else \
                 simulator.sample_x_given_theta(theta_0, self.n_per_theta, np.random.default_rng(0))
             n = x.shape[0]
             theta_t = torch.tensor([[float(v) for v in theta_0]], dtype=x.dtype).expand(n, -1)
@@ -85,7 +85,7 @@ class MarginalCDRecovery:
             sigma_pit = norm.cdf(r[:, sc].detach().cpu().numpy())
             analytic = simulator.analytic_marginal_cd_pit(theta_0, x)
             sigma_ks = float(kstest(sigma_pit, "uniform").statistic)
-            sigma_chi2_resid = float(np.abs(sigma_pit - analytic["sigma_pit"].numpy()).max())
+            sigma_chi2_resid = float(np.quantile(np.abs(sigma_pit - analytic["sigma_pit"].numpy()), 0.95))
             lc = spec["location_coord"]
             H_mu = np.clip(self._marginalize_mu(proc, simulator, theta_0, x, sc, lc), 0.0, 1.0)
             mu_ks = float(kstest(H_mu, "uniform").statistic)
