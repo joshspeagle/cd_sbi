@@ -77,3 +77,56 @@ def test_e5_returns_three_panels(tmp_path):
     write_coverage(rd, [0.5, 1.5, 2.5], [0.5, 0.68, 0.9, 0.95])
     fig = render(_spec(source_runs=[str(rd)], section="8.4"))
     assert len(fig.axes) == 3
+
+
+def test_e6_returns_grouped_bars_with_floor(tmp_path):
+    from cdsbi.analysis.figures.figures.e6_r2_ablation_bars import render
+    r1r2 = tmp_path / "r1r2"; r1only = tmp_path / "r1only"
+    for root in (r1r2, r1only):
+        for b in ("small", "medium", "large", "xlarge"):
+            make_run_dir(root, method="cd_sbi", budget_name=b, seed=0,
+                         coverage_error_max=0.03, final_loss=0.99,
+                         loss_history_tail=[1.0, 0.99])
+    fig = render(_spec(source_runs=[str(r1r2), str(r1only)], section="8.4"))
+    ax = fig.axes[0]
+    assert len(ax.patches) == 8     # 2 arms x 4 budgets
+    assert len(ax.lines) == 1       # entropy floor line
+
+
+def test_e7_returns_trajectory_with_floor(tmp_path):
+    from cdsbi.analysis.figures.figures.e7_catastrophic_folding import render
+    import pandas as pd
+    d = tmp_path / "8_4_folding"; d.mkdir()
+    steps = np.arange(3900, 4000)
+    pd.DataFrame({"step": steps, "loss": 0.6 + 0.0 * steps,
+                  "entropy_floor": 0.99}).to_parquet(d / "folding_tail.parquet")
+    fig = render(_spec(source_runs=[str(d)], section="8.4"))
+    assert len(fig.axes) == 1
+    assert len(fig.axes[0].lines) == 2     # trajectory + floor
+
+
+def test_e8_returns_logy_summary(tmp_path):
+    from cdsbi.analysis.figures.figures.e8_headline_summary import render
+    roots = []
+    for lbl in ("a", "b", "c", "d"):
+        roots.append(str(make_sweep(tmp_path / lbl)))
+    fig = render(_spec(source_runs=roots, section="8.5"))
+    ax = fig.axes[0]
+    assert ax.get_yscale() == "log"
+    assert len(ax.lines) >= 2      # >=1 line per method (+floor)
+
+
+def test_e9_returns_logx_lines(tmp_path):
+    from cdsbi.analysis.figures.figures.e9_budget_saturation import render
+    root = str(make_sweep(tmp_path / "sweep"))
+    fig = render(_spec(source_runs=[root], section="8.5"))
+    ax = fig.axes[0]
+    assert ax.get_xscale() == "log"
+    assert len(ax.lines) >= 1
+
+
+def test_e10_returns_four_panels(tmp_path):
+    from cdsbi.analysis.figures.figures.e10_per_experiment_boxplots import render
+    roots = [str(make_sweep(tmp_path / lbl)) for lbl in ("a", "b", "c", "d")]
+    fig = render(_spec(source_runs=roots, section="8.5"))
+    assert len(fig.axes) == 4
