@@ -383,16 +383,19 @@ c4_entropy_floor:
 
 **Files:** Create `c5_kr_structure.py`; modify manifest + smoke test.
 
-One panel: a lower-triangular dependency map — `r_k` depends on `θ_{1..k}` (and all on X), shown as a `tril` heatmap with check marks.
+Two panels: BOTH the θ-dependence AND the X-dependence are lower-triangular —
+`r_k` depends on `θ_{1:k}` AND on `X_{1:k}` (verified against the manuscript's
+(R1) and (R2ᵃᵘᵗᵒ) dependence clauses in §6.1; §6.2 says ∂_X r is lower-triangular
+too). A single θ-only tril with "all depend on X" would misstate the structure.
 
 - [ ] **Step 1: Append the smoke test**
 
 ```python
-def test_c5_triangular_heatmap():
+def test_c5_two_triangular_heatmaps():
     from cdsbi.analysis.figures.figures.c5_kr_structure import render
     fig = render(_spec())
-    ax = fig.axes[0]
-    assert len(ax.images) == 1          # the tril heatmap (imshow)
+    assert len(fig.axes) == 2                       # θ-block + X-block
+    assert all(len(ax.images) == 1 for ax in fig.axes)
 ```
 
 - [ ] **Step 2: Run to verify it fails.** → FAIL.
@@ -402,7 +405,7 @@ def test_c5_triangular_heatmap():
 `src/cdsbi/analysis/figures/figures/c5_kr_structure.py`:
 
 ```python
-"""C5 — Knothe–Rosenblatt triangular structure: r_k = r_k(θ_{1:k}; X)."""
+"""C5 — KR structure: r_k depends on θ_{1:k} AND X_{1:k} (both lower-triangular)."""
 from __future__ import annotations
 
 import numpy as np
@@ -413,21 +416,28 @@ from cdsbi.analysis.figures.manifest import FigureSpec
 D = 4
 
 
-def render(spec: FigureSpec):
-    style.apply_style()
-    import matplotlib.pyplot as plt
-
+def _tril_panel(ax, var: str):
     mask = np.tril(np.ones((D, D)))
-    fig, ax = plt.subplots(figsize=style.SIZES["square"])
     ax.imshow(mask, cmap="Blues", vmin=0.0, vmax=1.5, aspect="equal")
     for i in range(D):
         for j in range(D):
             if mask[i, j]:
                 ax.text(j, i, "✓", ha="center", va="center", color="white", fontsize=10)
-    ax.set_xticks(range(D)); ax.set_xticklabels([fr"$\theta_{{{j+1}}}$" for j in range(D)])
+    ax.set_xticks(range(D)); ax.set_xticklabels([fr"${var}_{{{j+1}}}$" for j in range(D)])
     ax.set_yticks(range(D)); ax.set_yticklabels([fr"$r_{{{i+1}}}$" for i in range(D)])
-    ax.set_title(r"Triangular dependence: $r_k = r_k(\theta_{1:k};\, X)$")
-    ax.set_xlabel(r"depends on $\theta_j$  (every $r_k$ also depends on $X$)")
+
+
+def render(spec: FigureSpec):
+    style.apply_style()
+    import matplotlib.pyplot as plt
+
+    fig, (ax_t, ax_x) = plt.subplots(1, 2, figsize=style.SIZES["double_column"])
+    _tril_panel(ax_t, r"\theta")
+    ax_t.set_title(r"$\theta$-dependence: $r_k(\theta_{1:k})$")
+    _tril_panel(ax_x, "X")
+    ax_x.set_title(r"$X$-dependence: $r_k(X_{1:k})$")
+    fig.suptitle(r"Triangular (Knothe--Rosenblatt) structure: "
+                 r"$r_k = r_k(\theta_{1:k};\, X_{1:k})$")
     fig.tight_layout()
     return fig
 ```
@@ -480,7 +490,11 @@ from __future__ import annotations
 from cdsbi.analysis.figures import style, panels
 from cdsbi.analysis.figures.manifest import FigureSpec
 
-COLUMNS = ["Target", "Single-stage", "Coverage by\nconstruction", r"Finite-$d$ guar."]
+# "Frequentist coverage" (the target/property) rather than "coverage by
+# construction": LF2I genuinely targets coverage (via a two-stage Neyman
+# construction), so it is "yes" here — the architectural distinction
+# (CD-SBI single-stage vs LF2I two-stage) is carried by the Single-stage column.
+COLUMNS = ["Target", "Single-stage", "Frequentist\ncoverage", r"Finite-$d$ guar."]
 ROWS = ["CD-SBI", "NPE", "NLE", "NRE", "LF2I"]
 CELLS = [
     ["confidence dist.", "yes", "yes", "yes"],
@@ -597,7 +611,8 @@ pointwise calibration with no prior.}
 \includegraphics[width=0.6\linewidth]{figures/c2_r1_failure.pdf}
 \caption{Why (R1) is needed. A pivot non-monotone in \(\theta\) is hit by a
 level \(r = c\) at two parameter values, so the implied confidence
-distribution's inverse is multi-valued and the confidence set is ill-defined.}
+distribution's quantile inverse is multi-valued and the confidence set is
+non-connected.}
 \label{fig:c2}
 \end{figure}
 ```
@@ -636,10 +651,11 @@ drives the surrogate onto the calibration manifold.}
 ```latex
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=0.5\linewidth]{figures/c5_kr_structure.pdf}
+\includegraphics[width=0.85\linewidth]{figures/c5_kr_structure.pdf}
 \caption{The triangular (Knothe--Rosenblatt) architectural class: component
-\(r_k\) depends on \(\theta_1, \dots, \theta_k\) (and on \(X\)), giving a
-lower-triangular Jacobian in \(\theta\) and a tractable, invertible map.}
+\(r_k\) depends on \(\theta_{1:k}\) (left) \emph{and} on \(X_{1:k}\) (right),
+so both \(\partial_\theta r\) and \(\partial_X r\) are lower-triangular ---
+giving a tractable Jacobian and an invertible, measure-preserving map.}
 \label{fig:c5}
 \end{figure}
 ```
@@ -684,3 +700,11 @@ git commit -m "manuscript(I-IV,10): insert conceptual figures C1-C6"
 - **Placeholder scan:** every step has complete runnable code + exact commands; no TBD.
 - **Type consistency:** manifest `builder` strings match each module's `render`; smoke-test helper `_spec(**kw)` matches `FigureSpec`'s fields; section labels (`subsec:2.2`…`sec:10`) verified to exist; `noise_floor_band`/`position_table_as_axes` signatures match their F1 definitions.
 - **F3 scope fidelity:** only conceptual builders + manifest + manuscript; no changes to F0/F1/F2 code or to diagnostics/run.py.
+
+### Dual-review outcome (2026-05-28)
+
+Self-review + an independent agent review of this plan, both grounded in the manuscript text. Applied:
+- **C5 (material) — fixed.** Verified §6.1's (R1)/(R2ᵃᵘᵗᵒ) dependence clauses: `r_k` depends on `(θ_{≤k}, X)` AND `(θ, X_{≤k})`, and §6.2 says ∂_X r is lower-triangular too. The original single θ-tril with "all depend on X" misstated the structure. C5 is now a 2-panel figure (θ-tril + X-tril) with a matching caption.
+- **C6 (clarity) — fixed.** Renamed the column "Coverage by construction" → "Frequentist coverage" so LF2I="yes" is unambiguous (per §10, LF2I targets coverage via a two-stage Neyman construction); the architectural CD-SBI-vs-LF2I distinction is carried by the "Single-stage" column.
+- **C2 (minor) — fixed.** Caption "ill-defined" → "quantile inverse is multi-valued / confidence set is non-connected", matching §2.3's language.
+- Verified non-issues: C1 (`r*=θ₀−X ~ N(0,1)` is exactly right for location-normal), the matplotlib API calls, smoke-test assertions, panel signatures, section anchors, and `FigureSpec` field match.
