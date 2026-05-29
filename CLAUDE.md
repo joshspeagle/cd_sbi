@@ -55,6 +55,15 @@ python -m cdsbi.experiments.run -m experiment=8_3_baseline_sweep \
     training.fresh_batch=false        # 100-run cross-method sweep (≈ 5 hr)
 ```
 
+**Render the figure suite** (16 figures: 10 empirical E1–E10 + 6 conceptual C1–C6):
+
+```bash
+python -m cdsbi.analysis.figures.render --all              # render all figures → figures/<id>.{pdf,png}
+python -m cdsbi.analysis.figures.render --all --section 8.4  # filter (NOTE: --section requires --all)
+python -m cdsbi.analysis.figures.render --gallery          # regenerate figures/README.md gallery
+python tools/regen_figure_data.py                          # re-run CDSBI figure-data sources (GPU; needs PYTHONPATH=.)
+```
+
 ## Current state of the repo
 
 - `cd_sbi_v7.tex` — the manuscript (50 pages; §8.1 / §8.2 / §8.3 carry
@@ -67,6 +76,8 @@ python -m cdsbi.experiments.run -m experiment=8_3_baseline_sweep \
 - `src/cdsbi/` — Python package (v0 + v1 + v2 + v3 landed). Six core layers + `confidence_set/`, `experiments/`, `analysis/`, `reproducibility/`. v3 added `DoublyMonotoneUMNN`, `JointUMNNFlow`, `JointUMNN1DFlow`, `MLPConditioner`, `ReducedSimulator`.
 - `configs/` — Hydra config groups (target / flow / conditioner / method / training / budget / experiment).
 - `tests/` — `unit/`, `integration/`, `diagnostics/`, opt-in `intensive/` (4 replication tests: §8.1, §8.2, §8.3, §8.4) and opt-in `ablation/` (3 tests: safety-check, trained-folding, 1D mechanism).
+- `src/cdsbi/analysis/figures/` — visualization suite (F0 infra + F1 panels + F2 empirical + F3 conceptual). Manifest-driven (`configs/figures/manifest.yaml`); builders are pure `render(spec) -> Figure` composing F1 panels; the render CLI owns all disk IO. matplotlib/Agg via `style.apply_style()`.
+- `figures/` — 16 tracked figure PDFs/PNGs + auto-generated README gallery (the manuscript's `\includegraphics`). `.gitignore` negates the global `*.pdf` rule for this dir.
 - `LICENSE`, `README.md`, `.gitignore` — repo setup.
 
 ## Specs and plans
@@ -87,6 +98,7 @@ Active artifacts:
 - `docs/superpowers/plans/2026-05-26-cd-sbi-v1-multivariate-iid.md`
 - `docs/superpowers/plans/2026-05-27-cd-sbi-v2-correlated-sigma.md`
 - `docs/superpowers/plans/2026-05-27-cd-sbi-v3-r2-ablation.md`
+- `docs/superpowers/specs/2026-05-28-cd-sbi-visualizations-design.md` + `docs/superpowers/plans/2026-05-28-cd-sbi-viz-{f0-infrastructure,f1-panels,f2-figures,f3-conceptual}.md` (the 16-figure visualization suite)
 
 ## Manuscript status
 
@@ -249,6 +261,22 @@ region of the prior.
   demonstrates the §3.5 mechanism failure (final loss drops below the
   entropy floor under a longer training recipe; under-converges at the
   standard recipe). Seed-fragile by design — see commit f1d17a7 notes.
+- **CDSBI v3 flow dispatch trap.** `configs/method/cd_sbi.yaml` hardcodes
+  `flow: additive_umnn`, so an experiment's `override /flow: doubly_monotone`
+  does NOT take for `cd_sbi` unless you also pass `method.flow=doubly_monotone`
+  (the `_build_flow` guard, commit `cb1e08e`). A single §8.4 replication needs
+  `flow=doubly_monotone method.flow=doubly_monotone` and NO redundant top-level
+  `method=cd_sbi`. Verify `model.pt`'s `arch_metadata.flow_class` after a run.
+- **`model.pt` has no `state_dict`** — only `{arch_metadata (incl.
+  `loss_history_tail` = last 100 steps), final_loss}`. A trained flow cannot be
+  reloaded; recompute requires re-training. (Why F3 conceptual figures use
+  closed-form/analytic drivers, not trained checkpoints.)
+- **§8.x sweep data is split across timestamp dirs** (method-specific re-runs).
+  §8.4 CD-SBI/`doubly_monotone` lives in
+  `outputs/8_4_baseline_sweep/2026-05-27_20-20-16` (5 methods);
+  `2026-05-28_12-05-31` is the 4-method on-T re-run. Aggregate figures use
+  `analysis.figures.data_io.figure_data.load_sweep()` to dedup
+  `(method, budget, seed)` across all timestamps of a sweep.
 
 **Manuscript-to-code mapping:**
 - §8.1 numbers: `outputs/8_1_baseline_sweep/2026-05-27_00-57-31/` +
