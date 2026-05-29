@@ -91,3 +91,78 @@ class _CondMonotoneScalarUMNN(nn.Module):
 
     def n_params(self) -> int:
         return sum(p.numel() for p in self.parameters())
+
+
+class TriangularDoublyMonotoneFlow(nn.Module, Flow):
+    monotonicity_guarantees = frozenset({Guarantee.R1, Guarantee.R2})
+
+    def __init__(self, d: int, hidden: int = 16, depth: int = 2,
+                 theta_ref: float = 0.0):
+        super().__init__()
+        if d < 1:
+            raise ValueError(f"d must be ≥ 1, got {d}")
+        self.d = d
+        self.depth = depth
+        self.theta_ref = theta_ref
+        self._alpha = nn.ModuleList()   # α_k: MLP([t, ctx_k]) → 1
+        self._beta = nn.ModuleList()    # β_k: monotone-increasing in feat_k, cond on ctx_k
+        self._b = nn.ModuleList()       # b_k: monotone-increasing in feat_k, cond on ctx_k
+        for k in range(d):
+            ctx_dim = 2 * k
+            self._alpha.append(_tanh_mlp(in_dim=1 + ctx_dim, hidden=hidden, out_dim=1, depth=depth))
+            self._beta.append(_CondMonotoneScalarUMNN(context_dim=ctx_dim, hidden=hidden, depth=depth))
+            self._b.append(_CondMonotoneScalarUMNN(context_dim=ctx_dim, hidden=hidden, depth=depth))
+        self.register_buffer("_nodes", torch.tensor(_NODES_NP, dtype=torch.float32))
+        self.register_buffer("_weights", torch.tensor(_WEIGHTS_NP, dtype=torch.float32))
+
+    def _alpha_eval(self, k: int, t: torch.Tensor, ctx: Optional[torch.Tensor]) -> torch.Tensor:
+        """α_k(t; ctx_k). t: (m,1); ctx: (m, 2k) or None → (m,1)."""
+        if ctx is None or ctx.shape[-1] == 0:
+            inp = t
+        else:
+            inp = torch.cat([t, ctx], dim=-1)
+        return self._alpha[k](inp)
+
+    def forward(self, theta: torch.Tensor, context: Optional[torch.Tensor]
+                ) -> Tuple[torch.Tensor, torch.Tensor]:
+        assert context is not None and context.shape[-1] == self.d, (
+            f"expected context (features) of width d={self.d}, got {None if context is None else context.shape}"
+        )
+        feats = context
+        n = theta.shape[0]
+        a = self.theta_ref
+        K = self._nodes.shape[0]
+        u = self._nodes.view(1, -1, 1).expand(n, -1, 1)      # (n, K, 1)
+        weights = self._weights.view(1, -1, 1)
+        r_cols: List[torch.Tensor] = []
+        logdet_terms: List[torch.Tensor] = []
+        for k in range(self.d):
+            theta_k = theta[:, k:k + 1]
+            feat_k = feats[:, k:k + 1]
+            ctx_k = None if k == 0 else torch.cat([theta[:, :k], feats[:, :k]], dim=-1)  # (n, 2k)
+            beta = self._beta[k](feat_k, ctx_k)                       # (n, 1)
+            beta_prime = self._beta[k].derivative(feat_k, ctx_k)      # (n, 1)
+            b_val = self._b[k](feat_k, ctx_k)                         # (n, 1)
+            b_prime = self._b[k].derivative(feat_k, ctx_k)            # (n, 1)
+            b_node = theta_k.view(n, 1, 1).expand(-1, K, -1)
+            t = a + 0.5 * (b_node - a) * (u + 1.0)                    # (n, K, 1)
+            if ctx_k is None:
+                ctx_rep = None
+            else:
+                ctx_rep = ctx_k.unsqueeze(1).expand(-1, K, -1).reshape(n * K, -1)
+            alpha_t = self._alpha_eval(k, t.reshape(n * K, 1), ctx_rep).view(n, K, 1)
+            beta_b = beta.unsqueeze(1).expand(-1, K, -1)              # (n, K, 1)
+            integrand = F.softplus(alpha_t + beta_b) + 1e-3
+            integral = 0.5 * (theta_k - a) * (weights * integrand).sum(dim=1)   # (n, 1)
+            r_k = b_val + integral                                   # (n, 1)
+            sig = torch.sigmoid(alpha_t + beta_b)                    # (n, K, 1)
+            sig_integral = 0.5 * (theta_k - a) * (weights * sig).sum(dim=1)     # (n, 1)
+            dr_dfeat = b_prime + beta_prime * sig_integral           # (n, 1)
+            r_cols.append(r_k)
+            logdet_terms.append(torch.log(dr_dfeat.clamp_min(1e-12)).squeeze(-1))
+        r = torch.cat(r_cols, dim=-1)                                # (n, d)
+        log_det = torch.stack(logdet_terms, dim=-1).sum(dim=-1)      # (n,)
+        return r, log_det
+
+    def n_params(self) -> int:
+        return sum(p.numel() for p in self.parameters())
