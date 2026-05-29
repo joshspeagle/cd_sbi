@@ -18,6 +18,14 @@ import torch
 from scipy.stats import chi2, norm
 
 
+# θ-independent volume constant for the (X̄, s²) sufficient-statistic reduction.
+# By sufficiency p(X | X̄, s²) is θ-free, so this only shifts the loss scale,
+# not the argmin. Set to 0.0 (the reduction's constant is folded into the
+# entropy-floor reference, not the optimization). Kept as a named constant so
+# the floor calc (here) and the conditioner (Task 3) stay in lockstep.
+_SUFFICIENT_STAT_LOG_DET_CONST = 0.0
+
+
 @dataclass
 class NormalUnknownMeanVar:
     n_iid: int = 10
@@ -50,3 +58,53 @@ class NormalUnknownMeanVar:
         mu = float(theta_vec[1])
         x_np = rng.normal(loc=mu, scale=sigma, size=(n, self.n_iid))
         return torch.from_numpy(x_np).float()
+
+    def _suff_stats(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """(X̄, s²) with s² the unbiased sample variance (ddof=1) over the n_iid axis."""
+        xbar = x.mean(dim=-1, keepdim=True)                       # (n, 1)
+        s2 = x.var(dim=-1, unbiased=True, keepdim=True)           # (n, 1), ddof=1
+        return xbar, s2
+
+    def r_star(self, theta: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+        """Closed-form joint pivot (r_σ, r_μ), shape (n, 2). θ = (log σ, μ)."""
+        xbar, s2 = self._suff_stats(x)
+        log_sigma = theta[:, 0:1]
+        mu = theta[:, 1:2]
+        sigma = torch.exp(log_sigma)
+        n = self.n_iid
+        w = ((n - 1) * s2 / (sigma ** 2)).detach().cpu().numpy()
+        u = chi2.cdf(w, df=n - 1)
+        u = np.clip(u, 1e-12, 1.0 - 1e-12)
+        r_sigma = torch.from_numpy(norm.ppf(u)).float().to(theta.device)   # (n, 1)
+        r_mu = math.sqrt(n) * (xbar - mu) / sigma                          # (n, 1)
+        return torch.cat([r_sigma, r_mu], dim=-1)                          # (n, 2)
+
+    def log_prob(self, x: torch.Tensor, theta: torch.Tensor) -> torch.Tensor:
+        """Σ_i log N(X_i; μ, σ²)."""
+        log_sigma = theta[:, 0:1]
+        mu = theta[:, 1:2]
+        sigma = torch.exp(log_sigma)
+        z = (x - mu) / sigma
+        per_obs = -0.5 * z ** 2 - log_sigma - 0.5 * math.log(2 * math.pi)
+        return per_obs.sum(dim=-1)
+
+    def entropy_lower_bound(self, n_mc: int = 50000, seed: int = 42) -> float:
+        """MC estimate of E[NF-MLE loss at r*] on the (θ, (X̄,s²)) scale."""
+        rng = np.random.default_rng(seed)
+        theta_np = self._draw_theta(n_mc, rng)
+        sigma = np.exp(theta_np[:, 0:1]); mu = theta_np[:, 1:2]
+        x = rng.normal(loc=mu, scale=sigma, size=(n_mc, self.n_iid))
+        xbar = x.mean(axis=-1, keepdims=True)
+        s2 = x.var(axis=-1, ddof=1, keepdims=True)
+        n = self.n_iid
+        w = (n - 1) * s2 / sigma ** 2
+        u = np.clip(chi2.cdf(w, df=n - 1), 1e-12, 1 - 1e-12)
+        r_sigma = norm.ppf(u)
+        r_mu = math.sqrt(n) * (xbar - mu) / sigma
+        dr_sigma_ds2 = (n - 1) / sigma ** 2 * chi2.pdf(w, df=n - 1) / np.clip(norm.pdf(r_sigma), 1e-30, None)
+        dr_mu_dxbar = math.sqrt(n) / sigma
+        log_det_feat = np.log(np.clip(dr_sigma_ds2, 1e-30, None)) + np.log(dr_mu_dxbar)
+        log_det_contrib = _SUFFICIENT_STAT_LOG_DET_CONST
+        loss = (0.5 * (r_sigma ** 2 + r_mu ** 2) + math.log(2 * math.pi)
+                - log_det_feat - log_det_contrib)
+        return float(loss.mean())
