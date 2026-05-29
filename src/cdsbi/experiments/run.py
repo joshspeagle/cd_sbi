@@ -389,7 +389,12 @@ def _run_diagnostics(cfg: DictConfig, trained, simulator, eval_data, rd: RunDir)
                 "n_samples": result.n_samples,
             }])
         df.to_parquet(diag_dir / f"{name}.parquet")
-        _write_raw_companion(name, result, diag_dir)
+        # Best-effort: persisting raw figure-sourcing arrays must never be able
+        # to fail a real training run. Log and continue if it raises.
+        try:
+            _write_raw_companion(name, result, diag_dir)
+        except Exception as exc:  # noqa: BLE001 - figure-data convenience only
+            log.warning("raw companion for %s failed (non-fatal): %s", name, exc)
         diag_results[name] = result
     return diag_results
 
