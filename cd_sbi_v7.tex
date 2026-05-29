@@ -2468,7 +2468,7 @@ is the Monte-Carlo floor of the diagnostic at the stated sample size
 indistinguishable from the truth.
 
 \textbf{CDSBI calibration diagnostics.} Single-method results at the
-medium budget (\(\approx\) 5k parameters):
+medium budget (\(\approx\) 5k parameters; see Fig.~\ref{fig:e1}):
 
 \begin{longtable}[]{@{}
   >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.40}}
@@ -2577,6 +2577,23 @@ exactly. The cross-method gap is small but consistent here, and
 foreshadows \S\ref{subsec:8.2}--\S\ref{subsec:8.4}, where
 architectural calibration matters more.
 
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\linewidth]{figures/e1_loc_normal_calibration.pdf}
+\caption{\S\ref{subsec:8.1} CDSBI calibration in the 1-D location-normal model:
+the marginal PIT is uniform (left) and empirical coverage tracks nominal along
+the diagonal (right), at the medium budget.}
+\label{fig:e1}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.62\linewidth]{figures/e2_loc_normal_cross_method.pdf}
+\caption{\S\ref{subsec:8.1} coverage by method (medium budget). CDSBI sits on
+the diagonal; the Bayesian and ratio baselines deviate.}
+\label{fig:e2}
+\end{figure}
+
 \subsection{2D location-Gaussian, \(\Sigma = I\)}\label{subsec:8.2}
 
 \textbf{Setup.} \(X \mid \theta \sim \mathcal{N}(\theta, I_2)\),
@@ -2599,7 +2616,7 @@ each of four matched-parameter budgets (\(\approx\) 1k, 5k, 25k,
 \(X \mid \theta\) samples per nominal coverage level.
 
 \textbf{CDSBI calibration diagnostics.} Medium budget
-(\(\approx\) 5k parameters):
+(\(\approx\) 5k parameters; Fig.~\ref{fig:e3}):
 
 \begin{longtable}[]{@{}
   >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.40}}
@@ -2735,6 +2752,15 @@ to materially distinguish the methods. \S\ref{subsec:8.3} and
 non-location-family families, where the architectural
 prescription is expected to be even more load-bearing.
 
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\linewidth]{figures/e3_joint_diagnostics.pdf}
+\caption{\S\ref{subsec:8.2} joint diagnostics: the joint-Mahalanobis PIT is
+uniform (left) and the coverage error is at the Monte-Carlo floor across the
+\(\theta_0\) grid and nominal levels (right).}
+\label{fig:e3}
+\end{figure}
+
 \subsection{2D location-Gaussian, \(\Sigma\) correlated}\label{subsec:8.3}
 
 \textbf{Setup.}
@@ -2761,7 +2787,7 @@ constant truth Jacobian \(L^{-1}\). This is the empirical
 Knothe--Rosenblatt uniqueness check (Theorem A-d).
 
 \textbf{CDSBI calibration diagnostics.} Medium budget
-(\(\approx\) 5k parameters):
+(\(\approx\) 5k parameters; Fig.~\ref{fig:e4}):
 
 \begin{longtable}[]{@{}
   >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.40}}
@@ -2919,6 +2945,15 @@ non-additive case (exponential rate, multiplicative \(\theta T\)
 interaction), where the architectural prescription is expected to
 be most load-bearing.
 
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.55\linewidth]{figures/e4_jacobian_recovery.pdf}
+\caption{\S\ref{subsec:8.3} Jacobian recovery: the trained
+\(\mathbb{E}[\partial r/\partial\theta]\) elements match the closed-form
+\(L^{-1}\) (Theorem~A-d / Knothe--Rosenblatt uniqueness).}
+\label{fig:e4}
+\end{figure}
+
 \subsection{Exponential rate: validating the non-additive case}\label{subsec:8.4}
 
 \textbf{Setup.} \(X_i \sim \mathrm{Exp}(\theta)\) iid, \(n = 5\) samples
@@ -2955,7 +2990,7 @@ coverage level). \(d = 1\) here, so \(\mathtt{JointMahalanobis}\) and
 diagnostics) no-op.
 
 \textbf{CDSBI calibration diagnostics.} Medium budget
-(\(\approx\) 5k parameters):
+(\(\approx\) 5k parameters; Figs.~\ref{fig:e5}--\ref{fig:e7}):
 
 \begin{longtable}[]{@{}
   >{\raggedright\arraybackslash}p{(\columnwidth - 4\tabcolsep) * \real{0.40}}
@@ -3171,14 +3206,43 @@ catastrophic folding at the longer recipe --- empirically confirms
 that the architectural enforcement of (R2) is not a stylistic choice
 but the source of strict propriety for NF-MLE.
 
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\linewidth]{figures/e5_exp_rate_calibration.pdf}
+\caption{\S\ref{subsec:8.4} doubly-monotone calibration on the exponential-rate
+target: uniform PIT, coverage on the diagonal, and final NF-MLE loss at the
+entropy floor.}
+\label{fig:e5}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.6\linewidth]{figures/e6_r2_ablation_bars.pdf}
+\caption{\S\ref{subsec:8.4} (R2) ablation: the doubly-monotone (R1+R2) flow
+reaches the entropy floor at every budget; the R1-only flow stays
+\(\sim 0.4\) above it.}
+\label{fig:e6}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.6\linewidth]{figures/e7_catastrophic_folding.pdf}
+\caption{\S\ref{subsec:8.4} catastrophic folding: under a longer recipe the
+R1-only loss falls below the entropy floor (final 100 steps shown) --- a regime
+impossible for a valid normalized density.}
+\label{fig:e7}
+\end{figure}
+\clearpage
+
 \subsection{Synthesis}\label{subsec:8.5}
 
 The four experiments collectively establish that the population-level
 theory of Parts III--IV is reached at practical finite-sample budgets
 (\(N \in [5000, 10000]\) per training run, 5 seeds at each of four
 matched-parameter budgets per section, wall \(\sim 30\) s to a few
-minutes per run on GPU). Mapping experiments back to claims, with
-seed-averaged numbers from the medium-budget sweep:
+minutes per run on GPU; Figs.~\ref{fig:e8}--\ref{fig:e10}). Mapping
+experiments back to claims, with seed-averaged numbers from the
+medium-budget sweep:
 
 \begin{longtable}[]{@{}
   >{\raggedright\arraybackslash}p{(\columnwidth - 2\tabcolsep) * \real{0.5000}}
@@ -3282,6 +3346,32 @@ remains open work (\S\ref{sec:11}). Among strictly-proper alternatives
 and finite-sample grounds analyzed in \S\ref{subsec:3.7}, not because
 \S\ref{sec:8} empirically rules out other losses (it does not test
 them).
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.72\linewidth]{figures/e8_headline_summary.pdf}
+\caption{Worst-case coverage error (log scale) by method across the four
+experiments. The CDSBI--baseline gap widens monotonically
+\S\ref{subsec:8.1}\(\to\)\S\ref{subsec:8.4}; only CDSBI stays at the
+Monte-Carlo floor (dashed).}
+\label{fig:e8}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.6\linewidth]{figures/e9_budget_saturation.pdf}
+\caption{Coverage error vs parameter budget (\S\ref{subsec:8.2}). CDSBI
+saturates at the floor by the smallest budget tested.}
+\label{fig:e9}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\linewidth]{figures/e10_per_experiment_boxplots.pdf}
+\caption{Per-experiment distribution of worst-case coverage error across seeds
+and budgets. CDSBI is at the floor with low variance throughout.}
+\label{fig:e10}
+\end{figure}
 
 \medskip\hrule\medskip
 
