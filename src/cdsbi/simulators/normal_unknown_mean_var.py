@@ -15,7 +15,7 @@ from typing import Optional, Tuple
 
 import numpy as np
 import torch
-from scipy.stats import chi2, norm
+from scipy.stats import chi2, norm, t
 
 
 # θ-independent volume constant for the (X̄, s²) sufficient-statistic reduction.
@@ -95,6 +95,30 @@ class NormalUnknownMeanVar:
         r_sigma = torch.from_numpy(norm.ppf(1.0 - u)).float().to(theta.device)   # increasing in log σ
         r_mu = math.sqrt(n) * (mu - xbar) / sigma                                # increasing in μ
         return torch.cat([r_sigma, r_mu], dim=-1)                          # (n, 2)
+
+    @property
+    def marginal_cd_spec(self) -> dict:
+        """Which coord is the scale nuisance (marginalize over) vs the location
+        target, for MarginalCDRecovery. θ = (log σ, μ)."""
+        return {"scale_coord": 0, "location_coord": 1}
+
+    def analytic_marginal_cd_pit(self, theta_0, x: torch.Tensor) -> dict:
+        """Closed-form marginal-CD PIT values at the true θ₀, the oracle the
+        trained marginalization is checked against. Returns {sigma_pit, mu_pit},
+        each (n,). σ²-CD = 1 − F_{χ²_{n−1}}((n−1)s²/σ₀²); μ-CD = F_{t_{n−1}}(√n(μ₀−X̄)/s)."""
+        log_sigma0, mu0 = float(theta_0[0]), float(theta_0[1])
+        sigma0 = math.exp(log_sigma0)
+        xbar, s2 = self._suff_stats(x)
+        xbar = xbar.squeeze(-1).detach().cpu().numpy()
+        s2 = s2.squeeze(-1).detach().cpu().numpy()
+        n = self.n_iid
+        w0 = (n - 1) * s2 / sigma0 ** 2
+        sigma_pit = 1.0 - chi2.cdf(w0, df=n - 1)
+        mu_pit = t.cdf(math.sqrt(n) * (mu0 - xbar) / np.sqrt(s2), df=n - 1)
+        return {
+            "sigma_pit": torch.from_numpy(sigma_pit).float(),
+            "mu_pit": torch.from_numpy(mu_pit).float(),
+        }
 
     def log_prob(self, x: torch.Tensor, theta: torch.Tensor) -> torch.Tensor:
         """Σ_i log N(X_i; μ, σ²)."""

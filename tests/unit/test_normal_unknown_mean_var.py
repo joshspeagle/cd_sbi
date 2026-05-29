@@ -62,3 +62,23 @@ def test_entropy_lower_bound_runs():
     from cdsbi.simulators.normal_unknown_mean_var import NormalUnknownMeanVar
     val = NormalUnknownMeanVar().entropy_lower_bound(n_mc=20000)
     assert np.isfinite(val)
+
+
+def test_analytic_marginal_cd_pit_uniform_at_truth():
+    import numpy as np
+    from scipy.stats import kstest
+    from cdsbi.simulators.normal_unknown_mean_var import NormalUnknownMeanVar
+    sim = NormalUnknownMeanVar()
+    theta_0 = (np.log(1.3), 0.7)                 # (log sigma, mu)
+    rng = np.random.default_rng(0)
+    x = sim.sample_x_given_theta(theta_0, 4000, rng)      # (4000, n_iid)
+    out = sim.analytic_marginal_cd_pit(theta_0, x)
+    assert kstest(out["sigma_pit"].numpy(), "uniform").statistic < 0.04
+    assert kstest(out["mu_pit"].numpy(), "uniform").statistic < 0.04
+
+
+def test_marginal_cd_spec_coords():
+    from cdsbi.simulators.normal_unknown_mean_var import NormalUnknownMeanVar
+    sim = NormalUnknownMeanVar()
+    spec = sim.marginal_cd_spec
+    assert spec["scale_coord"] == 0 and spec["location_coord"] == 1
