@@ -127,3 +127,63 @@ e10_per_experiment_boxplots:
   output:
     pdf: figures/e10_per_experiment_boxplots.pdf
     png: figures/e10_per_experiment_boxplots.png
+
+c1_pivot_picture:
+  description: "§2.2 the pivot collapses X|θ₀ onto N(0,1) via r*=θ₀-X"
+  section: "2.2"
+  source_runs: []
+  checkpoint_runs: []
+  builder: "cdsbi.analysis.figures.figures.c1_pivot_picture:render"
+  output:
+    pdf: figures/c1_pivot_picture.pdf
+    png: figures/c1_pivot_picture.png
+
+c2_r1_failure:
+  description: "§2.3 (R1) failure: non-monotone r ⇒ multi-valued CD inverse"
+  section: "2.3"
+  source_runs: []
+  checkpoint_runs: []
+  builder: "cdsbi.analysis.figures.figures.c2_r1_failure:render"
+  output:
+    pdf: figures/c2_r1_failure.pdf
+    png: figures/c2_r1_failure.png
+
+c3_r2_folding:
+  description: "§2.4 (R2) failure: folding in X ⇒ Z(θ)>1 (unnormalized density)"
+  section: "2.4"
+  source_runs: []
+  checkpoint_runs: []
+  builder: "cdsbi.analysis.figures.figures.c3_r2_folding:render"
+  output:
+    pdf: figures/c3_r2_folding.pdf
+    png: figures/c3_r2_folding.png
+
+c4_entropy_floor:
+  description: "§3.2 strict propriety: NF-MLE loss ≥ conditional-entropy floor"
+  section: "3.2"
+  source_runs: []
+  checkpoint_runs: []
+  builder: "cdsbi.analysis.figures.figures.c4_entropy_floor:render"
+  output:
+    pdf: figures/c4_entropy_floor.pdf
+    png: figures/c4_entropy_floor.png
+
+c5_kr_structure:
+  description: "§6.1 triangular autoregressive (Knothe–Rosenblatt) dependence"
+  section: "6.1"
+  source_runs: []
+  checkpoint_runs: []
+  builder: "cdsbi.analysis.figures.figures.c5_kr_structure:render"
+  output:
+    pdf: figures/c5_kr_structure.pdf
+    png: figures/c5_kr_structure.png
+
+c6_sbi_position:
+  description: "§10 CD-SBI vs NPE/NLE/NRE/LF2I (target, single-stage, coverage)"
+  section: "10"
+  source_runs: []
+  checkpoint_runs: []
+  builder: "cdsbi.analysis.figures.figures.c6_sbi_position:render"
+  output:
+    pdf: figures/c6_sbi_position.pdf
+    png: figures/c6_sbi_position.png
