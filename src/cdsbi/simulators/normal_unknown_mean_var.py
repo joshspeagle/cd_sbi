@@ -43,6 +43,17 @@ class NormalUnknownMeanVar:
         flow's theta_ref, so R2 holds by construction across the support."""
         return (self.log_sigma_range[0], self.mu_range[0])
 
+    @property
+    def theta_signs(self) -> Tuple[float, float]:
+        """∂r_k/∂θ_k sign per coord: both increasing-in-θ (= +1)."""
+        return (1.0, 1.0)
+
+    @property
+    def feat_signs(self) -> Tuple[float, float]:
+        """∂r_k/∂feat_k sign per coord: both decreasing-in-feature (= -1).
+        Features are (log s², X̄); r_σ ↓ in log s², r_μ ↓ in X̄."""
+        return (-1.0, -1.0)
+
     def _draw_theta(self, n: int, rng: np.random.Generator) -> np.ndarray:
         log_sigma = rng.uniform(*self.log_sigma_range, size=(n, 1))
         mu = rng.uniform(*self.mu_range, size=(n, 1))
@@ -81,8 +92,8 @@ class NormalUnknownMeanVar:
         w = ((n - 1) * s2 / (sigma ** 2)).detach().cpu().numpy()
         u = chi2.cdf(w, df=n - 1)
         u = np.clip(u, 1e-12, 1.0 - 1e-12)
-        r_sigma = torch.from_numpy(norm.ppf(u)).float().to(theta.device)   # (n, 1)
-        r_mu = math.sqrt(n) * (xbar - mu) / sigma                          # (n, 1)
+        r_sigma = torch.from_numpy(norm.ppf(1.0 - u)).float().to(theta.device)   # increasing in log σ
+        r_mu = math.sqrt(n) * (mu - xbar) / sigma                                # increasing in μ
         return torch.cat([r_sigma, r_mu], dim=-1)                          # (n, 2)
 
     def log_prob(self, x: torch.Tensor, theta: torch.Tensor) -> torch.Tensor:
@@ -105,11 +116,12 @@ class NormalUnknownMeanVar:
         n = self.n_iid
         w = (n - 1) * s2 / sigma ** 2
         u = np.clip(chi2.cdf(w, df=n - 1), 1e-12, 1 - 1e-12)
-        r_sigma = norm.ppf(u)
-        r_mu = math.sqrt(n) * (xbar - mu) / sigma
-        dr_sigma_ds2 = (n - 1) / sigma ** 2 * chi2.pdf(w, df=n - 1) / np.clip(norm.pdf(r_sigma), 1e-30, None)
+        r_sigma = norm.ppf(1.0 - u)                          # increasing convention
+        r_mu = math.sqrt(n) * (mu - xbar) / sigma
+        # feature = (log s², X̄): |∂r_σ/∂ log s²| = w·f_χ²(w)/φ(r_σ);  |∂r_μ/∂X̄| = √n/σ
+        dr_sigma_dlogs2 = w * chi2.pdf(w, df=n - 1) / np.clip(norm.pdf(r_sigma), 1e-30, None)
         dr_mu_dxbar = math.sqrt(n) / sigma
-        log_det_feat = np.log(np.clip(dr_sigma_ds2, 1e-30, None)) + np.log(dr_mu_dxbar)
+        log_det_feat = np.log(np.clip(dr_sigma_dlogs2, 1e-30, None)) + np.log(dr_mu_dxbar)
         log_det_contrib = _SUFFICIENT_STAT_LOG_DET_CONST
         loss = (0.5 * (r_sigma ** 2 + r_mu ** 2) + math.log(2 * math.pi)
                 - log_det_feat - log_det_contrib)

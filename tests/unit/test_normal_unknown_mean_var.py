@@ -50,12 +50,12 @@ def test_r_star_monotonicity_signs():
     x = sim.sample_x_given_theta([0.0, 0.0], 1, rng)         # shape (1, 10)
     base = torch.tensor([[0.0, 0.0]])
     r0 = sim.r_star(base, x)
-    # r_μ ↓ in μ (index 1): increasing μ lowers r_μ
+    # r_μ ↑ in μ (index 1): increasing μ raises r_μ
     r_mu_up = sim.r_star(torch.tensor([[0.0, 0.5]]), x)
-    assert float(r_mu_up[0, 1]) < float(r0[0, 1])
-    # r_σ ↓ in log σ (index 0): increasing log σ lowers r_σ
+    assert float(r_mu_up[0, 1]) > float(r0[0, 1])
+    # r_σ ↑ in log σ (index 0): increasing log σ raises r_σ
     r_sig_up = sim.r_star(torch.tensor([[0.5, 0.0]]), x)
-    assert float(r_sig_up[0, 0]) < float(r0[0, 0])
+    assert float(r_sig_up[0, 0]) > float(r0[0, 0])
 
 
 def test_entropy_lower_bound_runs():
