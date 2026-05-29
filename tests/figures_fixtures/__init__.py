@@ -63,3 +63,53 @@ def make_sweep(root: Path) -> Path:
                 coverage_error_max=cov + 0.001 * seed, final_loss=1.0,
             )
     return root
+
+
+def write_marginal_pit_raw(run_dir: Path, u) -> None:
+    """Write a diagnostics/marginal_pit_raw.parquet with a 1-D 'u' column."""
+    import numpy as _np
+    diag = run_dir / "diagnostics"
+    diag.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame({"u": _np.asarray(u)}).to_parquet(diag / "marginal_pit_raw.parquet")
+
+
+def write_jacobian_raw(run_dir: Path, j_emp, j_true) -> None:
+    """Write a diagnostics/jacobian_recovery_raw.parquet (i, j, j_emp, j_true)."""
+    import numpy as _np
+    j_emp = _np.asarray(j_emp); j_true = _np.asarray(j_true)
+    d = j_emp.shape[0]
+    diag = run_dir / "diagnostics"
+    diag.mkdir(parents=True, exist_ok=True)
+    rows = [{"i": i, "j": j, "j_emp": float(j_emp[i, j]), "j_true": float(j_true[i, j])}
+            for i in range(d) for j in range(d)]
+    pd.DataFrame(rows).to_parquet(diag / "jacobian_recovery_raw.parquet")
+
+
+def write_coverage(run_dir: Path, theta0_list, alpha_list) -> None:
+    """Write a d=1 diagnostics/coverage.parquet (theta_0_0, alpha, nominal, empirical)."""
+    import numpy as _np
+    diag = run_dir / "diagnostics"
+    diag.mkdir(parents=True, exist_ok=True)
+    rng = _np.random.default_rng(0)
+    rows = []
+    for t in theta0_list:
+        for a in alpha_list:
+            rows.append({"theta_0_0": float(t), "alpha": float(a), "nominal": float(a),
+                         "empirical": float(a) + rng.normal(0, 0.01), "n_eval": 2000})
+    pd.DataFrame(rows).to_parquet(diag / "coverage.parquet")
+
+
+def write_coverage_2d(run_dir: Path, grid_points, alpha_list) -> None:
+    """Write a d=2 coverage.parquet (theta_0_0, theta_0_1, alpha, nominal, empirical).
+    `grid_points` is a list of (t0, t1) tuples (several may share a first coord)."""
+    import numpy as _np
+    diag = run_dir / "diagnostics"
+    diag.mkdir(parents=True, exist_ok=True)
+    rng = _np.random.default_rng(0)
+    rows = []
+    for (t0, t1) in grid_points:
+        for a in alpha_list:
+            rows.append({"theta_0_0": float(t0), "theta_0_1": float(t1),
+                         "alpha": float(a), "nominal": float(a),
+                         "empirical": float(a) + rng.normal(0, 0.01), "n_eval": 2000})
+    pd.DataFrame(rows).to_parquet(diag / "coverage.parquet")
