@@ -259,7 +259,7 @@ In `cd_sbi.py` `fit()`:
         if cond_is_module:
             trainable_params += list(self.conditioner.parameters())
 ```
-Then each optimizer uses `trainable_params` (e.g. `torch.optim.Adam(trainable_params, lr=lr, betas=betas)`), and the clip becomes:
+⚠️ **Edit ALL THREE optimizer branches** — `adam`, `adamw`, AND `sgd` (an unedited `sgd` branch would silently not train the conditioner under that optimizer). Each becomes e.g. `torch.optim.Adam(trainable_params, lr=lr, betas=betas)` / `AdamW(trainable_params, ...)` / `SGD(trainable_params, ...)`. The clip becomes:
 ```python
             torch.nn.utils.clip_grad_norm_(trainable_params, max_norm=grad_clip)
 ```
@@ -420,15 +420,22 @@ def test_stage_b_learned_summary_trains_and_recovers_sufficiency():
     feats = feats.cpu().numpy()
     xbar, s2 = sim._suff_stats(x)
     suff = np.column_stack([np.log(s2.squeeze(-1).numpy()), xbar.squeeze(-1).numpy()])  # (n,2)
-    # each oracle coordinate should be well-predicted by the 2 learned features:
-    # max |corr| of each suff coord with the learned feature set (simple, robust).
-    def best_abscorr(target, F):
-        return max(abs(np.corrcoef(target, F[:, j])[0, 1]) for j in range(F.shape[1]))
-    corr_logs2 = best_abscorr(suff[:, 0], feats)
-    corr_xbar = best_abscorr(suff[:, 1], feats)
-    print(f"sufficiency recovery: |corr(log s², ·)|={corr_logs2:.3f}  |corr(X̄, ·)|={corr_xbar:.3f}")
-    assert corr_logs2 > 0.9, f"learned summary lost σ²-information (corr {corr_logs2:.2f})"
-    assert corr_xbar > 0.9, f"learned summary lost μ-information (corr {corr_xbar:.2f})"
+    # Sufficiency = "did the summary recover a smooth (monotone) reparameterization
+    # of each oracle coordinate?" Use SPEARMAN (rank) correlation — monotone-
+    # invariant, so a curved-but-information-equivalent feature (e.g. ∝ s² rather
+    # than log s²) still scores ~1. Pearson is printed alongside for diagnosis only
+    # (a low Pearson + high Spearman = nonlinear reparam, NOT lost information).
+    from scipy.stats import spearmanr, pearsonr
+    def best_abscorr(target, F, fn):
+        return max(abs(fn(target, F[:, j])[0]) for j in range(F.shape[1]))
+    sp_logs2 = best_abscorr(suff[:, 0], feats, spearmanr)
+    sp_xbar = best_abscorr(suff[:, 1], feats, spearmanr)
+    pe_logs2 = best_abscorr(suff[:, 0], feats, pearsonr)
+    pe_xbar = best_abscorr(suff[:, 1], feats, pearsonr)
+    print(f"sufficiency (Spearman): log s²={sp_logs2:.3f}  X̄={sp_xbar:.3f}  "
+          f"| (Pearson): log s²={pe_logs2:.3f}  X̄={pe_xbar:.3f}")
+    assert sp_logs2 > 0.9, f"learned summary lost σ²-information (Spearman {sp_logs2:.2f})"
+    assert sp_xbar > 0.9, f"learned summary lost μ-information (Spearman {sp_xbar:.2f})"
 
     # (c) calibration sanity: joint Mahalanobis PIT at a central θ₀ ~ χ²₂
     from scipy.stats import kstest, chi2
@@ -449,7 +456,7 @@ Run: `pytest tests/integration/test_mu_sigma_stage_b_smoke.py -v -s -m intensive
 
 Interpretation:
 - **Pass** → Stage-B infrastructure works; the learned summary recovers sufficiency and roughly calibrates. M3 then does the cross-seed verdict + cheat instrumentation.
-- **Sufficiency-recovery fail** (corr < 0.9) → the learned summary is not finding `(log s², X̄)`. Report the corr values + final loss. This is a *finding*, not a tolerance to loosen — likely the feature-ordering / fixed-sign interaction flagged in the spec (M3 territory surfacing early). STOP and report for the controller.
+- **Sufficiency-recovery fail** (Spearman < 0.9) → the learned summary is not finding a monotone reparam of `(log s², X̄)`. Report BOTH Spearman and Pearson values + final loss (low-Pearson/high-Spearman = nonlinear reparam, fine; low-Spearman = genuinely lost information or coordinate *mixing* — the feature-ordering / fixed-sign interaction flagged in the spec, M3 territory surfacing early). This is a *finding*, not a tolerance to loosen — STOP and report for the controller.
 - **Calibration fail but sufficiency OK** → the summary is sufficient but the pivot mis-orients; report KS + corr. Also a finding (the M3 ordering question). STOP and report.
 - **Loss dips far below the entropy floor** (`NormalUnknownMeanVar().entropy_lower_bound()` ≈ 0.92) → the cheat (device-1 insufficient); report `final_loss` vs floor. STOP — escalation to the invertible summary (spec device-2) is M3.
 
