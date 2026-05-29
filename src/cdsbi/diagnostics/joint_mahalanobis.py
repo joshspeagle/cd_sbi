@@ -43,6 +43,7 @@ class JointMahalanobis(Diagnostic):
         floor = ks_noise_floor(N=self.n_per_theta, n_bins=1)
         rng = np.random.default_rng(0)
         rows = []
+        r_sq_by_theta = {}
         chi2_cdf = chi2(df=d).cdf
         for theta_0 in self.theta_0_grid:
             theta_repr = str(list(map(
@@ -58,6 +59,7 @@ class JointMahalanobis(Diagnostic):
             with torch.no_grad():
                 r = trained.procedure.pivot(theta_t, x)
             r_sq = r.pow(2).sum(dim=-1).cpu().numpy()
+            r_sq_by_theta[str(list(map(float, list(theta_0))))] = r_sq
             ks_stat, _ = kstest(r_sq, chi2_cdf)
             rows.append({
                 "theta_0_repr": str(list(map(float, list(theta_0)))),
@@ -71,5 +73,5 @@ class JointMahalanobis(Diagnostic):
         return DiagnosticResult(
             name=self.name, value=df, passed=passed, noise_floor=floor,
             n_samples=len(self.theta_0_grid) * self.n_per_theta,
-            meta={"d": int(d)},
+            meta={"d": int(d), "r_sq": r_sq_by_theta},
         )
