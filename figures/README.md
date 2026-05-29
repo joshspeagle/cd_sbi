@@ -2,6 +2,42 @@
 
 _Auto-generated from `configs/figures/manifest.yaml` by `python -m cdsbi.analysis.figures.render --gallery`. Do not edit by hand._
 
+## 10
+
+### c6_sbi_position — §10 CD-SBI vs NPE/NLE/NRE/LF2I (target, single-stage, coverage)
+
+![c6_sbi_position](c6_sbi_position.png)
+
+## 2.2
+
+### c1_pivot_picture — §2.2 the pivot collapses X|θ₀ onto N(0,1) via r*=θ₀-X
+
+![c1_pivot_picture](c1_pivot_picture.png)
+
+## 2.3
+
+### c2_r1_failure — §2.3 (R1) failure: non-monotone r ⇒ multi-valued CD inverse
+
+![c2_r1_failure](c2_r1_failure.png)
+
+## 2.4
+
+### c3_r2_folding — §2.4 (R2) failure: folding in X ⇒ Z(θ)>1 (unnormalized density)
+
+![c3_r2_folding](c3_r2_folding.png)
+
+## 3.2
+
+### c4_entropy_floor — §3.2 strict propriety: NF-MLE loss ≥ conditional-entropy floor
+
+![c4_entropy_floor](c4_entropy_floor.png)
+
+## 6.1
+
+### c5_kr_structure — §6.1 triangular autoregressive (Knothe–Rosenblatt) dependence
+
+![c5_kr_structure](c5_kr_structure.png)
+
 ## 8.1
 
 ### e1_loc_normal_calibration — §8.1 CDSBI 1-D calibration: marginal PIT + coverage curve
