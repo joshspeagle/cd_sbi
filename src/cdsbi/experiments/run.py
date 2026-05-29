@@ -51,6 +51,22 @@ def _build_flow(cfg: DictConfig, simulator) -> Any:
     # whose method.flow is None / "additive_umnn" / "doubly_monotone").
     # NPE/NLE/NRE/LF2I-BFF have method.flow set to "maf"/None and need their
     # own flow architecture — they fall through to the slow path below.
+    # triangular_doubly_monotone needs d AND per-coordinate theta_ref injected
+    # (R2 holds for θ_k ≥ theta_ref[k]; inject the simulator's prior lower bounds
+    # so R2 holds by construction across the full support).
+    if hydra_flow_name == "triangular_doubly_monotone" and (
+        method_flow_label is None or method_flow_label == hydra_flow_name
+    ):
+        flow_dict = OmegaConf.to_container(cfg.flow, resolve=True)
+        target = flow_dict.pop("_target_")
+        flow_dict.pop("name", None)
+        flow_dict.setdefault("d", int(simulator.d_theta))
+        # R2 holds for θ_k ≥ theta_ref[k]; inject the simulator's per-coordinate
+        # prior lower bounds so R2 holds by construction across the support.
+        if hasattr(simulator, "theta_lower"):
+            flow_dict.setdefault("theta_ref", list(simulator.theta_lower))
+        return _instantiate(target, **flow_dict)
+
     v3_flow_names = {"doubly_monotone", "joint_umnn", "joint_umnn_1d"}
     if hydra_flow_name in v3_flow_names and (
         method_flow_label is None or method_flow_label == hydra_flow_name
@@ -159,7 +175,8 @@ def _build_flow(cfg: DictConfig, simulator) -> Any:
     raise ValueError(
         f"Unknown flow label '{method_flow_label}' in method.flow. "
         "Expected one of: 'maf', 'additive_umnn', 'triangular_additive', "
-        "'doubly_monotone', 'joint_umnn', 'joint_umnn_1d'."
+        "'doubly_monotone', 'joint_umnn', 'joint_umnn_1d', "
+        "'triangular_doubly_monotone'."
     )
 
 
@@ -177,10 +194,16 @@ def _build_method(cfg: DictConfig, simulator) -> Any:
         from cdsbi.losses.nfmle import NFMLELoss
         flow = _build_flow(cfg, simulator)
         allow_ablation = bool(OmegaConf.select(cfg, "method.allow_ablation", default=False))
-        # Conditioner dispatch: exp_rate uses MLPConditioner(frozen_sum) to reduce
-        # X ∈ R^{n_iid} to the sufficient statistic T = Σ X_i with the
-        # accompanying log|∂T/∂X|; all other targets pass X through unchanged.
-        if cfg.target.name == "exp_rate":
+        # Conditioner dispatch: an explicit non-identity cfg.conditioner
+        # (sufficient_stat now, learned summaries later) is built generically;
+        # else exp_rate's frozen-sum reduction; else Identity passthrough.
+        cond_name = OmegaConf.select(cfg, "conditioner.name", default="identity")
+        if cond_name not in ("identity", None):
+            cond_cfg = OmegaConf.to_container(cfg.conditioner, resolve=True)
+            cond_target = cond_cfg.pop("_target_")
+            cond_cfg.pop("name", None)
+            conditioner = _instantiate(cond_target, **cond_cfg)
+        elif cfg.target.name == "exp_rate":
             from cdsbi.conditioners.mlp import MLPConditioner
             conditioner = MLPConditioner(
                 input_dim=int(simulator.d_x),
