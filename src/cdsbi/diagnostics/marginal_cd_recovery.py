@@ -1,9 +1,14 @@
 """MarginalCDRecovery: validate the σ² (χ²) and μ (Student-t) marginal CDs.
 
 σ² is direct (r_σ ⟂ μ → Φ(r_σ) is the χ²-based CD). μ requires marginalizing the
-σ nuisance out of the joint confidence density → Student-t_{n−1} CD (added in a
-later task). No-ops (passed=True) when the procedure is not pivot-based or the
-simulator lacks a marginal_cd_spec.
+σ nuisance out of the joint confidence density → Student-t_{n−1} CD. The primary
+recovery metric for each marginal is the KS statistic of its PIT against U(0,1)
+(distributional recovery). The pointwise `*_resid` columns are secondary: the gap
+between the trained marginalized CD and the closed-form analytic CD, summarised as
+the **95th percentile over X** (a max-over-X L∞ statistic grows with sample size
+and is dominated by a single tail draw, so it is a poor recovery summary). No-ops
+(passed=True) when the procedure is not pivot-based or the simulator lacks a
+marginal_cd_spec.
 """
 from __future__ import annotations
 
@@ -84,7 +89,9 @@ class MarginalCDRecovery:
             lc = spec["location_coord"]
             H_mu = np.clip(self._marginalize_mu(proc, simulator, theta_0, x, sc, lc), 0.0, 1.0)
             mu_ks = float(kstest(H_mu, "uniform").statistic)
-            mu_t_resid = float(np.abs(H_mu - analytic["mu_pit"].numpy()).max())
+            # 95th-percentile per-X residual vs the analytic t-CD (robust to a
+            # single tail draw; the KS statistic above is the primary check).
+            mu_t_resid = float(np.quantile(np.abs(H_mu - analytic["mu_pit"].numpy()), 0.95))
             rows.append({
                 "theta_0": key, "sigma_ks": sigma_ks,
                 "sigma_chi2_resid": sigma_chi2_resid, "noise_floor": floor,

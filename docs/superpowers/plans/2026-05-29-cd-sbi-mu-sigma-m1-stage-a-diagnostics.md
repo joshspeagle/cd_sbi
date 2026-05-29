@@ -365,7 +365,11 @@ In `__call__`, after computing the σ² metrics for a θ₀, add:
             lc = spec["location_coord"]
             H_mu = np.clip(self._marginalize_mu(proc, simulator, theta_0, x, sc, lc), 0.0, 1.0)
             mu_ks = float(kstest(H_mu, "uniform").statistic)
-            mu_t_resid = float(np.abs(H_mu - analytic["mu_pit"].numpy()).max())
+            # 95th-percentile per-X residual vs the analytic t-CD. NOT max-over-X:
+            # an L∞-over-samples statistic grows with sample size and is dominated
+            # by a single tail draw, so it is a poor recovery summary. The KS
+            # statistic above is the primary (distributional) recovery check.
+            mu_t_resid = float(np.quantile(np.abs(H_mu - analytic["mu_pit"].numpy()), 0.95))
 ```
 and extend the appended row dict with `"mu_ks": mu_ks, "mu_t_resid": mu_t_resid`. Update `passed` to also require `(df["mu_ks"] <= 2.0 * floor).all()`. The σ² `proc.pivot` call in `__call__` keeps its `torch.no_grad()` — no conflict, since `_marginalize_mu` owns its own `no_grad` block and uses no autograd.
 
