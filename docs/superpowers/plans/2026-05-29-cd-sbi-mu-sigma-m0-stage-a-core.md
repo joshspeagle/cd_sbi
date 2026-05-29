@@ -436,10 +436,7 @@ def test_cond_monotone_scalar_increasing_and_derivative_matches_autograd():
     z = torch.linspace(-2, 2, n).unsqueeze(-1)
     val = f(z, ctx)
     assert val.shape == (n, 1)
-    # strictly increasing in z (compare sorted z)
-    z_sorted, idx = torch.sort(z.squeeze(-1))
-    v_sorted = f(z_sorted.unsqueeze(-1), ctx[idx])
-    # not a valid monotonicity check across different ctx; instead test at fixed ctx:
+    # monotonicity is only well-defined at a FIXED context, so check there:
     ctx0 = torch.randn(1, 3).expand(n, 3)
     zz = torch.linspace(-3, 3, n).unsqueeze(-1)
     vv = f(zz, ctx0).squeeze(-1)
@@ -763,6 +760,10 @@ n_iid: 10
 ```yaml
 name: triangular_doubly_monotone
 _target_: cdsbi.flows.triangular_doubly_monotone.TriangularDoublyMonotoneFlow
+# NOTE: cdsbi_flow_hidden is the 1-D budget key; the d=2 non-additive flow's
+# parameter count is NOT yet calibrated against the budget's target_params.
+# Adequate for M0 (correctness/recovery smoke); revisit budget calibration
+# (a per-flow d2 key, à la cdsbi_flow_hidden_d2) in M1's replication sweep.
 hidden: ${budget.cdsbi_flow_hidden}
 depth: 2
 ```
@@ -849,6 +850,11 @@ Insert, just before it, a dedicated branch (it needs `d`):
         return _instantiate(target, **flow_dict)
 ```
 
+Also add `triangular_doubly_monotone` to the known-flow-label string in
+`_build_flow`'s fall-through `raise ValueError(...)` (~L159–163), so a
+mis-dispatch (the `cb1e08e` gotcha) surfaces a helpful message rather than
+omitting the new flow from the list.
+
 - [ ] **Step 3: Make the CDSBI conditioner honor `cfg.conditioner`**
 
 In `_build_method`, replace the hardcoded `if cfg.target.name == "exp_rate": … else: Identity()` block with one that **prefers an explicit non-identity `cfg.conditioner`** (so `sufficient_stat` — and M2's future learned summary — is built generically), falling back to exp_rate's frozen-sum and the Identity default:
@@ -928,7 +934,7 @@ def test_stage_a_recovers_pivot():
     flow = TriangularDoublyMonotoneFlow(d=2, hidden=32, depth=2)
     cond = SufficientStatConditioner(n_iid=sim.n_iid)
     runner = CDSBIRunner(flow=flow, conditioner=cond, loss=NFMLELoss())
-    config = {"lr": 3e-3, "batch_size": 256, "n_steps": 3000, "n_train": 10000,
+    config = {"lr": 3e-3, "batch_size": 256, "n_steps": 5000, "n_train": 10000,
               "optimizer": "adamw", "fresh_batch": False}
     trained = runner.fit(simulator=sim, config=config, seed=0)
 
@@ -949,7 +955,7 @@ def test_stage_a_recovers_pivot():
 - [ ] **Step 2: Run it (opt-in intensive — it trains; minutes on GPU)**
 
 Run: `pytest tests/integration/test_mu_sigma_smoke.py -m intensive -v`
-Expected: PASS. If `rmse` is borderline, bump `n_steps` to 5000 (the flow can represent `r*` exactly; under-training, not capacity, is the only failure mode here). If it FAILS structurally (not just borderline), STOP and report — it indicates a flow/wiring bug, not a tuning issue.
+Expected: PASS. If `rmse` is borderline, bump `n_steps` to 8000 (the flow can represent `r*` exactly; under-training, not capacity, is the only failure mode here). If it FAILS structurally (e.g. RMSE ≫ 0.25, or one coordinate way off), STOP and report — that indicates a flow/wiring bug (most likely the `dr_dfeat` diagonal or the autoregressive `ctx_k` wiring), not a tuning issue.
 
 - [ ] **Step 3: Confirm the fast suite still passes**
 
@@ -972,3 +978,19 @@ git commit -m "test(intensive): Stage-A (μ,σ²) smoke — recovers closed-form
 - **Type consistency:** `θ=(log σ, μ)` index order and `features=(s², X̄)` order are consistent across simulator, conditioner, flow tests, and configs. `_SUFFICIENT_STAT_LOG_DET_CONST` is defined once in the simulator module and imported by the conditioner (single source). Flow `forward(theta, context)` and conditioner `encode(x)` match the `Flow`/`Conditioner` protocols. `entropy_lower_bound` uses the same log-det constant as the conditioner.
 - **Known follow-on (M2):** `CDSBIRunner.fit` optimizes only `self.flow.parameters()`; M0's oracle conditioner is zero-param so this is fine, but M2's learned `DeepSetsConditioner` requires the optimizer extension — flagged in the spec, not needed here.
 - **Risk:** the `triangular_doubly_monotone` flow-dispatch in `run.py` mirrors the `cb1e08e` guard; Task 7 Step 4 verifies `flow_class == TriangularDoublyMonotoneFlow` to catch the AdditiveFlow1D fallback that bit the F2 milestone.
+
+### Dual-review outcome (2026-05-29)
+
+Self-review + an independent agent review, both grounded in the code and the
+`doubly_monotone` template. **Math confirmed sound:** `r* ~ 𝒩(0,I₂)` via Basu
+(X̄ ⊥ s²); the feature-Jacobian is lower-triangular so `log|det| = Σ_k
+log(∂r_k/∂feat_k)` even though below-diagonal `∂r_k/∂feat_{<k}` are nonzero
+(determinant of a triangular matrix is the product of its diagonal); and
+`dr_dfeat = b' + β'·∫σ` is the correct diagonal term (validated at runtime by
+`test_flow_logdet_matches_autograd_feature_jacobian`). Minor edits applied:
+- removed dead `v_sorted` code in the cond-monotone test;
+- add `triangular_doubly_monotone` to `_build_flow`'s error-label string;
+- flow config notes `cdsbi_flow_hidden` is the 1-D key (d=2 budget calibration
+  deferred to M1);
+- smoke `n_steps` 3000 → 5000 (first run of a new architecture).
+No math-correctness or architectural issues; verdict was "ready with minor edits."
