@@ -847,6 +847,11 @@ Insert, just before it, a dedicated branch (it needs `d`):
         target = flow_dict.pop("_target_")
         flow_dict.pop("name", None)
         flow_dict.setdefault("d", int(simulator.d_theta))
+        # R2 holds for θ_k ≥ theta_ref[k]; inject the simulator's per-coordinate
+        # prior lower bounds so R2 holds by construction across the proposal
+        # support (the NormalUnknownMeanVar exposes theta_lower).
+        if hasattr(simulator, "theta_lower"):
+            flow_dict.setdefault("theta_ref", list(simulator.theta_lower))
         return _instantiate(target, **flow_dict)
 ```
 
@@ -931,7 +936,10 @@ from cdsbi.methods.cd_sbi import CDSBIRunner
 def test_stage_a_recovers_pivot():
     torch.manual_seed(0)
     sim = NormalUnknownMeanVar()
-    flow = TriangularDoublyMonotoneFlow(d=2, hidden=32, depth=2)
+    # theta_ref = per-coord prior lower bounds so R2 holds across the support
+    # (default theta_ref=0.0 would violate R2 for the many in-support θ < 0).
+    flow = TriangularDoublyMonotoneFlow(d=2, hidden=32, depth=2,
+                                        theta_ref=list(sim.theta_lower))
     cond = SufficientStatConditioner(n_iid=sim.n_iid)
     runner = CDSBIRunner(flow=flow, conditioner=cond, loss=NFMLELoss())
     config = {"lr": 3e-3, "batch_size": 256, "n_steps": 5000, "n_train": 10000,
