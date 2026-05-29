@@ -1,0 +1,9 @@
+name: deep_sets
+_target_: cdsbi.conditioners.deep_sets.DeepSetsConditioner
+# run.py builds conditioners GENERICALLY from this config (pops _target_/name,
+# instantiates with the rest) — it does NOT inject n_iid. So hardcode it here,
+# exactly as configs/conditioner/sufficient_stat.yaml does (n_iid: 10).
+n_iid: 10
+d_out: 2
+hidden: ${budget.cdsbi_flow_hidden}
+depth: 2
