@@ -1,0 +1,7 @@
+name: invertible_summary
+_target_: cdsbi.conditioners.invertible_summary.InvertibleSummaryConditioner
+n_iid: 10        # hardcoded (run.py builds conditioners generically, no injection)
+d_theta: 2       # MUST equal simulator.d_theta (the flow's d is injected separately)
+hidden: ${budget.cdsbi_flow_hidden}
+n_layers: 6
+depth: 2
