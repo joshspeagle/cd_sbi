@@ -351,8 +351,14 @@ class MultivariateMarginalCDRecovery:
     def __call__(self, trained, simulator, eval_data=None, x_per_theta=None) -> DiagnosticResult:
         proc = getattr(trained, "procedure", None)
         encode_fn = getattr(proc, "encode_fn", None)
-        if encode_fn is None or not hasattr(simulator, "analytic_marginal_cd_pit"):
-            return self._noop("no learned summary / no analytic reference")
+        # Gate on `p` (the bivariate (μ,Σ) sim sets self.p=2). CRITICAL: the 1-D
+        # NormalUnknownMeanVar ALSO has analytic_marginal_cd_pit (from M1) and
+        # encode_fn is always set, so encode_fn+analytic alone is NOT a sufficient
+        # gate — it would fire on a mu_sigma run and IndexError on the 2-wide r.
+        # `hasattr(simulator, "p")` excludes the 1-D sim (which has no p attribute).
+        if (encode_fn is None or not hasattr(simulator, "analytic_marginal_cd_pit")
+                or not hasattr(simulator, "p")):
+            return self._noop("not a multivariate (μ,Σ) target with a learned summary")
         n = simulator.n_iid; p = simulator.p
         floor = ks_noise_floor(self.n_per_theta)
         rng = np.random.default_rng(self.seed)
@@ -379,22 +385,38 @@ class MultivariateMarginalCDRecovery:
         return DiagnosticResult(self.name, value=df, passed=passed, noise_floor=floor,
                                 n_samples=self.n_per_theta, meta={})
 
-    def _mu_hotelling(self, proc, simulator, x, rng, n, p) -> float:
-        # need the flow object for inversion; the procedure exposes pivot_fn closing over it.
-        # Reconstruct a forward callable that autoregressive_invert can use: it calls
-        # flow.forward(theta, context=feat). We obtain feat = encode_fn(x), and use a tiny
-        # adapter exposing .forward + ._s_theta from the trained flow via proc.flow.
-        flow = getattr(proc, "flow", None)
-        if flow is None:
-            # fall back: skip μ recovery if the procedure didn't expose the flow
-            return 0.0
-        feat = proc.encode_fn(x)
+    def _sample_mu_marginal(self, proc, simulator, x, n, p):
+        """Sample the marginal μ-CD per dataset (one draw each). Returns μ-samples (m,p).
+        Trained path: r~N(0,I_d) → autoregressive_invert(flow) → θ-samples → μ-block.
+        Oracle path (flow is None): the validated closed-form Bartlett inversion —
+        invert the covariance pivots from r_cov, then μ = X̄ + (1/√n)·C·z."""
+        feat = proc.encode_fn(x)                                     # (m, d_theta)
         m = x.shape[0]
-        r_samp = torch.randn(m, simulator.d_theta, dtype=x.dtype)
-        with torch.no_grad():
-            theta_s = autoregressive_invert(flow, r_samp, feat)
-        mu_s = theta_s[:, 3:5].cpu().numpy()                         # μ-block of the θ-samples
-        obs = x.reshape(m, n, p)
+        flow = getattr(proc, "flow", None)
+        if flow is not None:
+            r_samp = torch.randn(m, simulator.d_theta, dtype=x.dtype)
+            with torch.no_grad():
+                theta_s = autoregressive_invert(flow, r_samp, feat)
+            return theta_s[:, 3:5].cpu().numpy()
+        # --- closed-form Bartlett fallback (oracle r*): the prototype-validated path ---
+        from scipy.stats import chi2 as _chi2
+        f = feat.cpu().numpy()
+        D11 = np.exp(f[:, 0]); D22 = np.exp(f[:, 1]); D21 = f[:, 2]
+        xbar = f[:, 3:5]                                             # (m,2) = (X̄₁, X̄₂)
+        rc = np.random.default_rng(self.seed + 1).standard_normal((m, 3))
+        z = np.random.default_rng(self.seed + 2).standard_normal((m, 2))
+        T11sq = _chi2.ppf(np.clip(1 - norm.cdf(rc[:, 0]), 1e-12, 1 - 1e-12), n - 1)
+        T22sq = _chi2.ppf(np.clip(1 - norm.cdf(rc[:, 1]), 1e-12, 1 - 1e-12), n - 2)
+        C11 = D11 / np.sqrt(T11sq); C22 = D22 / np.sqrt(T22sq)
+        L21 = (D21 - rc[:, 2] * C22) * C11 / D11
+        mu = np.empty((m, 2))
+        mu[:, 0] = xbar[:, 0] + (C11 * z[:, 0]) / math.sqrt(n)
+        mu[:, 1] = xbar[:, 1] + (L21 * z[:, 0] + C22 * z[:, 1]) / math.sqrt(n)
+        return mu
+
+    def _mu_hotelling(self, proc, simulator, x, rng, n, p) -> float:
+        mu_s = self._sample_mu_marginal(proc, simulator, x, n, p)    # (m,2) marginal-μ draws
+        obs = x.reshape(x.shape[0], n, p)
         xbar = obs.mean(dim=1).cpu().numpy()
         Xc = (obs - obs.mean(dim=1, keepdim=True)).cpu().numpy()
         S = np.einsum('mki,mkj->mij', Xc, Xc) / (n - 1)
@@ -403,7 +425,22 @@ class MultivariateMarginalCDRecovery:
         F = T2 * (n - p) / (p * (n - 1))
         return float(kstest(F, "f", args=(p, n - p)).statistic)
 ```
-**Implementation note (resolve in Step 3):** the diagnostic needs the trained **flow** for inversion. The current `PivotBasedProcedure` exposes `pivot_fn`/`encode_fn` but not the flow. Add `flow` to the procedure: in `cd_sbi.py`'s `fit()` (and the energy/exact runners if reused), pass `procedure.flow = self.flow` after construction (one line), OR extend `PivotBasedProcedure.__init__` with an optional `flow=None`. Use the latter (cleaner): add `flow: optional` to `PivotBasedProcedure` and set it in `CDSBIRunner.fit`. For the **oracle** test (`_OracleProc`), the μ-Hotelling path needs a flow too — but the oracle uses `r_star` (not a flow). So for the oracle test, the μ-Hotelling recovery is validated **directly via the closed-form sampling** (the N2 prototype method): in `_mu_hotelling`, if `flow is None` AND the procedure has an `r_star`-style closed form, sample via the analytic covariance-pivot inversion instead. To keep the test honest and avoid special-casing, the oracle test (`test_mu_hotelling_recovery_with_oracle`) should construct `_OracleProc` with a `flow` attribute = a fitted/closed-form-mimicking inverter; simplest: give `_OracleProc` a `flow=None` and have `_mu_hotelling` fall back to the **closed-form covariance-pivot inversion + μ=X̄+(1/√n)Cz sampling** (the validated prototype path) when `flow is None`. Implement that fallback (it's the prototype code, ~15 lines) so the oracle test exercises the validated method; the trained path uses `autoregressive_invert`.
+(Add `import math` at the top of the module. The oracle path is the N2-prototype-validated closed-form sampling — so `test_mu_hotelling_recovery_with_oracle` exercises the real joint-CD→Hotelling recovery, NOT a `0.0` stub. The trained path uses `autoregressive_invert`.)
+
+**Also expose the trained flow on the procedure (so the TRAINED μ-path works).** Two minimal, non-breaking edits:
+1. `src/cdsbi/confidence_set/procedures.py` — add a keyword arg to `PivotBasedProcedure.__init__` (keep it last, default `None`, so the energy/exact-density runners that build procedures positionally are unaffected):
+```python
+    def __init__(self, pivot_fn, d_theta, theta_range=(-20.0, 20.0), encode_fn=None, flow=None):
+        ...
+        self.encode_fn = encode_fn
+        self.flow = flow            # the trained flow, for autoregressive inversion (None if N/A)
+```
+2. `src/cdsbi/methods/cd_sbi.py` `fit()` — pass `flow=self.flow` where it constructs the procedure:
+```python
+        procedure = PivotBasedProcedure(pivot_fn=pivot_fn, d_theta=simulator.d_theta,
+                                        encode_fn=encode_fn, flow=self.flow)
+```
+The oracle test's `_OracleProc` has no `flow` attribute, so `getattr(proc, "flow", None)` is `None` → the closed-form fallback runs (intended). A `CDSBIRunner`-trained model gets `procedure.flow` set → the `autoregressive_invert` path runs.
 
 - [ ] **Step 4: Run to verify pass**
 
@@ -561,8 +598,7 @@ def test_replicate_mu_cov_stage_a():
     config = {"lr": 3e-3, "batch_size": 256, "n_steps": 12000, "n_train": 20000,
               "optimizer": "adamw", "fresh_batch": False}
     trained = runner.fit(simulator=sim, config=config, seed=0)
-    # expose the flow for the inverter
-    trained.procedure.flow = flow
+    assert trained.procedure.flow is not None   # set by CDSBIRunner.fit (Task 4 edit)
 
     # (a) recovery (tightened: μ coords should improve vs N1's 6000-step run)
     rng = np.random.default_rng(123)
