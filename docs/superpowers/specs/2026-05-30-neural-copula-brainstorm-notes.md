@@ -62,6 +62,43 @@ copula transform of X|θ; the score reads the θ-dependence. **No summary to eng
 distribution; no summary bottleneck; cannot cheat (proper likelihood); near-floor
 coverage incl. on no-sufficient-statistic targets.
 
+## Comparison across all targets (probing round 2; rough, single-seed)
+
+coverage_error_max (floor ~0.02–0.03). NC = neural-copula NLE+score.
+
+| target | d_θ | exact CD-SBI / oracle | NC asymptotic | NC calibrated |
+|---|---|---|---|---|
+| §8.1 LocationNormal1D | 1 | 0.025 | **0.009** | ~floor |
+| §8.2 LocationGaussian2D_iid | 2 | 0.025 | 0.032 | 0.040 |
+| §8.3 LocationGaussian2D_corr | 2 | 0.025 | 0.034 | 0.042 |
+| §8.4 ExponentialRate | 1 | 0.028–0.034 | 0.063 | 0.061 |
+| (μ,σ²) NormalUnknownMeanVar | 2 | 0.026 | 0.043 | **0.030** |
+| (μ,Σ) bivariate cov | 5 | 0.026 | 0.060 | **0.038** |
+| Cauchy loc-scale (**no suff. stat**) | 2 | **impossible** | **0.022** | 0.046 |
+| higher-d 5×Gaussian(μ,logσ) | **10** | — | **0.058** | 0.071 |
+| **SLCP** (multimodal benchmark) | 5 | — | **0.115** | **0.426** ✗ |
+
+**Reading:**
+- **Regular targets:** NC score CD sits at 0.01–0.06 — within ~1–2.5× the *exact*
+  CD-SBI floor. Gaussian-location (§8.1–8.3) is near-exact (linear score → exact χ²).
+  Nonlinear-score cases (§8.4, (μ,σ²), (μ,Σ)) are looser (asymptotic) but **grid-free
+  calibration sharpens them toward the floor** ((μ,σ²) 0.043→0.030; (μ,Σ) 0.060→0.038).
+- **Scales in θ-dimension:** d_θ=10 → 0.058 (no blow-up).
+- **Generality:** Cauchy (no sufficient statistic; CD-SBI machinery can't be built) →
+  **0.022**, the floor.
+- **THE BOUNDARY — non-regular/multimodal breaks it.** SLCP (θ₃,θ₄ enter squared →
+  sign-symmetry multimodality + Fisher degeneracy near 0) → 0.115 asymptotic, 0.426
+  calibrated (calibration *can't* rescue a non-regular statistic). The score/Rao CD
+  assumes a regular, non-degenerate-Fisher, locally-quadratic (unimodal) log-likelihood;
+  where that fails, so does the method. (Note: the earlier §8.1 0.227 was a
+  d_x=1 zero-padding artifact, not a failure — clean run is 0.009.)
+
+**Verdict so far:** the neural-copula score CD is a **scalable, general workhorse for
+REGULAR models** — matching/approaching the exact CD-SBI floor, extending to
+no-sufficient-statistic targets and higher d — but it is **NOT universal**: multimodal /
+non-identifiable / Fisher-degenerate problems (a large part of the SBI benchmark suite)
+need a different CD construction.
+
 ## The strategic fork (for the broad discussion)
 
 The score CD is **asymptotic** (finite-sample loose, sharpenable by calibration);
