@@ -50,6 +50,9 @@ class SufficiencyRecovery:
         # recovery on the OTHER feature index isn't masked, and suppress the warning.
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", ConstantInputWarning)
+            # also suppress numpy's "All-NaN slice" if EVERY feature is constant
+            # (fully-degenerate summary): the result is still NaN → passed=False.
+            warnings.simplefilter("ignore", RuntimeWarning)
             for k in range(oracle.shape[1]):
                 name = _ORACLE_NAMES[k] if k < len(_ORACLE_NAMES) else f"coord{k}"
                 sp = np.nanmax([abs(spearmanr(oracle[:, k], feats[:, j]).statistic)
@@ -59,7 +62,7 @@ class SufficiencyRecovery:
                 row[f"spearman_{name}"] = float(sp)
                 row[f"pearson_{name}"] = float(pe)
                 spearmans.append(sp)
-        row["sufficiency_min_spearman"] = float(np.nanmin(spearmans))
+            row["sufficiency_min_spearman"] = float(np.nanmin(spearmans))
         df = pd.DataFrame([row])
         passed = bool(row["sufficiency_min_spearman"] > self.pass_threshold)
         return DiagnosticResult(self.name, value=df, passed=passed,
