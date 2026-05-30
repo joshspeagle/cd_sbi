@@ -313,11 +313,12 @@ class PivotBasedProcedure:
     """CDSBI: 1D pivot inverted via chi-square."""
 
     def __init__(self, pivot_fn: Callable, d_theta: int, theta_range: tuple = (-20.0, 20.0),
-                 encode_fn: Callable | None = None):
+                 encode_fn: Callable | None = None, flow=None):
         self.pivot_fn = pivot_fn
         self.d_theta = d_theta
         self.theta_range = theta_range
         self.encode_fn = encode_fn
+        self.flow = flow            # the trained flow, for autoregressive inversion (None if N/A)
 
     def pivot(self, theta: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
         return self.pivot_fn(theta, x)

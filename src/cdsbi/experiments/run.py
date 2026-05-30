@@ -247,7 +247,12 @@ def _build_method(cfg: DictConfig, simulator) -> Any:
             classifier_depth=m.classifier_depth,
             quantile_hidden=m.quantile_hidden,
             quantile_depth=m.quantile_depth,
-            marginal_grid_n=int(OmegaConf.select(m, "marginal_grid_n", default=64)),
+            # `marginal_n` is the BFF Monte-Carlo budget; `marginal_grid_n` is the
+            # deprecated alias (still honored for older configs/sweeps).
+            marginal_n=OmegaConf.select(
+                m, "marginal_n",
+                default=int(OmegaConf.select(m, "marginal_grid_n", default=64)),
+            ),
             device=cfg.device,
         )
     raise ValueError(f"Unknown method: {m.name}")
@@ -336,6 +341,7 @@ def _run_diagnostics(cfg: DictConfig, trained, simulator, eval_data, rd: RunDir)
     from cdsbi.diagnostics.joint_mahalanobis import JointMahalanobis
     from cdsbi.diagnostics.marginal_cd_recovery import MarginalCDRecovery
     from cdsbi.diagnostics.marginal_pit import MarginalPIT
+    from cdsbi.diagnostics.multivariate_marginal_cd import MultivariateMarginalCDRecovery
     from cdsbi.diagnostics.pivot_rmse import PivotRMSE
     from cdsbi.diagnostics.set_size import SetSize
     from cdsbi.diagnostics.sufficiency_recovery import SufficiencyRecovery
@@ -382,6 +388,9 @@ def _run_diagnostics(cfg: DictConfig, trained, simulator, eval_data, rd: RunDir)
         )),
         ("sufficiency_recovery", SufficiencyRecovery(
             n_eval=int(OmegaConf.select(cfg, "experiment.n_eval", default=4000)))),
+        ("multivariate_marginal_cd", MultivariateMarginalCDRecovery(
+            theta_0_grid=list(cfg.experiment.eval_thetas_interior),
+            n_per_theta=int(cfg.experiment.n_eval_per_theta))),
         ("floor_integrity", FloorIntegrity()),
     ]
     # F6: precompute r = procedure.pivot(theta, x) once for pivot-based
@@ -503,6 +512,12 @@ def _write_index_row(cfg: DictConfig, rd: RunDir, trained, diag_results, config_
         sr_df = pd.read_parquet(sr_path)
         if "sufficiency_min_spearman" in sr_df.columns and len(sr_df):
             row["sufficiency_min_spearman"] = float(sr_df["sufficiency_min_spearman"].iloc[0])
+    mmcd = rd.path / "diagnostics" / "multivariate_marginal_cd.parquet"
+    if mmcd.exists():
+        mdf = pd.read_parquet(mmcd)
+        for col in ("cov1_ks", "cov2_ks", "cov3_ks", "mu_hotelling_ks"):
+            if col in mdf.columns and len(mdf):
+                row[f"mmcd_{col}"] = float(mdf[col].mean())
     fi_path = rd.path / "diagnostics" / "floor_integrity.parquet"
     if fi_path.exists():
         fi_df = pd.read_parquet(fi_path)

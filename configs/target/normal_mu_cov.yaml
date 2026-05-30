@@ -1,0 +1,3 @@
+name: normal_mu_cov
+_target_: cdsbi.simulators.normal_bivariate_unknown_cov.NormalBivariateUnknownCov
+n_iid: 10

@@ -75,6 +75,17 @@ def paper_table_8_4(df: pd.DataFrame) -> pd.DataFrame:
     return agg
 
 
+def paper_table_mu_cov(df: pd.DataFrame) -> pd.DataFrame:
+    """Seed-averaged (μ,Σ) Stage-A table."""
+    metrics = ["coverage_error_max", "pivot_rmse", "joint_mahal_ks",
+               "mmcd_cov1_ks", "mmcd_cov2_ks", "mmcd_cov3_ks", "mmcd_mu_hotelling_ks",
+               "floor_margin", "final_loss", "actual_params_total"]
+    metrics = [m for m in metrics if m in df.columns]
+    agg = df.groupby(["method", "budget_name"])[metrics].agg(["mean", "std"])
+    agg.columns = [f"{m}_{stat}" for m, stat in agg.columns]
+    return agg
+
+
 def paper_table_mu_sigma(df: pd.DataFrame) -> pd.DataFrame:
     """Seed-averaged (μ,σ²) Stage-A table: coverage, pivot RMSE, joint Mahalanobis,
     marginal-CD recovery (σ² χ² + μ t), entropy-floor loss."""

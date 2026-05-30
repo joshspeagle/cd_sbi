@@ -80,6 +80,75 @@ def test_lf2i_bff_test_stat_wilks_direction_at_oracle_classifier():
     )
 
 
+def test_lf2i_bff_marginal_is_mc_from_proposal_and_d_aware():
+    """The BFF marginal E_{θ~π}[∏ O(X;θ)] (Dalmasso et al. Eq. 10) must be a
+    Monte-Carlo average over draws from the PROPOSAL (the simulator's prior) with a
+    d-aware sample count — NOT a fixed box-uniform grid. Regression for the d-blind
+    N=64 marginal grid that broke high-d coverage (audit 2026-05-30): the faithful
+    estimator samples θ_b ~ π via simulator.sample, and the count floors at 128·d."""
+    seed_everything(0)
+    sim = LocationNormal1D()
+    requested_ns = []
+    orig_sample = sim.sample
+
+    def spy(n, rng):
+        requested_ns.append(int(n))
+        return orig_sample(n, rng)
+
+    sim.sample = spy
+    MN = 137  # distinctive prime so the marginal draw is identifiable among sample() calls
+    runner = LF2IBFFRunner(
+        classifier_hidden=8, classifier_depth=2, quantile_hidden=8, quantile_depth=2,
+        marginal_n=MN,
+    )
+    runner.fit(
+        simulator=sim,
+        config={
+            "lr": 1e-3, "batch_size": 32, "n_steps": 5,
+            "n_train_stat": 100, "n_train_quantile": 50,
+            "alpha_grid": [0.9], "fresh_batch": False,
+        },
+        seed=0,
+    )
+    expected = max(MN, 128 * int(sim.d_theta))   # d-aware floor; d=1 → 137
+    assert expected in requested_ns, (
+        f"BFF marginal must draw {expected} samples from the proposal; "
+        f"simulator.sample() was called with {sorted(set(requested_ns))}"
+    )
+
+
+def test_lf2i_bff_marginal_n_back_compat_alias():
+    """`marginal_grid_n` stays accepted as a deprecated alias for `marginal_n`;
+    an explicit `marginal_n` wins."""
+    assert LF2IBFFRunner(marginal_grid_n=99).marginal_n == 99
+    assert LF2IBFFRunner(marginal_n=77, marginal_grid_n=99).marginal_n == 77
+
+
+def test_lf2i_bff_test_stat_deterministic():
+    """The BFF statistic must be DETERMINISTIC given (θ, X) — the marginal MC draws
+    are fixed at fit time, not re-sampled per call (else calibration is miscalibrated
+    against a noisy statistic)."""
+    seed_everything(0)
+    sim = LocationNormal1D()
+    runner = LF2IBFFRunner(
+        classifier_hidden=8, classifier_depth=2, quantile_hidden=8, quantile_depth=2,
+        marginal_n=64,
+    )
+    trained = runner.fit(
+        simulator=sim,
+        config={
+            "lr": 1e-3, "batch_size": 32, "n_steps": 5,
+            "n_train_stat": 100, "n_train_quantile": 50,
+            "alpha_grid": [0.9], "fresh_batch": False,
+        },
+        seed=0,
+    )
+    x = torch.tensor([[0.3]])
+    t1 = float(trained.procedure.test_statistic(torch.tensor([[0.0]]), x).item())
+    t2 = float(trained.procedure.test_statistic(torch.tensor([[0.0]]), x).item())
+    assert t1 == t2, f"BFF statistic not deterministic: {t1} vs {t2}"
+
+
 def test_lf2i_bff_smoke_d2(seed):
     """BFF runs end-to-end on LocationGaussian2D_iid; produces a finite-size 2D set.
 

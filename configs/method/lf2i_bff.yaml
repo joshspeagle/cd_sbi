@@ -4,4 +4,8 @@ classifier_hidden: ${budget.classifier_hidden}
 classifier_depth: 2
 quantile_hidden: ${budget.quantile_hidden}
 quantile_depth: 2
-marginal_grid_n: 64
+# BFF marginal Monte-Carlo budget: E_{θ~π}[∏ O(X;θ)] estimated from `marginal_n`
+# draws of the proposal (the simulator's prior), floored at 128·d_theta. NOT a grid
+# resolution — cost is O(N), dimension-scalable. Bump for higher d (≳512 @ d=2,
+# ≳2048 @ d=5). `marginal_grid_n` remains a deprecated alias.
+marginal_n: 64

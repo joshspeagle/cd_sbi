@@ -166,7 +166,7 @@ class CDSBIRunner(Runner):
             return feats
 
         procedure = PivotBasedProcedure(pivot_fn=pivot_fn, d_theta=simulator.d_theta,
-                                        encode_fn=encode_fn)
+                                        encode_fn=encode_fn, flow=self.flow)
 
         # Gather arch metadata including new knobs
         flow_obj = self.flow

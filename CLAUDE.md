@@ -350,9 +350,81 @@ documented contrast, NOT executed as a calibrating arm).
     arm). `cd_sbi` method configs select the loss via `method.loss ∈
     {nfmle,energy,exact_density}` (run.py `_build_method`).
 
-**Next milestone:** M3.3′ (Stage-B verdict: cross-arm table + I-B contrast
-writeup + manuscript note). Then the v-track roadmap: v4 (SBI benchmark — Two
-Moons, SLCP, Gaussian Mixture), v5 (§3.7 alt-loss — the II-A finding feeds this),
-v6 (synthetic high-d), v7 (real-data astronomy), v8 (image/sequence). Open
-Stage-B threads: permutation-equivariant bijection (generalization), whether a
-power/sharpness term rescues II-A. See spec §12 for the full roadmap.
+## Bivariate-normal unknown-(μ, Σ) — d=5 Stage-A landed (N1 + N2)
+
+The next generalization: `NormalBivariateUnknownCov` (θ = (ℓ₁₁, ℓ₂₂, L₂₁, μ₁,
+μ₂) in **log-Cholesky** coords, `Σ=LLᵀ`, `n_iid=10`, X ∈ ℝ²⁰, `d_theta=5`,
+`p=2`). Branch `feat/musigma-m3-verdict`. Spec
+`docs/superpowers/specs/2026-05-30-cd-sbi-bivariate-normal-mu-cov-design.md`;
+plans `…/plans/2026-05-30-cd-sbi-mu-cov-{n1-stage-a-core,n2-diagnostics-
+replication}.md`; **verdict `…/specs/2026-05-30-cd-sbi-mu-cov-n2-verdict.md`**.
+
+- **The enabler — Wishart Bartlett decomposition** (multivariate analog of the
+  1-D χ²/Student-t): scatter `A=Σ(Xᵢ−X̄)(Xᵢ−X̄)ᵀ ~ Wishart₂(n−1,Σ)`, ⫫ X̄ (Basu);
+  with `A=DDᵀ`, `Σ=CCᵀ` (Cholesky), the factor `T=C⁻¹D` has independent entries
+  `T₁₁²~χ²_{n−1}`, `T₂₂²~χ²_{n−2}`, `T₂₁~N(0,1)`. Inherently triangular → drops
+  into the existing **`SingleIndexMonotoneFlow` with NO architecture change**.
+  Closed-form `r*` (Bartlett): `r₁=Φ⁻¹(1−F_{χ²_{n−1}}(T₁₁²))`,
+  `r₂=Φ⁻¹(1−F_{χ²_{n−2}}(T₂₂²))`, `r₃=T₂₁`, `r₄=√n(μ₁−X̄₁)/C₁₁`,
+  `r₅=√n(−(L₂₁/(C₁₁C₂₂))(μ₁−X̄₁)+(μ₂−X̄₂)/C₂₂)` — validated N(0,I₅) at truth
+  (KS≤0.011). KR ordering diagonals→off-diag→mean; `theta_signs=(+,+,−,+,+)`,
+  `feat_signs=(−,−,+,−,−)`; features `(log D₁₁, log D₂₂, D₂₁, X̄₁, X̄₂)`.
+- **N1 (Stage-A core).** `normal_bivariate_unknown_cov.py` (simulator + `r_star`
+  + `oracle_summary` + `entropy_lower_bound`≈2.03 + `data_entropy_lower_bound` +
+  `analytic_marginal_cd_pit`), `BartlettSummaryConditioner`,
+  `flows/invert.py::autoregressive_invert` (per-coord bisection, fwd∘inv 1e-6).
+  Recovery smoke RMSE 0.10.
+- **N2 (Stage-A diagnostics + replication).** `MultivariateMarginalCDRecovery`
+  (3 covariance direct PITs + **joint Hotelling-T² μ-marginal** = multivariate
+  analog of the Student-t check, recovered via `autoregressive_invert`),
+  `PivotBasedProcedure.flow` (set by `CDSBIRunner.fit`), 16-pt LHS coverage grid,
+  `paper_table_mu_cov`. **Verdict: the framework generalizes to d=5** — 4/5 pivot
+  coords calibrate to the noise floor; aggregate covariance χ² / joint Hotelling /
+  joint Mahalanobis χ²₅ / entropy-floor all hold.
+- **Documented limit (μ₂).** The doubly-cross-coupled mean coord is **mildly**
+  miscalibrated at extreme θ₀ (per-coord PIT KS up to ~0.10; std ~0.9–1.3;
+  central coverage fine) — a **ctx-MLP expressivity limit on the affine index
+  z₅**, NOT finite-sample / convergence / capacity / G-curvature / w-asymmetry
+  (all ruled out; identity-G trades scale-for-shape, no clean win). Accepted and
+  documented; `test_replicate_mu_cov.py` pins it as a regression (KS<0.16),
+  precedent `test_trained_folding.py`. RMSE-vs-`r*` is only a loose recovery
+  sanity (`r*` is one specific calibrated pivot; calibration only needs M).
+
+- **N3 (Stage-B learned summary) — FINDINGS milestone, not a build.** Verdict
+  `…/specs/2026-05-30-cd-sbi-mu-cov-n3-stage-b-verdict.md`; evidence prototypes
+  `…/evidence/2026-05-30-n3-stage-b-summary/`. The information-preserving I-A arm
+  (the 1-D winner) does **NOT** scale to the 2-D covariance: generic *learned*
+  invertible summaries route the linear means but **not the quadratic (co)variance**
+  sufficient stats (7 variants; best = 4/5, comp-2 variance A₂₂ never routes;
+  canonical corr `[.999 .999 .958 .919 .16]`). **Adding flexibility makes it worse**
+  (Glow 1×1 mixing, permutation-equivariance, asinh all → lazier 2/5). Calibration
+  passes throughout (χ²₅ ≈0.03) → *valid but inefficient* (calibration≠sufficiency,
+  sharpest yet). A bespoke **Helmert+polar** structure-informed summary recovers all
+  5 + calibrates but only by hard-coding the Bartlett decomposition — **existence
+  proof, not a method** (not productionised). **LF2I-BFF baseline at d=5 scored
+  coverage_err 0.20–0.39 from raw X — confirmed an artifact of OUR implementation, NOT
+  LF2I** (recipe research pass + code audit, 2026-05-30): `lf2i_bff.py:71–87,114`
+  estimates the BFF marginal with a **fixed N=64 sample set, frozen + blind to d** (d=1
+  exact linspace; d=2 ≈8/axis degraded-but-real; d=5 ≈2.3/axis = noise). The recipe
+  (Eq. 10) needs **no grid** — the marginal is `E_{θ~π}` (MC over proposal draws),
+  calibration is grid-free quantile regression. **§8.1–8.4 numbers NOT invalidated**
+  (d=1 exact; d=2 genuine N=64 measurement). **Fix LANDED** (`lf2i_bff.py`): BFF
+  marginal now MC over true-prior draws (`simulator.sample`), d-aware `max(marginal_n,
+  128·d)`, config `marginal_grid_n→marginal_n` (alias kept), +3 TDD regression tests.
+  **Fair d=5 LF2I-BFF (marginal_n=2048):** coverage_err 0.091 (3-pt) / 0.189 (LHS) vs
+  0.393/0.201 unfixed — central coverage repaired; residual ~0.19 at extreme θ₀ is a
+  classifier/quantile-head budget matter, ~7× the oracle. Stage-A (oracle Bartlett)
+  stands; Stage-B learned-summary is an **open problem**.
+
+**Strategic reframe (user, 2026-05-30 — [[scalable-neural-copula-strategy]]):** bespoke
+per-problem summaries are dead ends; the target must **scale to high-d & arbitrary
+distributions**, framed as a **neural copula** (the pivot `r(θ;X)~N(0,I)` IS a
+normal-scores/Gaussian-copula transform). Likely the **fixed-dim summary bottleneck is
+itself the unscalable step**. A dedicated broad strategy brainstorm is **deferred until
+the current experiments are done** (user's call).
+
+**Next milestone:** the scalable neural-copula strategy discussion (deferred), then the
+v-track roadmap: v4 (SBI benchmark — Two Moons, SLCP, Gaussian Mixture), v5 (§3.7
+alt-loss — the II-A finding feeds this), v6 (synthetic high-d), v7 (real-data
+astronomy), v8 (image/sequence). Open threads: whether a power/sharpness term rescues
+II-A; a richer ctx-conditioned index for cross-coupled coords (the μ₂ refinement).
