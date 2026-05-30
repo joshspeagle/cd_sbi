@@ -40,10 +40,78 @@ NEW
   tests/intensive/test_replicate_mu_sigma_stage_b_energy.py
 
 MODIFY
+  src/cdsbi/conditioners/deep_sets.py               # add standardize: bool flag (Task 0 — see note)
+  configs/conditioner/deep_sets.yaml                # standardize: true (preserve NF-MLE default)
   src/cdsbi/experiments/run.py                      # _build_method: energy-loss selector; _fit_config: group passthrough
+  tests/unit/test_deep_sets_conditioner.py           # standardize=False test
 ```
 
-No change to `DeepSetsConditioner`, `SingleIndexMonotoneFlow`, the simulator, or the M3.0 diagnostics.
+**Dependency note:** Task 0 adds a `standardize` flag to `DeepSetsConditioner`. This flag was originally slated for the I-B plan (`dc0c08e`, demoted/not executed), so it does NOT exist on the branch — II-A must add it. No change to `SingleIndexMonotoneFlow`, the simulator, or the M3.0 diagnostics.
+
+---
+
+## Task 0: `DeepSetsConditioner` `standardize` flag (prerequisite)
+
+**Files:**
+- Modify: `src/cdsbi/conditioners/deep_sets.py`
+- Modify: `configs/conditioner/deep_sets.yaml`
+- Test: `tests/unit/test_deep_sets_conditioner.py` (append)
+
+READ `src/cdsbi/conditioners/deep_sets.py` — `__init__(self, n_iid, d_out=2, hidden=64, depth=2, momentum=0.1)` and the `encode` running-standardization block (applied unconditionally). The energy loss has no cheat channel, so II-A wants `standardize=False` (raw summary outputs, the flow's affine combiner + co-adaptation handle scale). Add the flag with default `True` to preserve the existing end-to-end NF-MLE behavior.
+
+- [ ] **Step 1: Write the failing test (append)**
+
+```python
+def test_standardize_false_passes_raw_rho_output():
+    import torch
+    from cdsbi.conditioners.deep_sets import DeepSetsConditioner
+    torch.manual_seed(0)
+    cond = DeepSetsConditioner(n_iid=10, d_out=2, hidden=16, standardize=False).eval()
+    x = torch.randn(64, 10)
+    feats, log_det = cond.encode(x)
+    assert feats.shape == (64, 2) and torch.allclose(log_det, torch.zeros(64))
+    n, m = x.shape
+    h = cond.phi(x.reshape(n * m, 1)).reshape(n, m, -1).mean(dim=1)
+    raw = cond.rho(h)
+    assert torch.allclose(feats, raw, atol=1e-6)   # no standardization applied
+```
+
+- [ ] **Step 2: Run to verify failure**
+
+Run: `pytest tests/unit/test_deep_sets_conditioner.py::test_standardize_false_passes_raw_rho_output -v`
+Expected: FAIL (`standardize` is not a ctor arg → `TypeError: unexpected keyword argument 'standardize'`).
+
+- [ ] **Step 3: Implement**
+
+Add `standardize: bool = True` to `__init__` (store `self.standardize = standardize`; keep the `running_mean`/`running_var` buffers registered unconditionally so `state_dict` is stable). Guard the standardization block in `encode`:
+```python
+        feats = self.rho(h)                                              # (n, d_out)
+        if self.standardize:
+            if self.training:
+                batch_mean = feats.mean(dim=0).detach()
+                batch_var = feats.var(dim=0, unbiased=False).detach()
+                self.running_mean.mul_(1 - self.momentum).add_(self.momentum * batch_mean)
+                self.running_var.mul_(1 - self.momentum).add_(self.momentum * batch_var)
+                mean, var = batch_mean, batch_var
+            else:
+                mean, var = self.running_mean, self.running_var
+            feats = (feats - mean) / torch.sqrt(var + 1e-5)
+        log_det = torch.zeros(n, dtype=x.dtype, device=x.device)
+        return feats, log_det
+```
+Add `standardize: true` to `configs/conditioner/deep_sets.yaml` (preserves the default for any NF-MLE consumer).
+
+- [ ] **Step 4: Run to verify pass**
+
+Run: `pytest tests/unit/test_deep_sets_conditioner.py -v`
+Expected: all pass (existing + 1 new). (The existing `standardize`-on tests are unaffected since the default is `True`.)
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/cdsbi/conditioners/deep_sets.py configs/conditioner/deep_sets.yaml tests/unit/test_deep_sets_conditioner.py
+git commit -m "feat(cond): DeepSetsConditioner standardize flag (off for the energy arm; default preserves NF-MLE)"
+```
 
 ---
 
@@ -155,7 +223,11 @@ class EnergyCalibrationLoss(Loss):
         # cross term: 2 * mean_{i,j} ||r_i - z_j||  per group
         cross = torch.cdist(r_groups, z.unsqueeze(0).expand(B, -1, -1))   # (B, m, M)
         term1 = 2.0 * cross.mean(dim=(1, 2))                              # (B,)
-        # within term: mean_{i,i'} ||r_i - r_i'||  per group
+        # within term: mean_{i,i'} ||r_i - r_i'||  per group. The m zero-diagonal
+        # self-distances add 0 and are kept (mean over m² not m(m−1)); this only
+        # rescales the repulsion by the constant (m−1)/m, which cancels in the
+        # gradient direction and does not move the N(0,I) minimizer. cdist's
+        # zero-diagonal yields finite grads on modern torch (no eps needed).
         within = torch.cdist(r_groups, r_groups)                          # (B, m, m)
         term2 = within.mean(dim=(1, 2))                                   # (B,)
         return (term1 - term2).mean()
@@ -500,6 +572,8 @@ git commit -m "config: cd_sbi_energy method + mu_sigma_stage_b_energy experiment
 - Create: `tests/intensive/test_replicate_mu_sigma_stage_b_energy.py`
 
 The Arm II-A verdict: end-to-end co-adaptation under the energy loss makes the learned summary (a) recover sufficiency on **both** coords (σ² included — the I-B casualty), and (b) calibrate near the Stage-A control. (No floor check — `FloorIntegrity` no-ops for the energy loss.)
+
+NOTE: this test constructs the runner directly with an **explicit** `config` (n_steps 8000, lr 2e-3, group sizes) — it does NOT go through `run.py`/the budget recipe, so the verdict runs at the intended recipe regardless of `budget=medium`'s `n_steps=4000`. (`EnergyCDSBIRunner.fit` reads only `lr`, `n_steps`, `grad_clip_norm`, `group` from `config`; the other `_recipe_dict` keys are ignored — fine for the energy arm, which hardcodes Adam + no scheduler.)
 
 - [ ] **Step 1: Write the test**
 
