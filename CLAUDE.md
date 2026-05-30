@@ -40,7 +40,7 @@ is the working one. The conda `pdflatex` at
 on this machine — its perl-based `mktexfmt` can't find
 `mktexlsr.pl` and bails before opening `pdflatex.fmt`.
 
-**Python codebase** (v0 + v1 + v2 + v3 + unknown-(μ,σ²) Stage A landed; ~289 fast tests + 5 intensive replication tests + opt-in (R2) ablation suite):
+**Python codebase** (v0 + v1 + v2 + v3 + unknown-(μ,σ²) Stage A + Stage B bake-off landed; ~318 fast tests + intensive replication/verdict tests + opt-in (R2) ablation suite):
 
 ```bash
 pip install -e ".[dev]"               # install cdsbi package + dev deps
@@ -73,7 +73,7 @@ python tools/regen_figure_data.py                          # re-run CDSBI figure
 - `reviews/round{1,2,3}/` — per-round critic reports and audit trail.
 - `docs/superpowers/specs/` — design specs.
 - `docs/superpowers/plans/` — implementation plans (v0, v1, v2, v3 plans live here; v4 plan next).
-- `src/cdsbi/` — Python package (v0 + v1 + v2 + v3 + (μ,σ²) Stage A landed). Six core layers + `confidence_set/`, `experiments/`, `analysis/`, `reproducibility/`. v3 added `DoublyMonotoneUMNN`, `JointUMNNFlow`, `JointUMNN1DFlow`, `MLPConditioner`, `ReducedSimulator`. (μ,σ²) Stage A added `NormalUnknownMeanVar`, `SingleIndexMonotoneFlow`, `SufficientStatConditioner`, `MarginalCDRecovery`.
+- `src/cdsbi/` — Python package (v0 + v1 + v2 + v3 + (μ,σ²) Stage A landed). Six core layers + `confidence_set/`, `experiments/`, `analysis/`, `reproducibility/`. v3 added `DoublyMonotoneUMNN`, `JointUMNNFlow`, `JointUMNN1DFlow`, `MLPConditioner`, `ReducedSimulator`. (μ,σ²) Stage A added `NormalUnknownMeanVar`, `SingleIndexMonotoneFlow`, `SufficientStatConditioner`, `MarginalCDRecovery`. Stage B added `DeepSetsConditioner`, `EnergyCalibrationLoss`+`EnergyCDSBIRunner`, `AffineCouplingBijection`+`InvertibleSummaryConditioner`+`ExactDensityCDSBIRunner`, `SufficiencyRecovery`+`FloorIntegrity`.
 - `configs/` — Hydra config groups (target / flow / conditioner / method / training / budget / experiment).
 - `tests/` — `unit/`, `integration/`, `diagnostics/`, opt-in `intensive/` (4 replication tests: §8.1, §8.2, §8.3, §8.4) and opt-in `ablation/` (3 tests: safety-check, trained-folding, 1D mechanism).
 - `src/cdsbi/analysis/figures/` — visualization suite (F0 infra + F1 panels + F2 empirical + F3 conceptual). Manifest-driven (`configs/figures/manifest.yaml`); builders are pure `render(spec) -> Figure` composing F1 panels; the render CLI owns all disk IO. matplotlib/Agg via `style.apply_style()`.
@@ -290,14 +290,16 @@ region of the prior.
   (apples-to-apples 5-method × 4-budget × 5-seed sweep on `T`) +
   `outputs/8_4_ablation/2026-05-27_23-55-59/` (R1+R2 vs R1-only sweep).
 
-## Unknown-(μ, σ²) Gaussian — Stage A landed (M0 + M1)
+## Unknown-(μ, σ²) Gaussian — Stage A + Stage B bake-off landed (M0–M3.2′)
 
 A separate research track (the first target with a **scale/nuisance**
 parameter): `NormalUnknownMeanVar` (θ = (log σ, μ), `n_iid=10` replicates per
-observation X ∈ ℝ¹⁰, `d_theta=2`). Spec:
+observation X ∈ ℝ¹⁰, `d_theta=2`). Specs:
 `docs/superpowers/specs/2026-05-29-cd-sbi-unknown-mean-variance-design.md`
-(Stage A = oracle summary; Stage B = learned summary, M2+). Plans:
-`docs/superpowers/plans/2026-05-29-cd-sbi-mu-sigma-m{0,1}-*.md`.
+(Stage A) + `…-stage-b-device-bakeoff-design.md` (Stage B, co-adaptation
+reframing). Plans: `docs/superpowers/plans/2026-05-29-cd-sbi-{mu-sigma-m0,
+mu-sigma-m1,m3-0,m3-1p,m3-2p}-*.md` (the I-B plan `…-m3-1-arm-ib-…` is a
+documented contrast, NOT executed as a calibrating arm).
 
 - **M0 (Stage-A core).** Key finding: a **doubly-monotone** flow (∂r/∂θ>0 AND
   ∂r/∂feat>0) **cannot** represent a scale parameter — `r_σ` must increase in
@@ -321,11 +323,36 @@ observation X ∈ ℝ¹⁰, `d_theta=2`). Spec:
 - **Flow dispatch:** `mu_sigma_replication.yaml` sets `method.flow=
   single_index_monotone` itself (the cb1e08e guard) so the experiment is
   self-contained.
+- **Stage B — learned summary device bake-off (M2→M3.2′).** Question: can a
+  *learned* `s_φ(X):ℝ¹⁰→ℝ²` calibrate in the pivot machinery? **σ (scale) is the
+  hard direction; the objective decides if it survives** (bake-off, judged on the
+  M3.0 harness — `SufficiencyRecovery` Spearman + coverage/marginal-CD KS +
+  `FloorIntegrity`):
+  - **M2 naive end-to-end NF-MLE → CHEATS** (`DeepSetsConditioner`): collapses
+    σ-info, loss −5.3 below floor 0.92. Captured as `tests/integration/
+    test_mu_sigma_stage_b_smoke.py` (regression).
+  - **Arm I-B (two-stage freeze, predict-θ) → WARPS** (`pretrain_summary` +
+    `TwoStageCDSBIRunner`, plan only): σ² recovered (0.97) but shrinkage → fixed
+    affine pivot miscalibrates σ. Documented contrast, not executed.
+  - **Arm II-A (end-to-end `EnergyCalibrationLoss`, grouped-by-θ₀;
+    `EnergyCDSBIRunner`) → COLLAPSES σ:** energy score hits its floor (1.83≈1.77)
+    with σ²-Spearman **0.014**. KEY FINDING: **calibration ≠ informativeness** —
+    per-θ₀ marginal calibration is satisfiable by a μ-only summary.
+  - **Arm I-A (invertible exact density; `AffineCouplingBijection` +
+    `InvertibleSummaryConditioner` + `ExactDensityCDSBIRunner`) → RECOVERS σ:**
+    σ²-Spearman **0.980**, coverage KS ≤ 0.077, loss 14.47 > H(X|θ)=13.66 (no
+    cheat). **Verdict: information-preservation (exact change-of-variables) is
+    required; calibration-only collapses scale.** New harness:
+    `SufficiencyRecovery`, arm-aware `FloorIntegrity` (loss→floor map:
+    NFMLE→entropy_lower_bound, ExactDensity→data_entropy_lower_bound),
+    `procedure.encode_fn` + `simulator.{oracle_summary,data_entropy_lower_bound}`.
+  - **`DeepSetsConditioner.standardize`** flag (default True; off for the energy
+    arm). `cd_sbi` method configs select the loss via `method.loss ∈
+    {nfmle,energy,exact_density}` (run.py `_build_method`).
 
-**Next milestone:** M2 (Stage-B — learned DeepSets summary `s_φ(X):ℝ¹⁰→ℝ²` +
-`fit()` optimizer extension for conditioner params; the "can a learned non-square
-summary live in the NF-MLE calibration machinery" investigation). Then M3
-(Stage-B cheat/regularity investigation), M4 (optional baselines + manuscript).
-The separate v-track roadmap: v4 (SBI benchmark — Two Moons, SLCP, Gaussian
-Mixture), v5 (§3.7 alt-loss), v6 (synthetic high-d), v7 (real-data astronomy),
-v8 (image/sequence). See spec §12 for the full roadmap.
+**Next milestone:** M3.3′ (Stage-B verdict: cross-arm table + I-B contrast
+writeup + manuscript note). Then the v-track roadmap: v4 (SBI benchmark — Two
+Moons, SLCP, Gaussian Mixture), v5 (§3.7 alt-loss — the II-A finding feeds this),
+v6 (synthetic high-d), v7 (real-data astronomy), v8 (image/sequence). Open
+Stage-B threads: permutation-equivariant bijection (generalization), whether a
+power/sharpness term rescues II-A. See spec §12 for the full roadmap.
