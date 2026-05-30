@@ -30,20 +30,27 @@ class CDSBIRunner(Runner):
         # JointUMNNFlow, JointUMNN1DFlow) can build the second-order graph via
         # create_graph=self.training during training.
         self.flow.train()
+        cond_is_module = isinstance(self.conditioner, torch.nn.Module)
+        if cond_is_module:
+            self.conditioner.to(self.device)
+            self.conditioner.train()
 
         # --- Optimizer factory ---
         opt_name = config.get("optimizer", "adam")
         lr = config["lr"]
         weight_decay = config.get("weight_decay", 0.0)
         betas = tuple(config.get("betas", [0.9, 0.999]))
+        trainable_params = list(self.flow.parameters())
+        if cond_is_module:
+            trainable_params += list(self.conditioner.parameters())
         if opt_name == "adam":
-            opt = torch.optim.Adam(self.flow.parameters(), lr=lr, betas=betas)
+            opt = torch.optim.Adam(trainable_params, lr=lr, betas=betas)
         elif opt_name == "adamw":
-            opt = torch.optim.AdamW(self.flow.parameters(), lr=lr, betas=betas,
+            opt = torch.optim.AdamW(trainable_params, lr=lr, betas=betas,
                                     weight_decay=weight_decay)
         elif opt_name == "sgd":
             momentum = config.get("momentum", 0.9)
-            opt = torch.optim.SGD(self.flow.parameters(), lr=lr,
+            opt = torch.optim.SGD(trainable_params, lr=lr,
                                   momentum=momentum, weight_decay=weight_decay)
         else:
             raise ValueError(f"Unknown optimizer: {opt_name!r}")
@@ -125,7 +132,7 @@ class CDSBIRunner(Runner):
             loss_val = self.loss(r=r, log_det_jac_input=log_det_total)
             opt.zero_grad()
             loss_val.backward()
-            torch.nn.utils.clip_grad_norm_(self.flow.parameters(), max_norm=grad_clip)
+            torch.nn.utils.clip_grad_norm_(trainable_params, max_norm=grad_clip)
             opt.step()
             if scheduler is not None:
                 scheduler.step()
@@ -137,6 +144,8 @@ class CDSBIRunner(Runner):
         # from building autograd graphs during diagnostic forward calls (no-op for
         # DoublyMonotoneUMNN which doesn't use self.training in its forward).
         self.flow.eval()
+        if cond_is_module:
+            self.conditioner.eval()
 
         # Build PivotBasedProcedure with a closure over the trained flow + conditioner
         flow = self.flow
@@ -150,7 +159,14 @@ class CDSBIRunner(Runner):
             r, _ = flow.forward(theta, context=context)
             return r
 
-        procedure = PivotBasedProcedure(pivot_fn=pivot_fn, d_theta=simulator.d_theta)
+        def encode_fn(x: torch.Tensor) -> torch.Tensor:
+            x = x.to(device)
+            with torch.no_grad():
+                feats, _ = conditioner.encode(x)
+            return feats
+
+        procedure = PivotBasedProcedure(pivot_fn=pivot_fn, d_theta=simulator.d_theta,
+                                        encode_fn=encode_fn)
 
         # Gather arch metadata including new knobs
         flow_obj = self.flow
@@ -164,6 +180,8 @@ class CDSBIRunner(Runner):
             "lr_schedule": sched_name,
             "batching": batching,
             "grad_clip_norm": grad_clip,
+            "conditioner_class": type(self.conditioner).__name__,
+            "conditioner_params": self.conditioner.n_params(),
         }
 
         return TrainedModel(

@@ -1,0 +1,38 @@
+# @package _global_
+defaults:
+  - override /target: normal_mu_sigma
+  - override /flow: single_index_monotone
+  - override /conditioner: invertible_summary
+  - override /method: cd_sbi_exact_density
+  - override /budget: medium
+
+method:
+  flow: single_index_monotone
+
+# Pin the validated recipe so a headline run matches the intensive test. NOTE:
+# ExactDensityCDSBIRunner uses plain Adam + no scheduler (reads only
+# lr/batch_size/n_steps/n_train/fresh_batch/grad_clip_norm).
+training:
+  lr: 2e-3
+  n_steps: 8000
+  batch_size: 256
+  n_train: 10000
+  fresh_batch: false
+
+experiment:
+  name: mu_sigma_stage_b_exact
+  n_eval: 6000
+  eval_thetas_interior:
+    - [-0.69, -2.0]
+    - [-0.69,  0.0]
+    - [-0.69,  2.0]
+    - [ 0.0,  -2.0]
+    - [ 0.0,   0.0]
+    - [ 0.0,   2.0]
+    - [ 0.69, -2.0]
+    - [ 0.69,  0.0]
+    - [ 0.69,  2.0]
+  eval_thetas_edge: []
+  alpha_grid: [0.5, 0.68, 0.9, 0.95]
+  n_eval_per_theta: 2000
+  joint_mahalanobis_n_per_theta: 2000

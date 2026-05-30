@@ -1,0 +1,38 @@
+# @package _global_
+defaults:
+  - override /target: normal_mu_sigma
+  - override /flow: single_index_monotone
+  - override /conditioner: deep_sets
+  - override /method: cd_sbi_energy
+  - override /budget: medium
+
+method:
+  flow: single_index_monotone
+
+conditioner:
+  d_out: 2
+  standardize: false
+
+training:
+  group:
+    n_theta_per_batch: 32
+    group_size: 64
+    n_ref: 256
+
+experiment:
+  name: mu_sigma_stage_b_energy
+  n_eval: 6000
+  eval_thetas_interior:
+    - [-0.69, -2.0]
+    - [-0.69,  0.0]
+    - [-0.69,  2.0]
+    - [ 0.0,  -2.0]
+    - [ 0.0,   0.0]
+    - [ 0.0,   2.0]
+    - [ 0.69, -2.0]
+    - [ 0.69,  0.0]
+    - [ 0.69,  2.0]
+  eval_thetas_edge: []
+  alpha_grid: [0.5, 0.68, 0.9, 0.95]
+  n_eval_per_theta: 2000
+  joint_mahalanobis_n_per_theta: 2000

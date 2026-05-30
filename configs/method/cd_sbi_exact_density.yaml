@@ -1,0 +1,5 @@
+name: cd_sbi
+runner_class: cdsbi.methods.cd_sbi_exact_density.ExactDensityCDSBIRunner
+flow: single_index_monotone
+loss: exact_density
+allow_ablation: false

@@ -1,0 +1,5 @@
+name: cd_sbi
+runner_class: cdsbi.methods.cd_sbi_energy.EnergyCDSBIRunner
+flow: single_index_monotone
+loss: energy
+allow_ablation: false
