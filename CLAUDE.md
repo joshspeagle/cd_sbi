@@ -390,11 +390,34 @@ replication}.md`; **verdict `…/specs/2026-05-30-cd-sbi-mu-cov-n2-verdict.md`**
   precedent `test_trained_folding.py`. RMSE-vs-`r*` is only a loose recovery
   sanity (`r*` is one specific calibrated pivot; calibration only needs M).
 
-**Next milestone:** N3 — Stage-B I-A invertible learned summary `ℝ²⁰→ℝ⁵`
-(the verified information-preserving arm from the (μ,σ²) bake-off). Then the
-v-track roadmap: v4 (SBI benchmark — Two Moons, SLCP, Gaussian Mixture),
-v5 (§3.7 alt-loss — the II-A finding feeds this), v6 (synthetic high-d),
-v7 (real-data astronomy), v8 (image/sequence). Open Stage-B threads:
-permutation-equivariant bijection, whether a power/sharpness term rescues II-A,
-a richer ctx-conditioned index for cross-coupled coords (the μ₂ refinement).
-See spec §12 for the full roadmap.
+- **N3 (Stage-B learned summary) — FINDINGS milestone, not a build.** Verdict
+  `…/specs/2026-05-30-cd-sbi-mu-cov-n3-stage-b-verdict.md`; evidence prototypes
+  `…/evidence/2026-05-30-n3-stage-b-summary/`. The information-preserving I-A arm
+  (the 1-D winner) does **NOT** scale to the 2-D covariance: generic *learned*
+  invertible summaries route the linear means but **not the quadratic (co)variance**
+  sufficient stats (7 variants; best = 4/5, comp-2 variance A₂₂ never routes;
+  canonical corr `[.999 .999 .958 .919 .16]`). **Adding flexibility makes it worse**
+  (Glow 1×1 mixing, permutation-equivariance, asinh all → lazier 2/5). Calibration
+  passes throughout (χ²₅ ≈0.03) → *valid but inefficient* (calibration≠sufficiency,
+  sharpest yet). A bespoke **Helmert+polar** structure-informed summary recovers all
+  5 + calibrates but only by hard-coding the Bartlett decomposition — **existence
+  proof, not a method** (not productionised). **LF2I-BFF baseline at d=5 scored
+  coverage_err 0.20–0.39 from raw X — but likely an artifact of OUR implementation**
+  (`lf2i_bff.py` estimates the BFF marginal via a fixed uniform θ-grid, NOT the
+  recipe's grid-free MC-from-proposal; PI flagged this 2026-05-30). Under review: a
+  research pass (recipe) + impl audit were dispatched; do NOT read as "LF2I fails at
+  d=5" until those land (and the §8.1–8.4 d≤2 numbers, same grid, are re-checked).
+  Stage-A (oracle Bartlett) stands; Stage-B learned-summary is an **open problem**.
+
+**Strategic reframe (user, 2026-05-30 — [[scalable-neural-copula-strategy]]):** bespoke
+per-problem summaries are dead ends; the target must **scale to high-d & arbitrary
+distributions**, framed as a **neural copula** (the pivot `r(θ;X)~N(0,I)` IS a
+normal-scores/Gaussian-copula transform). Likely the **fixed-dim summary bottleneck is
+itself the unscalable step**. A dedicated broad strategy brainstorm is **deferred until
+the current experiments are done** (user's call).
+
+**Next milestone:** the scalable neural-copula strategy discussion (deferred), then the
+v-track roadmap: v4 (SBI benchmark — Two Moons, SLCP, Gaussian Mixture), v5 (§3.7
+alt-loss — the II-A finding feeds this), v6 (synthetic high-d), v7 (real-data
+astronomy), v8 (image/sequence). Open threads: whether a power/sharpness term rescues
+II-A; a richer ctx-conditioned index for cross-coupled coords (the μ₂ refinement).
