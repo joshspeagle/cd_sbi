@@ -81,9 +81,11 @@ class MultivariateMarginalCDRecovery:
         m = x.shape[0]
         flow = getattr(proc, "flow", None)
         if flow is not None:
-            r_samp = torch.randn(m, simulator.d_theta, dtype=x.dtype)
+            device = next(flow.parameters()).device
+            r_samp = torch.randn(m, simulator.d_theta, dtype=x.dtype, device=device)
+            feat_dev = feat.to(device)
             with torch.no_grad():
-                theta_s = autoregressive_invert(flow, r_samp, feat)
+                theta_s = autoregressive_invert(flow, r_samp, feat_dev)
             return theta_s[:, 3:5].cpu().numpy()
         # --- closed-form Bartlett fallback (oracle r*): the prototype-validated path ---
         from scipy.stats import chi2 as _chi2

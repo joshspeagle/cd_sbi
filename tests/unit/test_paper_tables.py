@@ -77,3 +77,17 @@ def test_paper_table_mu_sigma_aggregates():
     assert ("cd_sbi", "medium") in tbl.index
     assert "marginal_cd_mu_ks_mean" in tbl.columns
     assert abs(tbl.loc[("cd_sbi", "medium"), "coverage_error_max_mean"] - 0.025) < 1e-9
+
+
+def test_paper_table_mu_cov_aggregates():
+    import pandas as pd
+    from cdsbi.analysis.paper_tables import paper_table_mu_cov
+    df = pd.DataFrame([
+        {"method": "cd_sbi", "budget_name": "medium", "coverage_error_max": 0.03,
+         "pivot_rmse": 0.12, "mmcd_mu_hotelling_ks": 0.03, "final_loss": 2.0},
+        {"method": "cd_sbi", "budget_name": "medium", "coverage_error_max": 0.04,
+         "pivot_rmse": 0.14, "mmcd_mu_hotelling_ks": 0.04, "final_loss": 2.1},
+    ])
+    tbl = paper_table_mu_cov(df)
+    assert ("cd_sbi", "medium") in tbl.index
+    assert "mmcd_mu_hotelling_ks_mean" in tbl.columns
