@@ -218,6 +218,8 @@ def _build_method(cfg: DictConfig, simulator) -> Any:
         if loss_name == "energy":
             from cdsbi.losses.energy_calibration import EnergyCalibrationLoss
             loss_obj = EnergyCalibrationLoss()
+        elif loss_name == "exact_density":
+            loss_obj = None          # ExactDensityCDSBIRunner computes the NLL itself
         else:
             loss_obj = NFMLELoss()
         return _instantiate(
