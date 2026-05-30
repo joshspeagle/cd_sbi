@@ -29,3 +29,35 @@ def test_signs():
     sim = NormalBivariateUnknownCov()
     assert tuple(sim.theta_signs) == (1.0, 1.0, -1.0, 1.0, 1.0)
     assert tuple(sim.feat_signs) == (-1.0, -1.0, 1.0, -1.0, -1.0)
+
+
+def test_r_star_is_standard_normal_at_truth():
+    import numpy as np
+    from scipy.stats import kstest
+    from cdsbi.simulators.normal_bivariate_unknown_cov import NormalBivariateUnknownCov
+    sim = NormalBivariateUnknownCov()
+    rng = np.random.default_rng(3)
+    theta0 = np.array([0.3, -0.2, 0.6, 0.5, -1.0])
+    x = sim.sample_x_given_theta(theta0, 8000, rng)
+    theta = torch.tensor(theta0, dtype=torch.float32).expand(8000, 5)
+    r = sim.r_star(theta, x).numpy()
+    assert r.shape == (8000, 5)
+    for j in range(5):
+        assert abs(r[:, j].mean()) < 0.06, f"coord {j} mean {r[:, j].mean():.3f}"
+        assert abs(r[:, j].std() - 1.0) < 0.06, f"coord {j} std {r[:, j].std():.3f}"
+        assert kstest(r[:, j], "norm").statistic < 0.04, f"coord {j} KS"
+    corr = np.corrcoef(r.T)
+    assert np.abs(corr - np.eye(5))[~np.eye(5, dtype=bool)].max() < 0.05
+
+
+def test_oracle_summary_shape_and_data_entropy():
+    import numpy as np, math
+    from cdsbi.simulators.normal_bivariate_unknown_cov import NormalBivariateUnknownCov
+    sim = NormalBivariateUnknownCov()
+    x = sim.sample_x_given_theta((0.0, 0.0, 0.0, 0.0, 0.0), 32, np.random.default_rng(0))
+    feats = sim.oracle_summary(x)
+    assert feats.shape == (32, 5)
+    H = sim.data_entropy_lower_bound()
+    mid = 0.5 * (sim.log_chol_range[0] + sim.log_chol_range[1])
+    expected = sim.n_iid * (0.5 * sim.p * (1 + math.log(2 * math.pi)) + 2 * mid)
+    assert abs(H - expected) < 1e-6
