@@ -70,3 +70,16 @@ def test_entropy_lower_bound_is_finite_and_stable():
     assert 1.5 < H < 2.5, f"entropy floor {H:.3f} outside expected ~2.0"
     H2 = sim.entropy_lower_bound(n_mc=40000, seed=1)
     assert abs(H - H2) < 0.05
+
+
+def test_analytic_marginal_cd_pit_uniform_at_truth():
+    import numpy as np
+    from scipy.stats import kstest
+    from cdsbi.simulators.normal_bivariate_unknown_cov import NormalBivariateUnknownCov
+    sim = NormalBivariateUnknownCov()
+    theta0 = (0.2, -0.1, 0.4, 1.0, -1.5)
+    x = sim.sample_x_given_theta(theta0, 8000, np.random.default_rng(2))
+    out = sim.analytic_marginal_cd_pit(theta0, x)
+    for key in ("cov1_pit", "cov2_pit", "cov3_pit", "mu_hotelling_pit"):
+        assert out[key].shape == (8000,)
+        assert kstest(out[key].numpy(), "uniform").statistic < 0.04, f"{key} not uniform"

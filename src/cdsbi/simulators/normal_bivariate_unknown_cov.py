@@ -140,3 +140,28 @@ class NormalBivariateUnknownCov:
         logdet = ld1 + ld2 + ld3 + ld4 + ld5
         loss = 0.5 * (r ** 2).sum(axis=1) + 0.5 * self.d_theta * math.log(2 * math.pi) - logdet
         return float(loss.mean())
+
+    def analytic_marginal_cd_pit(self, theta_0, x: torch.Tensor) -> dict:
+        """Reference marginal-CD PITs at the true θ₀ (each ~ U at truth): three scalar
+        covariance PITs (Bartlett χ²/χ²/N = Φ(r*₁..₃)) + one JOINT Hotelling-T² μ-PIT:
+        F_{p, n−p}( T²(n−p)/(p(n−1)) ), T²=n(μ₀−X̄)ᵀS⁻¹(μ₀−X̄)."""
+        from scipy.stats import f as _f, norm as _norm
+        tv = np.atleast_1d(np.asarray(theta_0, dtype=np.float64))
+        n = self.n_iid; p = self.p
+        theta = torch.tensor(tv, dtype=x.dtype).expand(x.shape[0], self.d_theta)
+        r = self.r_star(theta, x).numpy()
+        cov_pits = _norm.cdf(r[:, :3])
+        obs = x.reshape(x.shape[0], n, p)
+        xbar = obs.mean(dim=1).numpy()
+        Xc = (obs - obs.mean(dim=1, keepdim=True)).numpy()
+        S = np.einsum('mki,mkj->mij', Xc, Xc) / (n - 1)
+        d = tv[3:5][None, :] - xbar
+        T2 = n * np.einsum('mi,mij,mj->m', d, np.linalg.inv(S), d)
+        F = T2 * (n - p) / (p * (n - 1))
+        mu_pit = _f.cdf(F, p, n - p)
+        return {
+            "cov1_pit": torch.from_numpy(cov_pits[:, 0]).float(),
+            "cov2_pit": torch.from_numpy(cov_pits[:, 1]).float(),
+            "cov3_pit": torch.from_numpy(cov_pits[:, 2]).float(),
+            "mu_hotelling_pit": torch.from_numpy(mu_pit).float(),
+        }
