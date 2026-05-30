@@ -135,6 +135,14 @@ class NormalUnknownMeanVar:
         per_obs = -0.5 * z ** 2 - log_sigma - 0.5 * math.log(2 * math.pi)
         return per_obs.sum(dim=-1)
 
+    def data_entropy_lower_bound(self) -> float:
+        """H(X|θ) averaged over the prior — the floor for an exact-density model of
+        p(X|θ). For X|θ ~ N(μ, σ² I_{n_iid}): H = (n/2)(1+log 2π) + n·log σ; average
+        log σ over the (uniform) prior = midpoint of log_sigma_range."""
+        n = self.n_iid
+        e_log_sigma = 0.5 * (self.log_sigma_range[0] + self.log_sigma_range[1])
+        return (n / 2) * (1 + math.log(2 * math.pi)) + n * e_log_sigma
+
     def entropy_lower_bound(self, n_mc: int = 50000, seed: int = 42) -> float:
         """MC estimate of E[NF-MLE loss at r*] on the (θ, (X̄,s²)) scale."""
         rng = np.random.default_rng(seed)

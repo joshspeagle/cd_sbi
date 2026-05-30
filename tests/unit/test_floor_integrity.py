@@ -36,3 +36,23 @@ def test_floor_integrity_noop_for_non_nfmle_loss():
     assert not bool(row["cheats"])
     assert res.passed
     assert math.isnan(float(row["entropy_floor"]))
+
+
+def test_floor_integrity_exact_density_uses_data_entropy():
+    from cdsbi.diagnostics.floor_integrity import FloorIntegrity
+
+    class _Sim:
+        def entropy_lower_bound(self, **kw): return 0.92
+        def data_entropy_lower_bound(self, **kw): return 13.66
+
+    class _Trained:
+        def __init__(self, loss_value):
+            self.final_loss = loss_value
+            self.arch_metadata = {"loss_class": "ExactDensityLoss"}
+            self.procedure = object()
+
+    ok = FloorIntegrity()(_Trained(13.70), _Sim())
+    assert not bool(ok.value.iloc[0]["cheats"]) and ok.passed
+    assert abs(float(ok.value.iloc[0]["entropy_floor"]) - 13.66) < 1e-9
+    bad = FloorIntegrity()(_Trained(5.0), _Sim())
+    assert bool(bad.value.iloc[0]["cheats"]) and not bad.passed

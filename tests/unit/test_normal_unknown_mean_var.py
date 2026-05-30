@@ -82,3 +82,14 @@ def test_marginal_cd_spec_coords():
     sim = NormalUnknownMeanVar()
     spec = sim.marginal_cd_spec
     assert spec["scale_coord"] == 0 and spec["location_coord"] == 1
+
+
+def test_data_entropy_lower_bound_matches_gaussian_formula():
+    import math
+    from cdsbi.simulators.normal_unknown_mean_var import NormalUnknownMeanVar
+    sim = NormalUnknownMeanVar()
+    H = sim.data_entropy_lower_bound()
+    n = sim.n_iid
+    e_logsig = 0.5 * (sim.log_sigma_range[0] + sim.log_sigma_range[1])
+    expected = (n / 2) * (1 + math.log(2 * math.pi)) + n * e_logsig
+    assert abs(H - expected) < 1e-6

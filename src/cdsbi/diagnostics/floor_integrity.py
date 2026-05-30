@@ -13,7 +13,11 @@ import pandas as pd
 
 from cdsbi.diagnostics.base import DiagnosticResult
 
-_NFMLE_LOSSES = {"NFMLELoss"}
+# loss_class -> the simulator method giving its conditional-entropy floor
+_FLOOR_METHOD_BY_LOSS = {
+    "NFMLELoss": "entropy_lower_bound",
+    "ExactDensityLoss": "data_entropy_lower_bound",
+}
 
 
 class FloorIntegrity:
@@ -25,12 +29,13 @@ class FloorIntegrity:
     def __call__(self, trained, simulator, eval_data=None, x_per_theta=None) -> DiagnosticResult:
         loss_class = getattr(trained, "arch_metadata", {}).get("loss_class", "")
         final_loss = float(getattr(trained, "final_loss", float("nan")))
-        applicable = loss_class in _NFMLE_LOSSES and hasattr(simulator, "entropy_lower_bound")
+        floor_method = _FLOOR_METHOD_BY_LOSS.get(loss_class)
+        applicable = floor_method is not None and hasattr(simulator, floor_method)
         if applicable:
-            H = float(simulator.entropy_lower_bound())
+            H = float(getattr(simulator, floor_method)())
             margin = final_loss - H
             cheats = bool(margin < -self.tol)
-            meta = {"loss_class": loss_class, "tol": self.tol}
+            meta = {"loss_class": loss_class, "tol": self.tol, "floor_method": floor_method}
         else:
             H = float("nan")
             margin = float("nan")
