@@ -319,12 +319,14 @@ def _write_raw_companion(name: str, result, diag_dir) -> None:
 def _run_diagnostics(cfg: DictConfig, trained, simulator, eval_data, rd: RunDir):
     from cdsbi.diagnostics.conditional_pit import ConditionalPIT
     from cdsbi.diagnostics.coverage import Coverage
+    from cdsbi.diagnostics.floor_integrity import FloorIntegrity
     from cdsbi.diagnostics.jacobian_recovery import JacobianRecovery
     from cdsbi.diagnostics.joint_mahalanobis import JointMahalanobis
     from cdsbi.diagnostics.marginal_cd_recovery import MarginalCDRecovery
     from cdsbi.diagnostics.marginal_pit import MarginalPIT
     from cdsbi.diagnostics.pivot_rmse import PivotRMSE
     from cdsbi.diagnostics.set_size import SetSize
+    from cdsbi.diagnostics.sufficiency_recovery import SufficiencyRecovery
 
     n_bins = max(2, len(list(cfg.experiment.eval_thetas_interior)))
     # SetSize is intentionally cheaper (~1/5 the X_obs of Coverage) — width
@@ -366,6 +368,9 @@ def _run_diagnostics(cfg: DictConfig, trained, simulator, eval_data, rd: RunDir)
             theta_0_grid=list(cfg.experiment.eval_thetas_interior),
             n_per_theta=int(cfg.experiment.n_eval_per_theta),
         )),
+        ("sufficiency_recovery", SufficiencyRecovery(
+            n_eval=int(OmegaConf.select(cfg, "experiment.n_eval", default=4000)))),
+        ("floor_integrity", FloorIntegrity()),
     ]
     # F6: precompute r = procedure.pivot(theta, x) once for pivot-based
     # procedures and share it across PivotRMSE / MarginalPIT / ConditionalPIT
@@ -481,6 +486,17 @@ def _write_index_row(cfg: DictConfig, rd: RunDir, trained, diag_results, config_
                          ("mu_t_resid", "marginal_cd_mu_t_resid")]:
             if col in mcd_df.columns and len(mcd_df):
                 row[out] = float(mcd_df[col].mean())
+    sr_path = rd.path / "diagnostics" / "sufficiency_recovery.parquet"
+    if sr_path.exists():
+        sr_df = pd.read_parquet(sr_path)
+        if "sufficiency_min_spearman" in sr_df.columns and len(sr_df):
+            row["sufficiency_min_spearman"] = float(sr_df["sufficiency_min_spearman"].iloc[0])
+    fi_path = rd.path / "diagnostics" / "floor_integrity.parquet"
+    if fi_path.exists():
+        fi_df = pd.read_parquet(fi_path)
+        if "floor_margin" in fi_df.columns and len(fi_df):
+            row["floor_margin"] = float(fi_df["floor_margin"].iloc[0])
+            row["floor_cheats"] = bool(fi_df["cheats"].iloc[0])
     pd.DataFrame([row]).to_parquet(rd.path / "index_row.parquet")
 
 
