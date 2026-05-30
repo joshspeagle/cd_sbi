@@ -7,13 +7,17 @@ observations per dataset, `X ∈ ℝ^{n_iid × 2}` (flattened ℝ²⁰). Paramet
 scatter A ∈ SPD)` → **5-D**. The multivariate generalization of the landed
 unknown-(μ,σ²) work (d_theta 2→5, suff-stat 2→5, data 10→20).
 
-**Lineage / what carries over:** this reuses, essentially unchanged, the
-`SingleIndexMonotoneFlow` (now d=5), the Stage-A→Stage-B structure, the M3.0
-harness (`SufficiencyRecovery`, `FloorIntegrity`, `MarginalCDRecovery`, `Coverage`,
-`JointMahalanobis`), and the **Stage-B verdict** (only the information-preserving
-**I-A invertible exact-density** arm calibrates a learned summary — see
-`2026-05-29-cd-sbi-stage-b-bakeoff-verdict.md`). Per that verdict we go **straight
-to Arm I-A** for the learned summary and do **not** re-run I-B/II-A.
+**Lineage / what carries over:** this reuses the `SingleIndexMonotoneFlow` (now
+d=5, arbitrary-d already), the Stage-A→Stage-B structure, and the **Stage-B
+verdict** (only the information-preserving **I-A invertible exact-density** arm
+calibrates a learned summary — `2026-05-29-cd-sbi-stage-b-bakeoff-verdict.md`); per
+that verdict we go **straight to Arm I-A** and do **not** re-run I-B/II-A. Of the
+M3.0 harness, **`SufficiencyRecovery`, `FloorIntegrity`, `Coverage`,
+`JointMahalanobis` reuse cleanly** (dim-agnostic). **`MarginalCDRecovery` does
+NOT** — it is hardwired to the 1-D (μ,σ²) case (a 2-vector θ, a single
+`{scale,location}` spec, a one-dimensional `log σ` marginalization grid); §4
+describes its substantial generalization (three covariance marginals + a 2-D
+Hotelling-T² μ-marginalization) as genuinely new code.
 
 ---
 
@@ -88,22 +92,27 @@ where `C₁₁=exp ℓ₁₁`, `C₂₂=exp ℓ₂₂`, and `D` = Cholesky of th
 - **`SingleIndexMonotoneFlow(d=5)`** — unchanged; signs injected from the simulator
   at wire-time. (N0: recovers `r*` to RMSE 0.098.)
 - **Stage-B learned summary (I-A only):** `AffineCouplingBijection` on ℝ²⁰ +
-  `InvertibleSummaryConditioner(d_theta=5)` (S∈ℝ⁵ inference block + A∈ℝ¹⁵
-  ancillary) + `ExactDensityCDSBIRunner` — all already exist; generalize their
-  dims from (2, 10) to (5, 20).
+  `InvertibleSummaryConditioner` (S∈ℝ⁵ inference block + A∈ℝ¹⁵ ancillary) +
+  `ExactDensityCDSBIRunner` — all already exist (dim-agnostic). **Wiring note:**
+  `InvertibleSummaryConditioner`'s first ctor arg (named `n_iid`) is the *flattened
+  data width* fed to the bijection — pass **20** (= n_iid×p), not 10 — and
+  `d_theta=5`. The data X∈ℝ^{n_iid×2} must be flattened to ℝ²⁰ before the bijection
+  (the simulator's `d_x` should be 20).
 
 ---
 
 ## 4. Harness at d=5
 
 - **`MarginalCDRecovery`** generalizes:
-  - the **three covariance** marginals read off the Bartlett pivots (the two
-    diagonal ones are χ²; the off-diagonal `T₂₁` is N(0,1) directly);
-  - the **μ marginal**, integrating Σ out of the joint CD, is **Hotelling-T²**
-    (the multivariate Student-t, the direct analog of the 1-D t-marginalization):
-    `n(μ−X̄)ᵀ S⁻¹(μ−X̄) · (n−p)/(p(n−1)) ~ F_{p, n−p}`. The diagnostic gets a
-    `simulator.analytic_marginal_cd_pit` returning the χ²/χ²/N (covariance) and the
-    F/Hotelling (mean) PITs at truth, KS-compared to U(0,1).
+  - the **three covariance** marginals are **three scalar PITs** read off the
+    Bartlett pivots (the two diagonal ones are χ²; the off-diagonal `T₂₁` is N(0,1)
+    directly) — directly analogous to the 1-D σ²→χ² check, ×3;
+  - the **μ marginal**, integrating Σ out of the joint CD, is a **single joint
+    (2-D) Hotelling-T² PIT** — NOT two per-coordinate μ-PITs. One scalar PIT per
+    dataset: `n(μ−X̄)ᵀ S⁻¹(μ−X̄) · (n−p)/(p(n−1)) ~ F_{p, n−p}` (the multivariate
+    analog of the 1-D Student-t μ-marginalization). The diagnostic gets a
+    `simulator.analytic_marginal_cd_pit` returning the three scalar covariance PITs
+    + the one joint Hotelling μ-PIT at truth, each KS-compared to U(0,1).
   - **Validate the μ-marginalization numerically first** (as we did the 1-D
     Student-t to ~1e-4) before wiring the diagnostic — the multivariate
     marginalization is the delicate piece.
