@@ -214,11 +214,17 @@ def _build_method(cfg: DictConfig, simulator) -> Any:
         else:
             from cdsbi.conditioners.identity import Identity
             conditioner = Identity()
+        loss_name = OmegaConf.select(cfg, "method.loss", default="nfmle")
+        if loss_name == "energy":
+            from cdsbi.losses.energy_calibration import EnergyCalibrationLoss
+            loss_obj = EnergyCalibrationLoss()
+        else:
+            loss_obj = NFMLELoss()
         return _instantiate(
             runner_class,
             flow=flow,
             conditioner=conditioner,
-            loss=NFMLELoss(),
+            loss=loss_obj,
             allow_ablation=allow_ablation,
             device=cfg.device,
         )
@@ -270,7 +276,11 @@ def _recipe_dict(t: DictConfig) -> dict:
 def _fit_config(cfg: DictConfig, method_name: str) -> dict:
     t = cfg.training
     if method_name == "cd_sbi":
-        return _recipe_dict(t)
+        d = _recipe_dict(t)
+        grp = OmegaConf.select(t, "group", default=None)
+        if grp is not None:
+            d["group"] = OmegaConf.to_container(grp, resolve=True)
+        return d
     if method_name in ("npe", "nle", "nre"):
         return _recipe_dict(t)
     if method_name == "lf2i_bff":
