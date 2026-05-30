@@ -402,12 +402,15 @@ replication}.md`; **verdict `…/specs/2026-05-30-cd-sbi-mu-cov-n2-verdict.md`**
   sharpest yet). A bespoke **Helmert+polar** structure-informed summary recovers all
   5 + calibrates but only by hard-coding the Bartlett decomposition — **existence
   proof, not a method** (not productionised). **LF2I-BFF baseline at d=5 scored
-  coverage_err 0.20–0.39 from raw X — but likely an artifact of OUR implementation**
-  (`lf2i_bff.py` estimates the BFF marginal via a fixed uniform θ-grid, NOT the
-  recipe's grid-free MC-from-proposal; PI flagged this 2026-05-30). Under review: a
-  research pass (recipe) + impl audit were dispatched; do NOT read as "LF2I fails at
-  d=5" until those land (and the §8.1–8.4 d≤2 numbers, same grid, are re-checked).
-  Stage-A (oracle Bartlett) stands; Stage-B learned-summary is an **open problem**.
+  coverage_err 0.20–0.39 from raw X — confirmed an artifact of OUR implementation, NOT
+  LF2I** (recipe research pass + code audit, 2026-05-30): `lf2i_bff.py:71–87,114`
+  estimates the BFF marginal with a **fixed N=64 sample set, frozen + blind to d** (d=1
+  exact linspace; d=2 ≈8/axis degraded-but-real; d=5 ≈2.3/axis = noise). The recipe
+  (Eq. 10) needs **no grid** — the marginal is `E_{θ~π}` (MC over proposal draws),
+  calibration is grid-free quantile regression. **§8.1–8.4 numbers NOT invalidated**
+  (d=1 exact; d=2 genuine N=64 measurement). Faithful fix: MC-from-true-prior, d-aware
+  N (≳2048 at d=5), `marginal_grid_n→marginal_n`. A fair d=5 LF2I baseline needs that
+  fix first. Stage-A (oracle Bartlett) stands; Stage-B learned-summary is an **open problem**.
 
 **Strategic reframe (user, 2026-05-30 — [[scalable-neural-copula-strategy]]):** bespoke
 per-problem summaries are dead ends; the target must **scale to high-d & arbitrary

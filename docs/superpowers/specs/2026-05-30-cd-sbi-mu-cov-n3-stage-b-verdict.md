@@ -96,20 +96,31 @@ but untuned settings; BFF grid = 128 pts over a (−3,3)⁵ bounding box):
 | 3-pt (center + 2 extremes) | **0.393** (50% set covers 11% at center) |
 | 16-pt LHS over the true prior | **0.201** |
 
-Our LF2I-BFF does **not** deliver valid coverage at d=5 — **but this is very likely an
-artifact of OUR implementation, not LF2I.** Our `lf2i_bff.py` estimates the BFF
-marginal/averaged-odds term by `logsumexp` over a **fixed uniform θ-grid**
-(`marginal_grid_n` points) — a step whose cost is exponential in d (128 pts in 5-D ≈
-2.6/axis) and which is **not faithful to the LF2I/BFF recipe**: the PI notes LF2I
-"should absolutely not require some type of grid-based integration." In the actual
-recipe the critical-value calibration is grid-free quantile regression on simulated
-`(θ, T)` pairs, and the BFF marginal should be a **Monte-Carlo average over proposal
-draws**, not a dense grid. So the d=5 failure plausibly reflects our crude grid, and
-this result must NOT be read as "LF2I fails at d=5." **Under review (2026-05-30):** a
-research pass on the paper/codebase recipe + an implementation audit of `lf2i_bff.py`
-were dispatched; this section will be revised with their findings (and the §8.1–8.4
-d ≤ 2 numbers, which used the same grid, re-checked). For contrast, CD-SBI Stage-A with
-the **oracle** Bartlett summary gets coverage ~0.026.
+Our LF2I-BFF scored coverage_error 0.20–0.39 at d=5 — **but this is a defect in OUR
+implementation, not LF2I** (confirmed by a recipe research pass + a code audit,
+2026-05-30):
+
+- **The recipe needs no grid.** The BFF averaged term (Dalmasso et al. 2024, EJS,
+  Eq. 10) is `E_{θ~π}[∏ᵢ O(Xᵢ;θ)]` — a Monte-Carlo expectation over **proposal draws**;
+  critical-value calibration is grid-free quantile regression of `c_α(θ)` on θ. The
+  only "grid" in LF2I is the candidate-θ list for confidence-set membership (pointwise,
+  replaceable). The PI's assertion is correct.
+- **Our defect** (`lf2i_bff.py:71–87,114`): the BFF marginal uses a **fixed N=64 sample
+  set, frozen at fit time and blind to d**. At d=1 (§8.1, §8.4-on-T) it is an exact
+  64-pt linspace quadrature; at d=2 (§8.2, §8.3) ≈ 8 pts/axis (degraded but real —
+  consistent with the published 0.11–0.14); at d=5 ≈ 2.3 pts/axis → the marginal is
+  noise. Compounded by a box-uniform proposal that extrapolates the classifier outside
+  its training prior.
+- **No correctness bugs** in sign convention, pinball loss, or containment; the
+  calibration stage is faithful and grid-free.
+- **§8.1–8.4 published numbers are NOT invalidated** (d=1 exact; d=2 a genuine
+  measurement of the N=64 estimator); no re-run required.
+- **Faithful/scalable fix** (audit): MC marginal drawn from the **true prior** with a
+  **d-aware sample count** (N ≳ 2048 at d=5), config `marginal_grid_n → marginal_n`.
+  A fair d=5 LF2I-BFF baseline requires that fix first; the 0.20–0.39 number above is
+  the *unfixed* implementation and must NOT be read as "LF2I fails at d=5."
+
+For contrast, CD-SBI Stage-A with the **oracle** Bartlett summary gets coverage ~0.026.
 
 ## 5. Verdict
 
