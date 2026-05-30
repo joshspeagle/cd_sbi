@@ -61,3 +61,12 @@ def test_oracle_summary_shape_and_data_entropy():
     mid = 0.5 * (sim.log_chol_range[0] + sim.log_chol_range[1])
     expected = sim.n_iid * (0.5 * sim.p * (1 + math.log(2 * math.pi)) + 2 * mid)
     assert abs(H - expected) < 1e-6
+
+
+def test_entropy_lower_bound_is_finite_and_stable():
+    from cdsbi.simulators.normal_bivariate_unknown_cov import NormalBivariateUnknownCov
+    sim = NormalBivariateUnknownCov()
+    H = sim.entropy_lower_bound(n_mc=40000, seed=0)
+    assert 1.5 < H < 2.5, f"entropy floor {H:.3f} outside expected ~2.0"
+    H2 = sim.entropy_lower_bound(n_mc=40000, seed=1)
+    assert abs(H - H2) < 0.05

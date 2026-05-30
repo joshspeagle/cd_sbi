@@ -115,3 +115,28 @@ class NormalBivariateUnknownCov:
     def data_entropy_lower_bound(self) -> float:
         mid = 0.5 * (self.log_chol_range[0] + self.log_chol_range[1])
         return self.n_iid * (0.5 * self.p * (1 + math.log(2 * math.pi)) + 2 * mid)
+
+    def entropy_lower_bound(self, n_mc: int = 50000, seed: int = 42) -> float:
+        """MC estimate of E[NF-MLE loss at r*] on the (θ, oracle-feature) scale.
+        The feature-Jacobian ∂r*/∂feat is lower-triangular ⇒ log|det| = Σₖ log|∂rₖ/∂featₖ|:
+          r₁: 2 w₁ f_{χ²_{n−1}}(w₁)/φ(r₁),  w₁=T₁₁²    (feat₁ = log D₁₁)
+          r₂: 2 w₂ f_{χ²_{n−2}}(w₂)/φ(r₂),  w₂=T₂₂²    (feat₂ = log D₂₂)
+          r₃: 1/C₂₂ (feat₃ = D₂₁);  r₄: √n/C₁₁ (feat₄ = X̄₁);  r₅: √n/C₂₂ (feat₅ = X̄₂).
+        """
+        rng = np.random.default_rng(seed)
+        theta_np = self._draw_theta(n_mc, rng)
+        x = self._sample_x(theta_np, rng).reshape(n_mc, self.d_x)
+        theta = torch.from_numpy(theta_np).float()
+        xt = torch.from_numpy(x).float()
+        r = self.r_star(theta, xt).numpy()
+        xbar, D = self._bartlett(xt)
+        D11 = D[:, 0, 0].numpy(); D22 = D[:, 1, 1].numpy()
+        C11 = np.exp(theta_np[:, 0]); C22 = np.exp(theta_np[:, 1])
+        n = self.n_iid
+        w1 = (D11 / C11) ** 2; w2 = (D22 / C22) ** 2
+        ld1 = np.log(2 * w1 * chi2.pdf(w1, n - 1) / np.clip(norm.pdf(r[:, 0]), 1e-30, None))
+        ld2 = np.log(2 * w2 * chi2.pdf(w2, n - 2) / np.clip(norm.pdf(r[:, 1]), 1e-30, None))
+        ld3 = np.log(1.0 / C22); ld4 = np.log(math.sqrt(n) / C11); ld5 = np.log(math.sqrt(n) / C22)
+        logdet = ld1 + ld2 + ld3 + ld4 + ld5
+        loss = 0.5 * (r ** 2).sum(axis=1) + 0.5 * self.d_theta * math.log(2 * math.pi) - logdet
+        return float(loss.mean())
