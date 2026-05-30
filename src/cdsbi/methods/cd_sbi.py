@@ -159,7 +159,14 @@ class CDSBIRunner(Runner):
             r, _ = flow.forward(theta, context=context)
             return r
 
-        procedure = PivotBasedProcedure(pivot_fn=pivot_fn, d_theta=simulator.d_theta)
+        def encode_fn(x: torch.Tensor) -> torch.Tensor:
+            x = x.to(device)
+            with torch.no_grad():
+                feats, _ = conditioner.encode(x)
+            return feats
+
+        procedure = PivotBasedProcedure(pivot_fn=pivot_fn, d_theta=simulator.d_theta,
+                                        encode_fn=encode_fn)
 
         # Gather arch metadata including new knobs
         flow_obj = self.flow

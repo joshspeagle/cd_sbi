@@ -82,6 +82,12 @@ class NormalUnknownMeanVar:
         s2 = x.var(dim=-1, unbiased=True, keepdim=True)           # (n, 1), ddof=1
         return xbar, s2
 
+    def oracle_summary(self, x: torch.Tensor) -> torch.Tensor:
+        """Ground-truth sufficient statistic (log s², X̄), shape (n, 2) — the order
+        and scale the flow's features use. Used by the SufficiencyRecovery diagnostic."""
+        xbar, s2 = self._suff_stats(x)
+        return torch.cat([torch.log(s2.clamp_min(1e-12)), xbar], dim=-1)
+
     def r_star(self, theta: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
         """Closed-form joint pivot (r_σ, r_μ), shape (n, 2). θ = (log σ, μ)."""
         xbar, s2 = self._suff_stats(x)
