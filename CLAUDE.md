@@ -408,9 +408,13 @@ replication}.md`; **verdict `…/specs/2026-05-30-cd-sbi-mu-cov-n2-verdict.md`**
   exact linspace; d=2 ≈8/axis degraded-but-real; d=5 ≈2.3/axis = noise). The recipe
   (Eq. 10) needs **no grid** — the marginal is `E_{θ~π}` (MC over proposal draws),
   calibration is grid-free quantile regression. **§8.1–8.4 numbers NOT invalidated**
-  (d=1 exact; d=2 genuine N=64 measurement). Faithful fix: MC-from-true-prior, d-aware
-  N (≳2048 at d=5), `marginal_grid_n→marginal_n`. A fair d=5 LF2I baseline needs that
-  fix first. Stage-A (oracle Bartlett) stands; Stage-B learned-summary is an **open problem**.
+  (d=1 exact; d=2 genuine N=64 measurement). **Fix LANDED** (`lf2i_bff.py`): BFF
+  marginal now MC over true-prior draws (`simulator.sample`), d-aware `max(marginal_n,
+  128·d)`, config `marginal_grid_n→marginal_n` (alias kept), +3 TDD regression tests.
+  **Fair d=5 LF2I-BFF (marginal_n=2048):** coverage_err 0.091 (3-pt) / 0.189 (LHS) vs
+  0.393/0.201 unfixed — central coverage repaired; residual ~0.19 at extreme θ₀ is a
+  classifier/quantile-head budget matter, ~7× the oracle. Stage-A (oracle Bartlett)
+  stands; Stage-B learned-summary is an **open problem**.
 
 **Strategic reframe (user, 2026-05-30 — [[scalable-neural-copula-strategy]]):** bespoke
 per-problem summaries are dead ends; the target must **scale to high-d & arbitrary

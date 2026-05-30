@@ -33,6 +33,17 @@ class NormalBivariateUnknownCov:
         return self.n_iid * self.p
 
     @property
+    def theta_range(self) -> Tuple[float, float]:
+        """Scalar bounding box (min low, max high) over the per-dimension priors.
+        Used only as bisection bounds for set construction in procedures that take a
+        scalar `theta_range` (e.g. CriticalValueProcedure / LF2I); pointwise coverage
+        does not depend on it. The per-coordinate priors are heterogeneous
+        (mu_range / log_chol_range / l21_range); this box is their union."""
+        lo = min(self.log_chol_range[0], self.l21_range[0], self.mu_range[0])
+        hi = max(self.log_chol_range[1], self.l21_range[1], self.mu_range[1])
+        return (float(lo), float(hi))
+
+    @property
     def theta_signs(self) -> Tuple[float, ...]:
         return (1.0, 1.0, -1.0, 1.0, 1.0)
 

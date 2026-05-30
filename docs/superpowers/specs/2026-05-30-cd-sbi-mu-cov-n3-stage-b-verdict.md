@@ -115,12 +115,26 @@ implementation, not LF2I** (confirmed by a recipe research pass + a code audit,
   calibration stage is faithful and grid-free.
 - **§8.1–8.4 published numbers are NOT invalidated** (d=1 exact; d=2 a genuine
   measurement of the N=64 estimator); no re-run required.
-- **Faithful/scalable fix** (audit): MC marginal drawn from the **true prior** with a
-  **d-aware sample count** (N ≳ 2048 at d=5), config `marginal_grid_n → marginal_n`.
-  A fair d=5 LF2I-BFF baseline requires that fix first; the 0.20–0.39 number above is
-  the *unfixed* implementation and must NOT be read as "LF2I fails at d=5."
+- **Faithful/scalable fix landed** (`lf2i_bff.py`): the BFF marginal is now an MC
+  average over draws from the **true prior** (`simulator.sample`, the proposal the
+  classifier trained on — removes the box-uniform extrapolation too), with a d-aware
+  count `max(marginal_n, 128·d)`; config `marginal_grid_n → marginal_n` (alias kept).
+  TDD: 3 new regression tests in `tests/integration/test_lf2i_bff_smoke.py`.
 
-For contrast, CD-SBI Stage-A with the **oracle** Bartlett summary gets coverage ~0.026.
+**Fair d=5 LF2I-BFF baseline (fixed impl, marginal_n=2048):**
+
+| coverage_error_max | unfixed (N=64 box) | **fixed (N=2048 MC-prior)** | CD-SBI oracle |
+|---|---|---|---|
+| 3-pt grid (center+extremes) | 0.393 | **0.091** | 0.026 |
+| 16-pt LHS (true prior) | 0.201 | **0.189** | 0.026 |
+
+The fix repairs the catastrophic central-region under-coverage (50% set: 11% → 46%
+at θ₀=0). The residual ~0.19 worst-case is at *extreme* θ₀ — consistent with
+classifier/quantile-head capacity at the prior edges (a training-budget matter), not
+the marginal estimator. **Fair verdict:** LF2I-BFF is a legitimate d=5 baseline with
+decent central coverage but still ~7× the oracle's worst-case error; it does not match
+the oracle CD-SBI procedure. (Evidence: `…/evidence/.../proto_lf2i_fair.py`.) For
+contrast, CD-SBI Stage-A with the **oracle** Bartlett summary gets coverage ~0.026.
 
 ## 5. Verdict
 

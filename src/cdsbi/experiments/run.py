@@ -247,7 +247,12 @@ def _build_method(cfg: DictConfig, simulator) -> Any:
             classifier_depth=m.classifier_depth,
             quantile_hidden=m.quantile_hidden,
             quantile_depth=m.quantile_depth,
-            marginal_grid_n=int(OmegaConf.select(m, "marginal_grid_n", default=64)),
+            # `marginal_n` is the BFF Monte-Carlo budget; `marginal_grid_n` is the
+            # deprecated alias (still honored for older configs/sweeps).
+            marginal_n=OmegaConf.select(
+                m, "marginal_n",
+                default=int(OmegaConf.select(m, "marginal_grid_n", default=64)),
+            ),
             device=cfg.device,
         )
     raise ValueError(f"Unknown method: {m.name}")

@@ -7,10 +7,14 @@ proposal: train a classifier to distinguish joint (θ, X∼F_θ) from marginal
     T_BFF(θ; X) = log[(1/N) Σ_b O(X; θ_b)] − log O(X; θ_0)
                 = logsumexp_b log_ratio(θ_b, X) − log N − log_ratio(θ_0, X)
 
-where O(X; θ) is the classifier odds and the average is taken over an
-integration grid drawn from the prior. The sign convention matches our
-existing CriticalValueProcedure: large T = evidence against θ
-(Wilks-direction). Inversion as before: {θ : T(θ; X) ≤ c_α(θ)}.
+where O(X; θ) is the classifier odds and the average is a Monte-Carlo estimate
+of the proposal expectation E_{θ~π}[O(X;θ)] (Eq. 10): the θ_b are drawn from the
+proposal π via simulator.sample (the same π the classifier was trained on), with
+a d-aware sample count `max(marginal_n, 128·d)`. This is grid-free and scales as
+O(N) in any dimension — NOT a tensor-product grid (exponential in d) nor a
+box-uniform lattice (which would extrapolate the classifier outside a non-box
+prior). The sign convention matches our existing CriticalValueProcedure: large
+T = evidence against θ (Wilks-direction). Inversion as before: {θ : T(θ;X) ≤ c_α(θ)}.
 
 References:
     Dalmasso et al., "Likelihood-Free Frequentist Inference", EJS 2024
@@ -40,6 +44,7 @@ class LF2IBFFRunner(Runner):
         classifier_depth: int = 3,
         quantile_hidden: int = 12,
         quantile_depth: int = 2,
+        marginal_n: int = None,
         marginal_grid_n: int = 64,
         device: str = "auto",
     ):
@@ -47,12 +52,16 @@ class LF2IBFFRunner(Runner):
         self.classifier_depth = classifier_depth
         self.quantile_hidden = quantile_hidden
         self.quantile_depth = quantile_depth
-        self.marginal_grid_n = marginal_grid_n
+        # `marginal_n` is the Monte-Carlo sample count for the BFF marginal
+        # E_{θ~π}[∏ O(X;θ)] (an MC budget, NOT a per-axis grid resolution).
+        # `marginal_grid_n` is a deprecated alias kept for back-compat; an explicit
+        # `marginal_n` wins.
+        self.marginal_n = int(marginal_n if marginal_n is not None else marginal_grid_n)
+        self.marginal_grid_n = self.marginal_n  # back-compat attribute
         self.device = get_device(device)
 
     def fit(self, simulator, config: dict, seed: int) -> TrainedModel:
         rngs = seed_everything(seed)
-        a, b = simulator.theta_range
 
         # === Stage 1: train NRE-style classifier with our recipe knobs ===
         classifier = build_classifier_mlp(
@@ -68,22 +77,21 @@ class LF2IBFFRunner(Runner):
         )
 
         # === Stage 2: build BFF test statistic ===
-        # Integration grid over the prior.
-        # 1D → equispaced linspace (deterministic, low variance);
-        # d > 1 → N uniform-prior Monte-Carlo samples (a product grid would
-        # be exponential in d). Uses rngs.eval but bumps its state once
-        # before drawing the grid so the calibration draw immediately
-        # after is deterministic per (seed) — see commit message for why.
+        # The BFF averaged term is an EXPECTATION under the proposal π
+        # (Dalmasso et al. 2024, EJS, Eq. 10): E_{θ~π}[∏ᵢ O(Xᵢ; θ)]. The faithful,
+        # dimension-scalable estimator is a Monte-Carlo average over draws θ_b ~ π —
+        # NOT a tensor-product grid (exponential in d) nor a box-uniform lattice
+        # (which extrapolates the classifier outside its training prior when the
+        # prior is not box-uniform). We draw θ_b from the proposal via
+        # simulator.sample (the same π the classifier was trained on), once, fixed
+        # for the run so the statistic is deterministic given (θ, X). `marginal_n`
+        # is the MC budget; a 128·d floor guards against under-sampling in higher d
+        # (the prior d-blind N=64 grid collapsed coverage at d≥5 — audit 2026-05-30).
+        # Uses rngs.eval (advancing its state once before the calibration draw).
         d = int(simulator.d_theta)
-        if d == 1:
-            theta_grid = torch.linspace(
-                a, b, self.marginal_grid_n, device=self.device,
-            ).view(-1, 1)
-        else:
-            grid_np = rngs.eval.uniform(
-                a, b, size=(self.marginal_grid_n, d),
-            )
-            theta_grid = torch.from_numpy(grid_np).float().to(self.device)
+        n_marginal = max(self.marginal_n, 128 * d)
+        theta_grid, _ = simulator.sample(n_marginal, rngs.eval)
+        theta_grid = theta_grid.to(self.device)
         N_grid = theta_grid.shape[0]
         log_N = math.log(N_grid)
         device = self.device
@@ -161,7 +169,9 @@ class LF2IBFFRunner(Runner):
             arch_metadata={
                 "method": "LF2I_BFF",
                 "test_statistic": "bff_wilks_direction",
-                "marginal_grid_n": self.marginal_grid_n,
+                "marginal_n": self.marginal_n,
+                "marginal_n_effective": N_grid,
+                "marginal_estimator": "mc_from_proposal",
                 "alpha_grid": alpha_grid,
                 "critical_net_class": "MultiQuantileMLP",
                 "classifier_params_actual": n_class,

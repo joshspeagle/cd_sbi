@@ -16,7 +16,8 @@ reproducibility of the findings. Run with `PYTHONPATH=src python <file>` on a GP
 | `proto_glow.py` | Glow invertible 1×1 (LU) channel-mixing — *more* flexibility → lazier 2/5 (means only). |
 | `proto_v4_suff.py` | **Decisive** sufficiency analysis of the best variant: canonical corr `[.999 .999 .958 .919 .16]`, raw-moment R² (A₂₂=0.04) — one sufficient dim genuinely missing, not a parameterisation artifact. |
 | `proto_struct.py` | **Existence proof:** Helmert+polar structure-informed invertible summary = exact Bartlett feats (diff 1e-5), invertible (1.9e-6), pivot calibrates (PIT≤0.069, χ²₅ 0.027). Bespoke → not productionised. |
-| `proto_lf2i.py` | LF2I-BFF baseline at d=5 from raw X: coverage_error 0.20–0.39 — calibration method also breaks (its own curse-of-dim). |
+| `proto_lf2i.py` | LF2I-BFF baseline at d=5, **UNFIXED** impl (N=64 box-grid marginal): coverage_error 0.20–0.39. Later confirmed an implementation artifact, not LF2I. |
+| `proto_lf2i_fair.py` | LF2I-BFF at d=5 after the marginal fix (MC-from-true-prior, N=2048): coverage_error 0.091 (3-pt) / 0.189 (LHS) — the FAIR baseline. Decent central coverage, ~7× oracle worst-case. |
 
 Verdict: generic *learned* summaries don't route the quadratic covariance stats;
 flexibility hurts; bespoke fixes work but don't scale; LF2I-BFF fails too. → motivates
