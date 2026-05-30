@@ -1,0 +1,3 @@
+name: bartlett_summary
+_target_: cdsbi.conditioners.bartlett_summary.BartlettSummaryConditioner
+n_iid: 10

@@ -1,0 +1,23 @@
+# @package _global_
+defaults:
+  - override /target: normal_mu_cov
+  - override /flow: single_index_monotone
+  - override /conditioner: bartlett_summary
+  - override /method: cd_sbi
+  - override /budget: medium
+
+method:
+  flow: single_index_monotone        # self-contained flow dispatch (cb1e08e guard)
+
+experiment:
+  name: mu_cov_replication
+  n_eval: 6000
+  # placeholder 3-point θ₀ grid for plumbing; N2 replaces with a ~16-pt LHS grid
+  eval_thetas_interior:
+    - [0.0, 0.0, 0.0, 0.0, 0.0]
+    - [0.4, -0.4, 0.8, 1.5, -1.5]
+    - [-0.4, 0.4, -0.8, -1.5, 1.5]
+  eval_thetas_edge: []
+  alpha_grid: [0.5, 0.68, 0.9, 0.95]
+  n_eval_per_theta: 2000
+  joint_mahalanobis_n_per_theta: 2000
