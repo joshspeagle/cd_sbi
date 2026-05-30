@@ -350,9 +350,51 @@ documented contrast, NOT executed as a calibrating arm).
     arm). `cd_sbi` method configs select the loss via `method.loss ∈
     {nfmle,energy,exact_density}` (run.py `_build_method`).
 
-**Next milestone:** M3.3′ (Stage-B verdict: cross-arm table + I-B contrast
-writeup + manuscript note). Then the v-track roadmap: v4 (SBI benchmark — Two
-Moons, SLCP, Gaussian Mixture), v5 (§3.7 alt-loss — the II-A finding feeds this),
-v6 (synthetic high-d), v7 (real-data astronomy), v8 (image/sequence). Open
-Stage-B threads: permutation-equivariant bijection (generalization), whether a
-power/sharpness term rescues II-A. See spec §12 for the full roadmap.
+## Bivariate-normal unknown-(μ, Σ) — d=5 Stage-A landed (N1 + N2)
+
+The next generalization: `NormalBivariateUnknownCov` (θ = (ℓ₁₁, ℓ₂₂, L₂₁, μ₁,
+μ₂) in **log-Cholesky** coords, `Σ=LLᵀ`, `n_iid=10`, X ∈ ℝ²⁰, `d_theta=5`,
+`p=2`). Branch `feat/musigma-m3-verdict`. Spec
+`docs/superpowers/specs/2026-05-30-cd-sbi-bivariate-normal-mu-cov-design.md`;
+plans `…/plans/2026-05-30-cd-sbi-mu-cov-{n1-stage-a-core,n2-diagnostics-
+replication}.md`; **verdict `…/specs/2026-05-30-cd-sbi-mu-cov-n2-verdict.md`**.
+
+- **The enabler — Wishart Bartlett decomposition** (multivariate analog of the
+  1-D χ²/Student-t): scatter `A=Σ(Xᵢ−X̄)(Xᵢ−X̄)ᵀ ~ Wishart₂(n−1,Σ)`, ⫫ X̄ (Basu);
+  with `A=DDᵀ`, `Σ=CCᵀ` (Cholesky), the factor `T=C⁻¹D` has independent entries
+  `T₁₁²~χ²_{n−1}`, `T₂₂²~χ²_{n−2}`, `T₂₁~N(0,1)`. Inherently triangular → drops
+  into the existing **`SingleIndexMonotoneFlow` with NO architecture change**.
+  Closed-form `r*` (Bartlett): `r₁=Φ⁻¹(1−F_{χ²_{n−1}}(T₁₁²))`,
+  `r₂=Φ⁻¹(1−F_{χ²_{n−2}}(T₂₂²))`, `r₃=T₂₁`, `r₄=√n(μ₁−X̄₁)/C₁₁`,
+  `r₅=√n(−(L₂₁/(C₁₁C₂₂))(μ₁−X̄₁)+(μ₂−X̄₂)/C₂₂)` — validated N(0,I₅) at truth
+  (KS≤0.011). KR ordering diagonals→off-diag→mean; `theta_signs=(+,+,−,+,+)`,
+  `feat_signs=(−,−,+,−,−)`; features `(log D₁₁, log D₂₂, D₂₁, X̄₁, X̄₂)`.
+- **N1 (Stage-A core).** `normal_bivariate_unknown_cov.py` (simulator + `r_star`
+  + `oracle_summary` + `entropy_lower_bound`≈2.03 + `data_entropy_lower_bound` +
+  `analytic_marginal_cd_pit`), `BartlettSummaryConditioner`,
+  `flows/invert.py::autoregressive_invert` (per-coord bisection, fwd∘inv 1e-6).
+  Recovery smoke RMSE 0.10.
+- **N2 (Stage-A diagnostics + replication).** `MultivariateMarginalCDRecovery`
+  (3 covariance direct PITs + **joint Hotelling-T² μ-marginal** = multivariate
+  analog of the Student-t check, recovered via `autoregressive_invert`),
+  `PivotBasedProcedure.flow` (set by `CDSBIRunner.fit`), 16-pt LHS coverage grid,
+  `paper_table_mu_cov`. **Verdict: the framework generalizes to d=5** — 4/5 pivot
+  coords calibrate to the noise floor; aggregate covariance χ² / joint Hotelling /
+  joint Mahalanobis χ²₅ / entropy-floor all hold.
+- **Documented limit (μ₂).** The doubly-cross-coupled mean coord is **mildly**
+  miscalibrated at extreme θ₀ (per-coord PIT KS up to ~0.10; std ~0.9–1.3;
+  central coverage fine) — a **ctx-MLP expressivity limit on the affine index
+  z₅**, NOT finite-sample / convergence / capacity / G-curvature / w-asymmetry
+  (all ruled out; identity-G trades scale-for-shape, no clean win). Accepted and
+  documented; `test_replicate_mu_cov.py` pins it as a regression (KS<0.16),
+  precedent `test_trained_folding.py`. RMSE-vs-`r*` is only a loose recovery
+  sanity (`r*` is one specific calibrated pivot; calibration only needs M).
+
+**Next milestone:** N3 — Stage-B I-A invertible learned summary `ℝ²⁰→ℝ⁵`
+(the verified information-preserving arm from the (μ,σ²) bake-off). Then the
+v-track roadmap: v4 (SBI benchmark — Two Moons, SLCP, Gaussian Mixture),
+v5 (§3.7 alt-loss — the II-A finding feeds this), v6 (synthetic high-d),
+v7 (real-data astronomy), v8 (image/sequence). Open Stage-B threads:
+permutation-equivariant bijection, whether a power/sharpness term rescues II-A,
+a richer ctx-conditioned index for cross-coupled coords (the μ₂ refinement).
+See spec §12 for the full roadmap.
