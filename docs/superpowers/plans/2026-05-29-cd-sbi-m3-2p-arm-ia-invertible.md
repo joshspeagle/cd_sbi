@@ -80,10 +80,17 @@ def test_shapes():
 
 
 def test_logdet_matches_autograd():
+    import torch.nn as nn
     torch.manual_seed(1)
     bij = _bij()
+    # the ctor zero-inits coupling output layers (near-identity start) — perturb them
+    # so this test exercises NON-TRIVIAL scales (else it's a vacuous identity check).
+    for net in list(bij.scale_nets) + list(bij.shift_nets):
+        nn.init.normal_(net[-1].weight, std=0.5)
+        nn.init.normal_(net[-1].bias, std=0.3)
     x = torch.randn(1, 4, requires_grad=True)
     z, log_det = bij(x)
+    assert float(log_det.abs()) > 1e-3, "test must exercise non-identity scales"
     J = torch.zeros(4, 4)
     for i in range(4):
         (g,) = torch.autograd.grad(z[0, i], x, retain_graph=True)
@@ -584,8 +591,8 @@ The generic conditioner dispatch builds `cfg.conditioner` by `_target_`. The new
 ```yaml
 name: invertible_summary
 _target_: cdsbi.conditioners.invertible_summary.InvertibleSummaryConditioner
-n_iid: 10
-d_theta: 2
+n_iid: 10        # hardcoded (run.py builds conditioners generically, no injection)
+d_theta: 2       # MUST equal simulator.d_theta (the flow's d is injected separately)
 hidden: ${budget.cdsbi_flow_hidden}
 n_layers: 6
 depth: 2
@@ -614,6 +621,17 @@ defaults:
 
 method:
   flow: single_index_monotone
+
+# Pin the validated recipe so a `python -m cdsbi.experiments.run` headline run matches
+# the Task-6 intensive test. NOTE: ExactDensityCDSBIRunner uses plain Adam + no
+# scheduler (it reads only lr/batch_size/n_steps/n_train/fresh_batch/grad_clip_norm);
+# the optimizer/schedule keys from the budget recipe are ignored by this runner.
+training:
+  lr: 2e-3
+  n_steps: 8000
+  batch_size: 256
+  n_train: 10000
+  fresh_batch: false
 
 experiment:
   name: mu_sigma_stage_b_exact
