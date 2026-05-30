@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-05-30-cd-sbi-bivariate-normal-mu-cov-design.md` (§2 conventions, §3 components). **Deferred to N2:** `entropy_lower_bound` (the NF-MLE feature-scale floor — needs the 5×5 triangular feature-Jacobian; validate numerically against the trained loss in N2, where `FloorIntegrity` consumes it). N1 includes `data_entropy_lower_bound` (analytic, used by Stage-B in N3).
 
+> **Guard-rail (deferral landmine):** `FloorIntegrity` maps `NFMLELoss → simulator.entropy_lower_bound()`. The N1 smoke (Task 5) and the Task-4 verify use the **direct API** (no `_run_diagnostics`), so they're safe. But do **NOT** run the full `python -m cdsbi.experiments.run experiment=mu_cov_replication` until N2 adds `entropy_lower_bound` — the diagnostics pass would `AttributeError`. N1 is validated via the direct-API smoke only.
+
 ---
 
 ## Conventions locked for N1 (from the validated N0 prototype)
