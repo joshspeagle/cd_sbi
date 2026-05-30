@@ -101,15 +101,16 @@ Expected: FAIL (`oracle_summary` missing; `encode_fn` attribute missing).
 
 - [ ] **Step 3: Implement**
 
-(3a) `PivotBasedProcedure.__init__` — add an optional `encode_fn` (default `None`):
+(3a) `PivotBasedProcedure.__init__` — add an optional `encode_fn` (default `None`). The current body sets `self.pivot_fn`, `self.d_theta`, `self.theta_range` (and any cache init) — keep ALL existing lines, just add the new param + assignment:
 ```python
     def __init__(self, pivot_fn: Callable, d_theta: int, theta_range: tuple = (-20.0, 20.0),
                  encode_fn: Callable | None = None):
         self.pivot_fn = pivot_fn
         self.d_theta = d_theta
-        self.encode_fn = encode_fn
+        self.theta_range = theta_range          # <-- preserve existing line(s)
+        self.encode_fn = encode_fn              # <-- new
 ```
-(Keep the rest of `__init__` unchanged. Add `from typing import Optional` if needed, or use `Callable | None`.)
+(`from __future__ import annotations` and `Callable` are already imported in this file, so `Callable | None` needs no new import. Do NOT drop `self.theta_range` or any other existing assignment.)
 
 (3b) `cd_sbi.py` `fit()` — after the `pivot_fn` closure and after `self.conditioner.eval()` (the conditioner is already switched to eval for nn.Module conditioners in M2), add an `encode_fn` closure and pass it to the procedure:
 ```python
@@ -229,10 +230,12 @@ exposes encode_fn (a learned summary) and the simulator exposes oracle_summary.
 """
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pandas as pd
 import torch
-from scipy.stats import spearmanr, pearsonr
+from scipy.stats import spearmanr, pearsonr, ConstantInputWarning
 
 from cdsbi.diagnostics.base import DiagnosticResult
 
@@ -266,14 +269,21 @@ class SufficiencyRecovery:
             oracle = simulator.oracle_summary(x).detach().cpu().numpy()  # (n, d_oracle)
         row = {}
         spearmans = []
-        for k in range(oracle.shape[1]):
-            name = _ORACLE_NAMES[k] if k < len(_ORACLE_NAMES) else f"coord{k}"
-            sp = max(abs(spearmanr(oracle[:, k], feats[:, j]).statistic) for j in range(feats.shape[1]))
-            pe = max(abs(pearsonr(oracle[:, k], feats[:, j])[0]) for j in range(feats.shape[1]))
-            row[f"spearman_{name}"] = float(sp)
-            row[f"pearson_{name}"] = float(pe)
-            spearmans.append(sp)
-        row["sufficiency_min_spearman"] = float(min(spearmans))
+        # A collapsed learned feature is constant → spearmanr/pearsonr return NaN.
+        # Use np.nanmax (NOT max(), which is order-dependent with NaN) so a real
+        # recovery on the OTHER feature index isn't masked, and suppress the warning.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", ConstantInputWarning)
+            for k in range(oracle.shape[1]):
+                name = _ORACLE_NAMES[k] if k < len(_ORACLE_NAMES) else f"coord{k}"
+                sp = np.nanmax([abs(spearmanr(oracle[:, k], feats[:, j]).statistic)
+                                for j in range(feats.shape[1])])
+                pe = np.nanmax([abs(pearsonr(oracle[:, k], feats[:, j])[0])
+                                for j in range(feats.shape[1])])
+                row[f"spearman_{name}"] = float(sp)
+                row[f"pearson_{name}"] = float(pe)
+                spearmans.append(sp)
+        row["sufficiency_min_spearman"] = float(np.nanmin(spearmans))
         df = pd.DataFrame([row])
         passed = bool(row["sufficiency_min_spearman"] > self.pass_threshold)
         return DiagnosticResult(self.name, value=df, passed=passed,
@@ -431,7 +441,8 @@ from cdsbi.diagnostics.floor_integrity import FloorIntegrity
 ```
 List entries (alongside `("marginal_cd_recovery", ...)`):
 ```python
-        ("sufficiency_recovery", SufficiencyRecovery(n_eval=int(cfg.experiment.n_eval))),
+        ("sufficiency_recovery", SufficiencyRecovery(
+            n_eval=int(OmegaConf.select(cfg, "experiment.n_eval", default=4000)))),
         ("floor_integrity", FloorIntegrity()),
 ```
 (`SufficiencyRecovery` does its own sampling, so it does NOT need `x_per_theta`; do NOT add it to `x_sharing_names`.)
