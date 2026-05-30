@@ -10,6 +10,15 @@ bake-off against the Stage-A oracle control.
 (`NormalUnknownMeanVar`). Stage A (oracle summary + `SingleIndexMonotoneFlow`)
 is landed on `main` and is the control.
 
+> **Revision (2026-05-29) — co-adaptation reframing.** M3.0 (shared harness)
+> landed; the M3.1 dry-run of **Arm I-B (two-stage freeze)** then surfaced a
+> deeper finding (§1.5) that reorders the bake-off. **The arms are now framed by
+> co-adaptation:** the disease is an *exploitable objective*, not co-adaptation
+> itself; under a *cheat-free* objective, end-to-end co-adaptation is the cure
+> (it forces the summary to emit calibratable coordinates). **Arm II-A is now the
+> primary; Arm I-A is the benchmark; Arm I-B is demoted to a documented
+> contrast** (it is structurally fragile — see §1.5). §3 and §4 reflect this.
+
 ---
 
 ## 1. The audit — why a learned non-square summary cheats NF-MLE
@@ -57,13 +66,49 @@ architectural-not-penalty ethos).
 
 ---
 
-## 2. Framing — a three-arm bake-off with Stage A as control
+## 1.5 The second finding — affine-single-index bias vs warped learned features
 
-Deliverable = an **empirical verdict**: which device(s) let a *learned* summary
-calibrate as well as the Stage-A oracle. The motivating use case is targets where
-the sufficient statistic is **unknown**; (μ,σ²) is the controlled stress test
-where we know the truth and can measure recovery. All arms are judged on the
-**same** harness.
+The M3.1 dry-run of Arm I-B exposed a second, distinct issue (verified by running
+the pipeline). `SingleIndexMonotoneFlow` bakes in an inductive bias: the pivot is a
+monotone function of an **affine** index `z_k = a·θ_k + b·feat_k + off`, with `a,b`
+**constant** at coordinate 0 (which has no autoregressive context). This is exactly
+right for the **oracle** feature, because the closed-form pivot genuinely is
+single-index affine in the natural sufficient statistic (`r*_σ = g(log s² − 2 log σ)`).
+A **learned** summary has no reason to emit that natural coordinate. Predict-θ
+(Arm I-B's stage 1) emits the **posterior mean** `E[log σ|X]`, which *shrinks* — a
+monotone but **nonlinear warp** of `log s²`. The constant-coefficient coord-0
+combiner cannot un-warp it, so even though **sufficiency is retained** (Spearman
+0.97), the **σ-coordinate miscalibrates** (joint KS 0.10–0.11 vs the 0.06 band;
+σ-marginal KS 0.17–0.31). Sufficiency is necessary but not sufficient — the
+*coordinate* must also be in the flow's affine basis.
+
+**The unifying axis: co-adaptation under a cheat-free objective.**
+
+| Device | Co-adapts summary↔pivot? | Objective | Outcome |
+|---|---|---|---|
+| M2 naive | yes | NF-MLE (Jacobian cheat channel) | **cheats** — co-adapts to inflate density; σ collapses |
+| Arm I-B freeze | **no** (frozen after predict-θ) | predict-θ, then NF-MLE | **warps** — sufficient but locks a non-affine coordinate the flow can't calibrate |
+| Arm II-A | yes | calibration-invariant (no Jacobian) | *hypothesis:* co-adapts to calibration; no cheat channel; learns flow-friendly coords |
+| Arm I-A | yes | NF-MLE but exact (invertible) | *hypothesis:* co-adapts; exact change-of-variables, can't destroy info |
+
+Co-adaptation is **not** the disease — an exploitable objective is. Under a
+*cheat-free* objective, end-to-end co-adaptation is the **cure**: gradient pressure
+forces the summary to emit exactly the coordinates the pivot can calibrate, which
+**solves the warp and the cheat at once**. Arm I-B forfeits co-adaptation (it
+freezes a summary trained for a *different* objective), so it cannot un-warp — it is
+**structurally fragile**, not fixable by tuning. Hence the reframing: lead with the
+end-to-end cheat-free arms; keep I-B only as the contrast that motivates them.
+
+---
+
+## 2. Framing — co-adaptation bake-off (II-A primary, I-A benchmark, I-B contrast)
+
+Deliverable = an **empirical verdict** on the §1.5 question: *does end-to-end
+co-adaptation under a cheat-free objective make the learned summary emit un-warped,
+calibratable coordinates* — calibrating as well as the Stage-A oracle? The
+motivating use case is targets where the sufficient statistic is **unknown**;
+(μ,σ²) is the controlled stress test where we know the truth and can measure both
+recovery and the warp. All arms are judged on the **same** harness (M3.0, landed).
 
 ### 2.1 Shared evaluation harness (build once, reuse)
 
@@ -74,9 +119,15 @@ where we know the truth and can measure recovery. All arms are judged on the
   best-|Spearman| and Pearson (diagnostic). Gated like `MarginalCDRecovery`
   (no-ops unless the simulator exposes the oracle stat + a learned conditioner is
   present). Quantifies "did the summary keep the sufficient information."
-- **`FloorIntegrity` (new check):** **arm-aware.**
-  - NF-MLE arms (I-A, I-B): final loss must satisfy `loss > H − tol` (does NOT
-    sink below the conditional-entropy floor). Reuses the §8.4 floor logic.
+- **`FloorIntegrity` (landed in M3.0; needs the empirical-floor fix):** **arm-aware.**
+  - NF-MLE arms (I-A): final loss must satisfy `loss > H − tol` (does NOT sink
+    below the conditional-entropy floor). **Fix required:** the M3.0 version
+    compares to the *oracle*-feature floor `entropy_lower_bound()`; a learned
+    summary's features have a *different* conditional entropy `H(feat|θ)`, so the
+    oracle floor gives a **false cheat** for any non-oracle-scale summary (the
+    M3.1 run hit exactly this). The check must use an **empirical `H(feat|θ)`**
+    estimated from the trained `encode_fn` (MC over θ then the NF-MLE loss at the
+    true conditional density of the actual features), not the oracle closed form.
   - Calibration-loss arm (II-A): no `H` to undercut — instead require the scoring
     rule → its floor (≈0) **with** `SufficiencyRecovery` intact (a degenerate
     summary cannot satisfy calibration across θ₀, so low loss + high sufficiency
@@ -96,23 +147,26 @@ failure the same way. This keeps the suite green and pins the motivating finding
 
 ---
 
-## 3. The three arms
+## 3. The arms — order of attack: II-A (primary) → I-A (benchmark) → I-B (contrast)
 
-### Arm I-B — two-stage freeze (pragmatic primary)
+Build and judge the **end-to-end co-adaptive** arms first (they are the candidate
+cures per §1.5); I-B is implemented only enough to *document* its fragility.
 
-- **Stage 1.** Train DeepSets `s_φ:ℝ¹⁰→ℝ²` *alone* to predict θ: minimize
-  `E‖g_ψ(s_φ(X)) − θ‖²` for a small read-out head `g_ψ`. The MSE is bounded below
-  (≥0); the optimal θ-predictor is a function of the sufficient statistic, so for
-  the Gaussian target this recovers `X̄`- and `s²`-equivalent features. Freeze
-  `s_φ` (eval mode, `requires_grad=False`); discard `g_ψ`.
-  - *Stage-1 objective choice:* **predict-θ MSE** (simplest bounded sufficiency
-    proxy). InfoNCE/`I(feat;θ)` is a documented fallback if predict-θ under-recovers
-    σ² (e.g. recovers a posterior-mean-of-θ that is insensitive to σ at the prior
-    center). The plan instruments the stage-1 `SufficiencyRecovery` and escalates
-    only if needed.
-- **Stage 2.** The *unchanged* Stage-A pivot (`SingleIndexMonotoneFlow`) +
-  NF-MLE on the **frozen** feat. Frozen feat ⇒ loss → fixed `H(feat|θ)`, no
-  collapse channel; calibrates iff feat is sufficient.
+### Arm I-B — two-stage freeze (DOCUMENTED CONTRAST — not a contender)
+
+**Status:** the M3.1 plan (`dc0c08e`) + the review dry-run already produced I-B's
+result: predict-θ pretraining recovers sufficiency (Spearman 0.97/0.9996) but the
+frozen features are **warped** (posterior-mean shrinkage), and the fixed-sign
+affine pivot **miscalibrates σ** (joint KS 0.10–0.11; §1.5). This is the structural
+fragility of forfeiting co-adaptation — captured as a contrast/ablation that
+*motivates* the co-adaptive arms, **not** pursued as a calibrating device. No
+attempt to rescue it (rectifier, InfoNCE, etc.) — that effort goes into the arms
+that co-adapt by construction.
+
+- **Stage 1.** DeepSets `s_φ:ℝ¹⁰→ℝ²` trained alone to predict θ (MSE), then frozen.
+- **Stage 2.** The unchanged pivot + NF-MLE on frozen feat. Calibrates only if the
+  frozen coordinate happens to be in the flow's affine basis — which predict-θ
+  (shrinkage) violates for σ. (Retained mainly as the contrast in M3.3′.)
 - **New code:** `pretrain_summary(simulator, summary, head, config) -> frozen summary`
   utility; a `FrozenConditioner` wrapper (or freeze-in-place: zero the conditioner
   param group so `fit()`'s optimizer is a no-op on it). `fit()` already tolerates a
@@ -122,7 +176,13 @@ failure the same way. This keeps the suite green and pins the motivating finding
   not end-to-end; stage-1 features must be orientable by the fixed-sign pivot
   (surfaces as miscalibration if not — detectable).
 
-### Arm II-A — calibration-invariant objective (principled; §3.7/v5 thread)
+### Arm II-A — calibration-invariant objective (PRIMARY; §3.7/v5 thread)
+
+*Why primary (§1.5):* end-to-end co-adaptation under a loss with **no Jacobian
+cheat channel**. The summary co-adapts to minimize distance-to-`N(0,I)`, which
+*requires* it to emit calibratable (un-warped) coordinates — so it is the minimal
+device that addresses **both** the M2 cheat and the I-B warp at once. The empirical
+question the bake-off answers first: does it?
 
 - Keep DeepSets end-to-end + the monotone pivot, **replace NF-MLE** with a
   distance of `{r(θ₀;X)}` to `N(0,I₂)`. Training uses **grouped batches**: for each
@@ -148,7 +208,12 @@ failure the same way. This keeps the suite green and pins the motivating finding
   optimum, e.g. `r` constant: a constant `r` is not `N(0,I₂)` so the energy score
   penalizes it).
 
-### Arm I-A — invertible summary (exactness benchmark)
+### Arm I-A — invertible summary (BENCHMARK; end-to-end, exact)
+
+*Role (§1.5):* the end-to-end, exact-change-of-variables gold standard. Co-adapts
+like II-A but via an exact bijective likelihood (can't destroy info). If II-A
+matches I-A on the harness, II-A wins on simplicity; if II-A falls short, I-A shows
+the achievable ceiling.
 
 - Permutation-equivariant **bijection** `s_φ: X → (S∈ℝ², A∈ℝ⁸)` over the
   exchangeable iid axis. Model the **full** conditional density:
@@ -167,44 +232,52 @@ failure the same way. This keeps the suite green and pins the motivating finding
   existing `Conditioner` protocol with a **genuine, non-zero** `log_det_contrib`,
   and an auxiliary `½‖A‖²` term added to the loss.
 - **Verdict signal:** the unimpeachable control for "what calibration is
-  achievable with a learned, information-preserving summary." If I-B or II-A
-  match I-A's calibration, they win on simplicity.
+  achievable with a learned, information-preserving summary." If II-A matches
+  I-A's calibration, II-A wins on simplicity (no equivariant bijection needed).
 
 ---
 
-## 4. Decomposition & order (cheapest → heaviest)
+## 4. Decomposition & order (revised — co-adaptation first)
 
 Each numbered item is its own implementation plan; each lands a working unit + its
-result on the shared harness. An arm may end the line if it cleanly wins, but the
-default (per the bake-off goal) is to run all three and report.
+result on the shared harness.
 
-1. **M3.0 — shared harness.** `SufficiencyRecovery` diagnostic + `FloorIntegrity`
-   check (arm-aware) wired into the runner/index-row; convert the M2 smoke to a
-   cheat-capture regression test. (No new arm yet — infrastructure for judging all
-   arms uniformly.)
-2. **M3.1 — Arm I-B (two-stage freeze).** `pretrain_summary` + freeze + Stage-2
-   pivot; intensive replication on the harness.
-3. **M3.2 — Arm II-A (calibration objective).** `EnergyCalibrationLoss` + grouped
-   training path; intensive replication on the harness.
-4. **M3.3 — Arm I-A (invertible benchmark).** Equivariant bijection summary +
-   full-density loss; intensive replication on the harness.
-5. **M3.4 — verdict + manuscript.** Cross-arm comparison table (each arm vs the
-   oracle control on every harness metric), the verdict (which device(s)
-   calibrate), and the audit written up for the draft.
+- **M3.0 — shared harness. ✅ LANDED** (`SufficiencyRecovery` + arm-aware
+  `FloorIntegrity` + the M2 cheat-capture regression test, on `feat/musigma-m2`).
+  *Carry-over:* the `FloorIntegrity` **empirical-`H(feat|θ)` fix** (§2.1) — folded
+  into M3.1′ since I-A needs an honest floor.
+- **M3.1′ — Arm II-A (PRIMARY).** `EnergyCalibrationLoss` + grouped-by-θ₀ training
+  path + the `FloorIntegrity` empirical-floor fix; intensive replication on the
+  harness. **Answers the core §1.5 question first:** does co-adaptation under a
+  cheat-free loss emit calibratable coordinates (σ included)?
+- **M3.2′ — Arm I-A (BENCHMARK).** Permutation-equivariant bijection summary +
+  full-density loss (the `+½‖A‖²` ancillary block); intensive replication. The
+  achievable-ceiling control for II-A.
+- **M3.3′ — verdict + I-B contrast + manuscript.** Cross-arm comparison table
+  (II-A and I-A vs the oracle control on every harness metric); the **I-B contrast**
+  written up from its existing plan + dry-run result (sufficient-but-warped →
+  σ-miscalibration); the §1 + §1.5 audit written for the draft.
+
+**I-B is NOT a separate build step** — its plan `dc0c08e` and the review dry-run
+are the source material for the M3.3′ contrast. (The plan stays in the repo as the
+record; it is not executed as a calibrating arm.)
 
 ---
 
 ## 5. Success criteria
 
-- **Per arm:** matches the Stage-A control within the same tolerance bands
-  (coverage_error_max ≤ 0.05; σ²/μ marginal-CD KS ≤ 0.06; JM ≥ 4/5 seeds at 2×
-  floor) **AND** `SufficiencyRecovery` Spearman > 0.9 on both coordinates **AND**
-  `FloorIntegrity` holds (arm-aware).
-- **Milestone:** at least one device makes a *learned* summary meet the per-arm
-  bar; the cross-arm table + verdict are produced; the cheat is captured as a
-  regression test. A negative result for an arm (e.g. II-A high-variance, or I-B
-  under-recovering σ² with predict-θ) is a *reportable finding*, not a failure of
-  the milestone.
+- **Per arm (II-A, I-A):** matches the Stage-A control within the same tolerance
+  bands (coverage_error_max ≤ 0.05; σ²/μ marginal-CD KS ≤ 0.06 — **σ included**, the
+  coordinate I-B fails; JM ≥ 4/5 seeds at 2× floor) **AND** `SufficiencyRecovery`
+  Spearman > 0.9 on both coordinates **AND** `FloorIntegrity` holds (arm-aware,
+  empirical floor).
+- **Milestone:** at least one end-to-end co-adaptive device (II-A or I-A) makes a
+  *learned* summary meet the per-arm bar — answering §1.5 in the affirmative; the
+  cross-arm table + verdict are produced; the M2 cheat and the I-B warp are both
+  captured (regression test + documented contrast). A negative result for an arm
+  (e.g. II-A high-variance) is a *reportable finding*, not a milestone failure —
+  but if neither co-adaptive arm calibrates σ, that reopens the flow-architecture
+  question (§1.5 directions: feature-rectifier / richer combiner).
 
 ---
 
