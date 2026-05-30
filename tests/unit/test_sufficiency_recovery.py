@@ -32,3 +32,54 @@ def test_procedure_exposes_encode_fn_after_fit():
     feats = trained.procedure.encode_fn(x)
     assert feats.shape == (32, 2)
     assert not feats.requires_grad
+
+
+def test_sufficiency_recovery_perfect_when_encode_is_oracle():
+    from cdsbi.simulators.normal_unknown_mean_var import NormalUnknownMeanVar
+    from cdsbi.diagnostics.sufficiency_recovery import SufficiencyRecovery
+    sim = NormalUnknownMeanVar()
+
+    class _Proc:
+        d_theta = 2
+        def __init__(self, sim): self.encode_fn = lambda x: sim.oracle_summary(x)
+        def pivot(self, theta, x): return sim.r_star(theta, x)
+    class _Trained:
+        def __init__(self, sim): self.procedure = _Proc(sim)
+
+    res = SufficiencyRecovery(n_eval=3000)(_Trained(sim), sim)
+    df = res.value
+    assert {"sufficiency_min_spearman", "spearman_log_s2", "spearman_xbar"}.issubset(df.columns)
+    assert df["sufficiency_min_spearman"].iloc[0] > 0.98
+    assert res.passed
+
+
+def test_sufficiency_recovery_detects_collapse():
+    import torch
+    from cdsbi.simulators.normal_unknown_mean_var import NormalUnknownMeanVar
+    from cdsbi.diagnostics.sufficiency_recovery import SufficiencyRecovery
+    sim = NormalUnknownMeanVar()
+
+    class _Proc:
+        d_theta = 2
+        def __init__(self, sim):
+            self.encode_fn = lambda x: x.mean(dim=-1, keepdim=True).repeat(1, 2)  # only X̄
+        def pivot(self, theta, x): return sim.r_star(theta, x)
+    class _Trained:
+        def __init__(self, sim): self.procedure = _Proc(sim)
+
+    res = SufficiencyRecovery(n_eval=3000)(_Trained(sim), sim)
+    assert res.value["spearman_log_s2"].iloc[0] < 0.5
+    assert not res.passed
+
+
+def test_sufficiency_recovery_noop_without_encode_fn():
+    from cdsbi.simulators.normal_unknown_mean_var import NormalUnknownMeanVar
+    from cdsbi.diagnostics.sufficiency_recovery import SufficiencyRecovery
+    sim = NormalUnknownMeanVar()
+    class _Proc:
+        d_theta = 2; encode_fn = None
+        def pivot(self, theta, x): return x
+    class _Trained:
+        procedure = _Proc()
+    res = SufficiencyRecovery(n_eval=10)(_Trained(), sim)
+    assert res.passed and "reason" in res.meta
