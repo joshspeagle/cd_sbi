@@ -1,6 +1,9 @@
-"""Stage-B smoke: CDSBI with a LEARNED DeepSets summary trains + recovers a
-reparameterization of the sufficient statistic (log s², X̄). Loose bands — the
-full Stage-B calibration/floor verdict is M3."""
+"""Regression capture: the naive device-1 learned summary (DeepSets, log_det=0 +
+normalization) CHEATS the NF-MLE loss — final loss sinks below the entropy floor
+and σ²-information collapses. This documents the Stage-B pathology that motivates
+the device bake-off (see specs/2026-05-29-cd-sbi-stage-b-device-bakeoff-design.md
+§1). It asserts the cheat is PRESENT; the fixes are the bake-off arms (M3.1–M3.3).
+Precedent: tests/ablation/test_trained_folding.py captures the §3.5 folding failure."""
 from __future__ import annotations
 
 import numpy as np
@@ -9,12 +12,13 @@ import torch
 
 
 @pytest.mark.intensive
-def test_stage_b_learned_summary_trains_and_recovers_sufficiency():
+def test_device1_learned_summary_cheats_below_floor():
     from cdsbi.simulators.normal_unknown_mean_var import NormalUnknownMeanVar
     from cdsbi.conditioners.deep_sets import DeepSetsConditioner
     from cdsbi.flows.single_index_monotone import SingleIndexMonotoneFlow
     from cdsbi.losses.nfmle import NFMLELoss
     from cdsbi.methods.cd_sbi import CDSBIRunner
+    from scipy.stats import spearmanr
 
     torch.manual_seed(0)
     sim = NormalUnknownMeanVar()
@@ -27,39 +31,22 @@ def test_stage_b_learned_summary_trains_and_recovers_sufficiency():
               "warmup_steps": 300, "lr_min_ratio": 0.01, "fresh_batch": False}
     trained = runner.fit(simulator=sim, config=config, seed=0)
 
-    # (a) trained: finite loss
-    assert np.isfinite(trained.final_loss)
-    print(f"final_loss = {trained.final_loss:.4f}  (entropy floor H ≈ {sim.entropy_lower_bound():.4f})")
+    H = sim.entropy_lower_bound()
+    # (1) the cheat: final NF-MLE loss sinks well below the conditional-entropy floor
+    assert trained.final_loss < H - 1.0, (
+        f"expected device-1 cheat (loss ≪ floor {H:.2f}); got {trained.final_loss:.3f}"
+    )
 
-    # (b) sufficiency recovery via SPEARMAN (monotone-invariant); Pearson printed for diagnosis
+    # (2) the harm: σ²-information collapses (X̄ survives)
     rng = np.random.default_rng(123)
-    theta, x = sim.sample(4000, rng)
+    _, x = sim.sample(4000, rng)
     cond.eval()
     with torch.no_grad():
-        feats, _ = cond.encode(x.to(runner.device))
-    feats = feats.cpu().numpy()
-    xbar, s2 = sim._suff_stats(x)
-    suff = np.column_stack([np.log(s2.squeeze(-1).numpy()), xbar.squeeze(-1).numpy()])  # (n,2)
-    from scipy.stats import spearmanr, pearsonr
-    def best_abscorr(target, F, fn):
-        return max(abs(fn(target, F[:, j])[0]) for j in range(F.shape[1]))
-    sp_logs2 = best_abscorr(suff[:, 0], feats, spearmanr)
-    sp_xbar = best_abscorr(suff[:, 1], feats, spearmanr)
-    pe_logs2 = best_abscorr(suff[:, 0], feats, pearsonr)
-    pe_xbar = best_abscorr(suff[:, 1], feats, pearsonr)
-    print(f"sufficiency (Spearman): log s²={sp_logs2:.3f}  X̄={sp_xbar:.3f}  "
-          f"| (Pearson): log s²={pe_logs2:.3f}  X̄={pe_xbar:.3f}")
-    assert sp_logs2 > 0.9, f"learned summary lost σ²-information (Spearman {sp_logs2:.2f})"
-    assert sp_xbar > 0.9, f"learned summary lost μ-information (Spearman {sp_xbar:.2f})"
-
-    # (c) calibration sanity: joint Mahalanobis PIT at a central θ₀ ~ χ²₂
-    from scipy.stats import kstest, chi2
-    theta_0 = (0.0, 0.0)
-    xv = sim.sample_x_given_theta(theta_0, 3000, np.random.default_rng(7))
-    th = torch.tensor([[0.0, 0.0]], dtype=xv.dtype).expand(xv.shape[0], -1)
-    with torch.no_grad():
-        r = trained.procedure.pivot(th, xv).cpu().numpy()
-    pit = chi2.cdf((r ** 2).sum(1), df=2)
-    ks = kstest(pit, "uniform").statistic
-    print(f"joint Mahalanobis KS (learned summary) = {ks:.3f}")
-    assert ks < 0.10, f"learned-summary joint calibration KS {ks:.3f} too high (loose Stage-B sanity)"
+        feats = cond.encode(x.to(runner.device))[0].cpu().numpy()
+    oracle = sim.oracle_summary(x).numpy()
+    sp_logs2 = max(abs(spearmanr(oracle[:, 0], feats[:, j]).statistic) for j in range(2))
+    sp_xbar = max(abs(spearmanr(oracle[:, 1], feats[:, j]).statistic) for j in range(2))
+    print(f"device-1 cheat: final_loss={trained.final_loss:.3f} floor={H:.3f} "
+          f"| σ²-Spearman={sp_logs2:.3f} X̄-Spearman={sp_xbar:.3f}")
+    assert sp_logs2 < 0.9, f"expected σ²-collapse; got Spearman {sp_logs2:.2f}"
+    assert sp_xbar > 0.9, f"expected X̄ to survive; got Spearman {sp_xbar:.2f}"
