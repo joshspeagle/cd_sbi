@@ -7,3 +7,4 @@ n_iid: 10
 d_out: 2
 hidden: ${budget.cdsbi_flow_hidden}
 depth: 2
+standardize: true

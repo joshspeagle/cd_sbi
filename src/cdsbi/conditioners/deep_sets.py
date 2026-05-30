@@ -27,11 +27,12 @@ def _tanh_mlp(in_dim: int, hidden: int, out_dim: int, depth: int) -> nn.Sequenti
 
 class DeepSetsConditioner(nn.Module):
     def __init__(self, n_iid: int, d_out: int = 2, hidden: int = 64, depth: int = 2,
-                 momentum: float = 0.1):
+                 momentum: float = 0.1, standardize: bool = True):
         super().__init__()
         self.n_iid = n_iid
         self.d_out = d_out
         self.momentum = momentum
+        self.standardize = standardize
         self.phi = _tanh_mlp(1, hidden, hidden, depth)        # per-element ℝ→ℝ^h
         self.rho = _tanh_mlp(hidden, hidden, d_out, depth)    # pooled ℝ^h→ℝ^{d_out}
         self.register_buffer("running_mean", torch.zeros(d_out))
@@ -44,15 +45,16 @@ class DeepSetsConditioner(nn.Module):
         n, m = x.shape
         h = self.phi(x.reshape(n * m, 1)).reshape(n, m, -1).mean(dim=1)   # (n, hidden)
         feats = self.rho(h)                                              # (n, d_out)
-        if self.training:
-            batch_mean = feats.mean(dim=0).detach()
-            batch_var = feats.var(dim=0, unbiased=False).detach()
-            self.running_mean.mul_(1 - self.momentum).add_(self.momentum * batch_mean)
-            self.running_var.mul_(1 - self.momentum).add_(self.momentum * batch_var)
-            mean, var = batch_mean, batch_var
-        else:
-            mean, var = self.running_mean, self.running_var
-        feats = (feats - mean) / torch.sqrt(var + 1e-5)
+        if self.standardize:
+            if self.training:
+                batch_mean = feats.mean(dim=0).detach()
+                batch_var = feats.var(dim=0, unbiased=False).detach()
+                self.running_mean.mul_(1 - self.momentum).add_(self.momentum * batch_mean)
+                self.running_var.mul_(1 - self.momentum).add_(self.momentum * batch_var)
+                mean, var = batch_mean, batch_var
+            else:
+                mean, var = self.running_mean, self.running_var
+            feats = (feats - mean) / torch.sqrt(var + 1e-5)
         log_det = torch.zeros(n, dtype=x.dtype, device=x.device)
         return feats, log_det
 

@@ -39,3 +39,17 @@ def test_running_standardization_eval_uses_buffers():
     cond.eval()
     f1, _ = cond.encode(x); f2, _ = cond.encode(x)
     assert torch.allclose(f1, f2)
+
+
+def test_standardize_false_passes_raw_rho_output():
+    import torch
+    from cdsbi.conditioners.deep_sets import DeepSetsConditioner
+    torch.manual_seed(0)
+    cond = DeepSetsConditioner(n_iid=10, d_out=2, hidden=16, standardize=False).eval()
+    x = torch.randn(64, 10)
+    feats, log_det = cond.encode(x)
+    assert feats.shape == (64, 2) and torch.allclose(log_det, torch.zeros(64))
+    n, m = x.shape
+    h = cond.phi(x.reshape(n * m, 1)).reshape(n, m, -1).mean(dim=1)
+    raw = cond.rho(h)
+    assert torch.allclose(feats, raw, atol=1e-6)   # no standardization applied
