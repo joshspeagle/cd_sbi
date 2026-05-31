@@ -22,9 +22,30 @@ class Coverage(Diagnostic):
         # F7: x_per_theta is an optional dict {theta_0_repr: x_tensor} pre-drawn
         # at the dispatcher level so Coverage / SetSize / JointMahalanobis share
         # a single X|θ_0 draw per θ_0 (slicing to each diagnostic's n_per_theta).
+        proc = trained.procedure
+        # Scalable fast path: delegate to the chunked, statistic-once engine when the
+        # procedure exposes pivot / test_statistic / contains_batch (everything except
+        # confidence_set-only procedures). The engine is verified bit-identical to the
+        # loop below (max|Δ|=0.0000) but memory-bounded (no n×d precompute → no OOM)
+        # and statistic-once (no per-α / per-diagnostic recompute) — what makes high-d /
+        # autograd (Score-CD) evaluation tractable.
+        if any(hasattr(proc, m) for m in ("pivot", "test_statistic", "contains_batch")):
+            from cdsbi.diagnostics.engine import evaluate_coverage
+            out = evaluate_coverage(proc, simulator, self.theta_0_grid, self.alpha_grid,
+                                    n_per_theta=self.n_per_theta, x_per_theta=x_per_theta)
+            cov = out["coverage"].copy()
+            cov["n_eval"] = int(self.n_per_theta)
+            cov["passed"] = (cov["empirical"] - cov["nominal"]).abs() <= 0.02
+            cov["tolerance"] = 0.02
+            return DiagnosticResult(
+                name=self.name, value=cov, passed=bool(cov["passed"].all()),
+                noise_floor=0.02, n_samples=len(self.theta_0_grid) * self.n_per_theta,
+            )
+
+        # Fallback: per-sample confidence_set construction (set-only procedures).
         rng = np.random.default_rng(0)
         rows = []
-        has_fast_path = hasattr(trained.procedure, "contains_batch")
+        has_fast_path = False
         for theta_0 in self.theta_0_grid:
             theta_repr = str(list(map(
                 float,

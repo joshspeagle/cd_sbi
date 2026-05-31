@@ -98,7 +98,8 @@ def _build_flow(cfg: DictConfig, simulator) -> Any:
         # or nflows raises "Dimension 1 must be of size 1" deep in the permutation
         # transform. Dispatch on cfg.method.name to get the right shape.
         method_name = OmegaConf.select(cfg, "method.name", default="")
-        if method_name == "nle":
+        if method_name in ("nle", "score_cd_rao", "score_cd_cal"):
+            # NLE and Score-CD both model p(X|θ): features=d_x, conditioned on θ.
             return _instantiate(
                 "cdsbi.flows.maf_adapter.MAFAdapter",
                 features=int(simulator.d_x),
@@ -233,6 +234,18 @@ def _build_method(cfg: DictConfig, simulator) -> Any:
     if m.name in ("npe", "nle"):
         flow = _build_flow(cfg, simulator)
         return _instantiate(runner_class, flow=flow, device=cfg.device)
+    if m.name in ("score_cd_rao", "score_cd_cal"):
+        # Score-CD: NLE-shaped MAF density model + score (Rao) CD readout.
+        flow = _build_flow(cfg, simulator)
+        return _instantiate(
+            runner_class,
+            flow=flow,
+            variant=str(m.variant),
+            fisher_n=int(OmegaConf.select(m, "fisher_n", default=4000)),
+            quantile_hidden=int(OmegaConf.select(m, "quantile_hidden", default=64)),
+            quantile_depth=int(OmegaConf.select(m, "quantile_depth", default=2)),
+            device=cfg.device,
+        )
     if m.name == "nre":
         return _instantiate(
             runner_class,
@@ -295,6 +308,12 @@ def _fit_config(cfg: DictConfig, method_name: str) -> dict:
             **_recipe_dict(t),
             "n_train_stat": int(t.n_train),
             "n_train_quantile": int(t.n_train) // 2,
+            "alpha_grid": list(cfg.experiment.alpha_grid),
+        }
+    if method_name in ("score_cd_rao", "score_cd_cal"):
+        return {
+            **_recipe_dict(t),
+            "n_train_quantile": int(t.n_train) // 2,   # cal variant's calibration set
             "alpha_grid": list(cfg.experiment.alpha_grid),
         }
     raise ValueError(method_name)
@@ -398,8 +417,13 @@ def _run_diagnostics(cfg: DictConfig, trained, simulator, eval_data, rd: RunDir)
     # via a 3-tuple eval_data. Saves two forward passes per run.
     theta_eval, x_eval = eval_data
     if isinstance(trained.procedure, PivotBasedProcedure):
+        # Chunk the pivot precompute so peak memory is O(chunk), not O(n_eval) — the
+        # un-chunked forward was a 21 GiB OOM for the single-index flow at d=5.
         with torch.no_grad():
-            r_precomputed = trained.procedure.pivot(theta_eval, x_eval).detach()
+            n = theta_eval.shape[0]
+            chunks = [trained.procedure.pivot(theta_eval[i:i + 2048], x_eval[i:i + 2048]).detach()
+                      for i in range(0, n, 2048)]
+            r_precomputed = torch.cat(chunks, dim=0)
         eval_data_shared = (theta_eval, x_eval, r_precomputed)
     else:
         eval_data_shared = eval_data

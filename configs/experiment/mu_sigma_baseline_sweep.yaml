@@ -1,0 +1,30 @@
+# @package _global_
+# (μ,σ²) cross-method-ish sweep: CD-SBI vs Score-CD across budgets (model size).
+# NO `method.flow` block here (unlike mu_sigma_replication) so it does NOT override
+# Score-CD's flow=maf. CD-SBI runs need `method.flow=single_index_monotone` on the CLI;
+# Score-CD ignores the single_index_monotone /flow default (slow path → NLE-shaped MAF)
+# and ignores the sufficient_stat conditioner (its NLE models raw X).
+defaults:
+  - override /target: normal_mu_sigma
+  - override /flow: single_index_monotone
+  - override /conditioner: sufficient_stat
+  - override /method: cd_sbi
+  - override /budget: medium
+
+experiment:
+  name: mu_sigma_baseline_sweep
+  n_eval: 6000
+  eval_thetas_interior:
+    - [-0.69, -2.0]
+    - [-0.69,  0.0]
+    - [-0.69,  2.0]
+    - [ 0.0,  -2.0]
+    - [ 0.0,   0.0]
+    - [ 0.0,   2.0]
+    - [ 0.69, -2.0]
+    - [ 0.69,  0.0]
+    - [ 0.69,  2.0]
+  eval_thetas_edge: []
+  alpha_grid: [0.5, 0.68, 0.9, 0.95]
+  n_eval_per_theta: 2000
+  joint_mahalanobis_n_per_theta: 2000

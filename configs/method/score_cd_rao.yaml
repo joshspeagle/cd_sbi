@@ -1,0 +1,7 @@
+name: score_cd_rao
+runner_class: cdsbi.methods.score_cd.ScoreCDRunner
+flow: maf            # NLE-shaped MAF density model q(X|θ) — identical to the NLE baseline
+variant: rao         # asymptotic Rao pivot: U^T Î(θ)^{-1} U ~ χ²_{d_θ}
+fisher_n: 4000       # MC sample count for the per-θ Fisher estimate
+quantile_hidden: ${budget.quantile_hidden}   # unused by rao; present for a uniform schema
+quantile_depth: 2

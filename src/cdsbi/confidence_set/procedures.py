@@ -195,6 +195,17 @@ def _ray_sample_set_boundary(
     return _contains, boundary
 
 
+def _chunked_inside(inside_fn, theta_flat: torch.Tensor, x_flat: torch.Tensor,
+                    chunk: int = 4096) -> torch.Tensor:
+    """Evaluate inside_fn over (N, ·) inputs in chunks so peak memory is O(chunk),
+    not O(N). The coarse center-grid is N = B·n_grid^d (exponential in d) — without
+    chunking this is a 21 GiB OOM for the single-index flow at d=5."""
+    outs = []
+    for i in range(0, theta_flat.shape[0], chunk):
+        outs.append(inside_fn(theta_flat[i:i + chunk], x_flat[i:i + chunk]))
+    return torch.cat(outs, dim=0)
+
+
 def _ray_sample_set_boundary_batched(
     x_obs_batch: torch.Tensor,
     inside_fn,
@@ -229,8 +240,13 @@ def _ray_sample_set_boundary_batched(
     lo, hi = theta_range
     B = x_obs_batch.shape[0]
 
-    # 1) Coarse grid argmin per X_obs via one batched inside_fn eval.
-    axes = [torch.linspace(lo, hi, n_grid_per_dim, dtype=dtype, device=device)
+    # 1) Coarse grid argmin per X_obs (center seed). A full n_grid_per_dim^d grid is
+    #    exponential in d, so cap the total grid size (only bites at d≥4; d≤3 keep the
+    #    default 9/coord). The grid is just a coarse seed for L-BFGS refinement, so a
+    #    coarser grid at high d is fine.
+    _G_MAX = 4096
+    n_gpd = max(2, min(int(n_grid_per_dim), int(_G_MAX ** (1.0 / d))))
+    axes = [torch.linspace(lo, hi, n_gpd, dtype=dtype, device=device)
             for _ in range(d)]
     mesh = torch.stack(torch.meshgrid(*axes, indexing="ij"), dim=-1).view(-1, d)  # (G, d)
     G = mesh.shape[0]
@@ -239,7 +255,7 @@ def _ray_sample_set_boundary_batched(
         -1, x_obs_batch.shape[-1]
     )
     with torch.no_grad():
-        vals = inside_fn(theta_mesh_exp, x_obs_exp).view(B, G)  # (B, G)
+        vals = _chunked_inside(inside_fn, theta_mesh_exp, x_obs_exp).view(B, G)  # (B, G)
     grid_argmin = vals.argmin(dim=1)  # (B,)
     centers_init = mesh[grid_argmin]  # (B, d)
 
@@ -292,7 +308,7 @@ def _ray_sample_set_boundary_batched(
             m = 0.5 * (t_lo + t_hi)  # (B, K)
             theta_m = centers_exp + m.unsqueeze(-1) * u_exp  # (B, K, d)
             theta_flat = theta_m.reshape(-1, d)  # (B*K, d)
-            v = inside_fn(theta_flat, x_obs_for_eval).view(B, n_rays)
+            v = _chunked_inside(inside_fn, theta_flat, x_obs_for_eval).view(B, n_rays)
             if v.device != device:
                 v = v.to(device)
             outside = v > 0
