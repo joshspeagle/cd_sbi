@@ -26,3 +26,4 @@ manuscript's exact KR pivot — complementary (notes §strategic fork).
 | file | what it shows |
 |---|---|
 | `proto_score_cd_zuko.py` | Score-CD with a zuko **NSF** density model (GPU-efficient). SLCP: NSF fit far better (-logq 10.99→3.06) but coverage UNCHANGED (0.111≈0.115), calibrated worse (0.648) → SLCP breakage is intrinsic regularity (Fisher degeneracy + sign-symmetry), NOT density quality. (μ,Σ): NSF≈MAF (0.066 vs 0.060). MAF→NSF is not a coverage lever; NSF is the sensible default density model regardless. |
+| `proto_lf2i_slcp.py` | LF2I-BFF benchmark on SLCP (Fisher-free calibrated): 0.148 benign grid / 0.500 full box — does NOT rescue SLCP; the degeneracy region breaks the whole calibration family, not just the score. |

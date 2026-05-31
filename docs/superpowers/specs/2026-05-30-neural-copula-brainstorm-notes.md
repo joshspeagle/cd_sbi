@@ -144,3 +144,27 @@ manuscript (a second, scalable estimator within the same CD framework).
 Rough prototypes (single seed, modest budgets, throwaway code). Numbers are
 directional, not validated replications. Next step (if pursued): a proper
 brainstorm→spec on the neural-copula method, then TDD implementation + replication.
+
+## SLCP "fix" probe: LF2I-BFF benchmark (2026-05-30)
+
+Hypothesis tested: swap the score for a Fisher-free CALIBRATED statistic (LF2I-BFF) →
+dodge the degeneracy. Result (fixed LF2I-BFF, MC marginal_n=2048, asinh, true U(-3,3)^5 box):
+
+| | SLCP benign grid (θ₃,θ₄ away from 0) | SLCP full-box LHS (incl. θ₃,θ₄≈0) |
+|---|---|---|
+| Score-CD | 0.111 asymptotic / 0.648 calibrated | — |
+| LF2I-BFF | 0.148 (conservative @50%, fine @90/95) | **0.500** |
+
+**LF2I-BFF does NOT rescue SLCP** — comparable on the benign region, blows up over the
+full box. **Partial refutation of the statistic-swap fix:** the failure is not *which
+statistic*, it is that near θ₃,θ₄→0 the parameter is **nearly non-identifiable** — the
+likelihood is near-deterministic, the statistic's distribution is pathological/wildly
+θ-dependent, and the learned critical-value surface c_α(θ) can't be fit there, for ANY
+statistic in the family. Both Score-CD and LF2I-BFF handle regular SLCP and break in
+the degenerate region.
+
+**Sharper "what resolves it":** (a) reparameterize away the degeneracy (problem-specific,
+non-scalable — the trap); (b) degeneracy-aware / local critical-value calibration (open,
+hard); (c) accept that non-identifiable regions cannot have tight valid CDs — the honest
+output is an uninformative (huge/unbounded) set; the goal becomes validity + honesty
+about non-identifiability, not tightness. Evidence: `proto_lf2i_slcp.py`.
