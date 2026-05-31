@@ -196,7 +196,12 @@ baselines: NPE 0.05–0.10, NLE 0.025–0.25, NRE 0.08–0.19, LF2I 0.06–0.14.
   score readout.
 - **Budget-degradation (d≥2):** rao 0.043→0.192 (§8.2), 0.048→0.182 (§8.3) small→xlarge.
   §8.1 (d=1) flat. Hypothesis: NLE overfits the FIXED finite set (fresh_batch=false);
-  the score amplifies density overfitting. (fresh_batch=true check pending.)
+  the score amplifies density overfitting. **CONFIRMED:** fresh_batch=true (infinite
+  data, no overfit) → degradation VANISHES: §8.2 xlarge 0.192→0.033, large 0.075→0.029;
+  §8.3 xlarge 0.182→0.032, large 0.089→0.034 — back to the floor, alongside CD-SBI.
+  So it is NLE overfitting (score-amplified), fixable by fresh data / early-stopping /
+  regularization; CD-SBI's monotone pivot is regularized-by-construction so it needs
+  no such care (its key practical robustness advantage).
 - **§8.4 failure (0.363, flat):** Score-CD gets the on-T reduction (d_x=1) + no asinh,
   so its score on the skewed 1-D Gamma T is badly miscalibrated. Contradicts the raw-X
   probe (0.063, battery4) — confirms data-conditioning gates Score-CD. (Follow-up:
