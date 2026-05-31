@@ -417,8 +417,13 @@ def _run_diagnostics(cfg: DictConfig, trained, simulator, eval_data, rd: RunDir)
     # via a 3-tuple eval_data. Saves two forward passes per run.
     theta_eval, x_eval = eval_data
     if isinstance(trained.procedure, PivotBasedProcedure):
+        # Chunk the pivot precompute so peak memory is O(chunk), not O(n_eval) — the
+        # un-chunked forward was a 21 GiB OOM for the single-index flow at d=5.
         with torch.no_grad():
-            r_precomputed = trained.procedure.pivot(theta_eval, x_eval).detach()
+            n = theta_eval.shape[0]
+            chunks = [trained.procedure.pivot(theta_eval[i:i + 2048], x_eval[i:i + 2048]).detach()
+                      for i in range(0, n, 2048)]
+            r_precomputed = torch.cat(chunks, dim=0)
         eval_data_shared = (theta_eval, x_eval, r_precomputed)
     else:
         eval_data_shared = eval_data

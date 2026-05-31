@@ -47,10 +47,15 @@ def _chunked_apply(fn, theta_vec: np.ndarray, x: torch.Tensor, d: int, chunk: in
 
 
 def evaluate_coverage(procedure, simulator, theta_grid: Sequence, alpha_grid: List[float],
-                      n_per_theta: int = 2000, chunk_size: int = 512, seed: int = 0) -> dict:
+                      n_per_theta: int = 2000, chunk_size: int = 512, seed: int = 0,
+                      x_per_theta: dict = None) -> dict:
     """Compute coverage (and, for pivot procedures, joint χ²_d KS + per-coord PIT KS)
     over a θ₀ grid, statistic-once and chunked. Returns a dict with a `coverage`
-    DataFrame (schema matches the legacy Coverage diagnostic) + summary scalars."""
+    DataFrame (schema matches the legacy Coverage diagnostic) + summary scalars.
+
+    `x_per_theta`: optional {θ₀-repr → X tensor} to reuse a pre-drawn X|θ₀ (shared
+    with other diagnostics); falls back to simulating when a θ₀ is absent.
+    """
     d = int(procedure.d_theta)
     rng = np.random.default_rng(seed)
     has_pivot = hasattr(procedure, "pivot")
@@ -61,7 +66,13 @@ def evaluate_coverage(procedure, simulator, theta_grid: Sequence, alpha_grid: Li
 
     for theta_0 in theta_grid:
         v = _theta_vec(theta_0, d)
-        x = simulator.sample_x_given_theta(theta_0, n_per_theta, rng)   # simulate-once
+        x = None
+        if x_per_theta is not None:
+            x = x_per_theta.get(str(list(map(float, v))))
+            if x is not None:
+                x = x[:n_per_theta]
+        if x is None:
+            x = simulator.sample_x_given_theta(theta_0, n_per_theta, rng)   # simulate-once
 
         if has_pivot:
             r = _chunked_apply(procedure.pivot, v, x, d, chunk_size).cpu().numpy()  # (n,d) once
