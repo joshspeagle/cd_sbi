@@ -1,0 +1,7 @@
+name: score_cd_cal
+runner_class: cdsbi.methods.score_cd.ScoreCDRunner
+flow: maf            # NLE-shaped MAF density model q(X|θ) — identical to the NLE baseline
+variant: cal         # calibrated score-norm: stat=‖U‖², learned c_α(θ) (LF2I-style)
+fisher_n: 4000       # unused by cal; present for a uniform schema
+quantile_hidden: ${budget.quantile_hidden}
+quantile_depth: 2
