@@ -99,6 +99,36 @@ no-sufficient-statistic targets and higher d — but it is **NOT universal**: mu
 non-identifiable / Fisher-degenerate problems (a large part of the SBI benchmark suite)
 need a different CD construction.
 
+## Naming + NSF density model (2026-05-30)
+
+**Method name: Score-CD** (honest: NLE density model + score-test confidence-distribution
+readout). Considered CD-NLE / Pivot-SBI; Score-CD names the mechanism.
+
+**MAF → NSF density model (zuko), repeat SLCP + (μ,Σ).** Does a more expressive
+likelihood model fix SLCP, or is the failure intrinsic?
+
+| target | NLE -logq (MAF → NSF) | asymptotic (MAF → NSF) | calibrated (MAF → NSF) |
+|---|---|---|---|
+| SLCP | 10.99 → **3.06** (much better fit) | 0.115 → **0.111** (unchanged) | 0.426 → **0.648** (worse) |
+| (μ,Σ) d=5 | — → 15.07 | 0.060 → 0.066 | 0.038 → 0.055 |
+
+**Decisive finding:** NSF fit the SLCP likelihood *dramatically* better (−logq 10.99→3.06)
+but Score-CD coverage **did not improve** (0.111≈0.115) and calibration got **worse**
+(0.648). So the SLCP breakage is **NOT a density-model-quality problem** — it is the
+**intrinsic regularity failure** of the score test: `θ₃,θ₄` enter squared → Fisher
+**degeneracy** at `θ₃,θ₄→0` (which the U(−3,3) prior hits) + **sign-symmetry
+multimodality**. A better likelihood model makes the density sharper but the score
+statistic *more* pathological at the degeneracies, so calibration fails harder. **The
+regularity boundary is architecture-independent.** On the regular (μ,Σ), NSF≈MAF
+(0.066 vs 0.060) — the density model is *not* the coverage lever there either; the
+gap to the exact oracle is finite-sample asymptotics, not flow quality.
+
+**Implication:** MAF vs NSF does not move Score-CD coverage on these targets. NSF is
+still the sensible **default density model** (far better fit on complex likelihoods;
+needed for high-d / structured data), but the coverage levers are (a) problem
+regularity and (b) finite-sample calibration — not flow expressivity. Evidence:
+`…/evidence/2026-05-30-neural-copula-probes/proto_score_cd_zuko.py`.
+
 ## The strategic fork (for the broad discussion)
 
 The score CD is **asymptotic** (finite-sample loose, sharpenable by calibration);
