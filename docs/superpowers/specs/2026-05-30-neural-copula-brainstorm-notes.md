@@ -209,3 +209,37 @@ baselines: NPE 0.05–0.10, NLE 0.025–0.25, NRE 0.08–0.19, LF2I 0.06–0.14.
 - **CD-SBI stays at the floor (0.02–0.03) across all sections/budgets** — the comparison
   reinforces its robustness; Score-CD is a strong low/medium-budget method but brittle
   (overfits with budget, sensitive to data conditioning / reduction).
+
+## Scalable eval engine + (μ,Σ) comparison (2026-05-31)
+
+**The μΣ full sweep exposed that the *evaluation harness* doesn't scale** (≈93 min/run;
+21 GiB OOM at d=5) — the per-θ₀/per-diagnostic loops recompute the statistic (a
+backward pass for Score-CD) in one un-chunked forward. Redesigned per Option-1:
+`cdsbi/diagnostics/engine.py::evaluate_coverage` — **statistic-once** (compute the
+pivot r / test-stat T a single time per θ₀, derive all metrics), **chunked**
+(memory O(chunk)), **simulate-once**. Results:
+- **Verified bit-identical to the legacy Coverage diagnostic** on trained models
+  (CD-SBI pivot + Score-CD critical-value: max|Δ|=0.0000). Pure speed/memory win.
+- **21 GiB OOM → 75 MiB; ~80 min eval → <1 s** (~5000×). Correctness + chunk-invariance
+  unit-tested (`tests/unit/test_eval_engine.py`).
+
+**(μ,Σ) d=5 comparison** (engine-evaluated, 16-pt LHS grid, 12k steps, fresh_batch=False,
+3 seeds), coverage_error_max by budget:
+
+| method | small | medium | large | xlarge |
+|---|---|---|---|---|
+| cd_sbi | 0.054 | 0.094 | 0.091 | 0.152 |
+| score_cd_rao | 0.110 | 0.105 | 0.105 | 0.135 |
+| score_cd_cal | 0.124 | 0.170 | 0.125 | 0.199 |
+
+- Both above the §8.1–8.3 floor: d=5 is harder (CD-SBI's documented μ₂ extreme-θ₀ limit
+  inflates the worst-over-grid metric; finite-data overfitting hits both). On a
+  non-extreme 3-pt grid CD-SBI is 0.023 (floor) — the 16-pt LHS worst-case is
+  extreme-θ₀-driven.
+- **CD-SBI degrades with budget (0.054→0.152)** at d=5 (bigger single_index overfits
+  the fixed set); **Score-CD-rao stays flat ~0.11–0.14 and matches/beats CD-SBI at
+  large/xlarge** — a reversal from lower d where CD-SBI's by-construction regularization
+  kept it at floor.
+
+**Follow-up:** wire the engine into run.py to make the whole harness scalable (the
+engine is a standalone primitive now; the §8.x diagnostic loop is still the legacy path).
