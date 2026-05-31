@@ -3641,6 +3641,25 @@ which is asymptotically \(\mathcal{N}(0, 1)\) under \(P_\theta\) and is
 the standard frequentist pivot for one-parameter exponential families.
 The connection is developed in \citet[ch.~5]{SchwederHjort2016}.
 
+\paragraph{A test-statistic variant: LF2I-Score.}
+The same standardized-score / signed-root-LR object can be used not as a
+by-construction pivot but as a \emph{test statistic} in the
+Neyman-construction mode of LF2I \citep{DalmassoEtAl2024} and WALDO
+\citep{MasseranoEtAl2023}. Where the monotone-architectural recipe of
+\S\ref{sec:6} is out of reach --- high \(d\), or no learnable
+low-dimensional sufficient statistic (\S\ref{subsec:11.5},
+\S\ref{subsec:11.7}) --- the score of a learned neural likelihood
+\(\nabla_\theta \log \hat p(X \mid \theta)\) can be calibrated by quantile
+regression of its per-\(\theta\) distribution, exactly as LF2I calibrates
+its odds-based statistic. This ``LF2I-Score'' construction is scalable to
+any differentiable likelihood model and to higher \(d\), but it forgoes
+the defining properties of the present framework: its coverage is
+asymptotic --- finite-sample only through the separate calibration stage
+--- rather than exact and by construction, and it inherits the two-stage
+structure of LF2I rather than CD-SBI's single forward pass. It is
+therefore a complement to, not an instance of, the by-construction CD
+developed here, and we treat it separately.
+
 \begin{figure}[htbp]
 \centering
 \includegraphics[width=0.85\linewidth]{figures/c6_sbi_position.pdf}

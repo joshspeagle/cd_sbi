@@ -423,8 +423,38 @@ normal-scores/Gaussian-copula transform). Likely the **fixed-dim summary bottlen
 itself the unscalable step**. A dedicated broad strategy brainstorm is **deferred until
 the current experiments are done** (user's call).
 
-**Next milestone:** the scalable neural-copula strategy discussion (deferred), then the
-v-track roadmap: v4 (SBI benchmark — Two Moons, SLCP, Gaussian Mixture), v5 (§3.7
-alt-loss — the II-A finding feeds this), v6 (synthetic high-d), v7 (real-data
-astronomy), v8 (image/sequence). Open threads: whether a power/sharpness term rescues
-II-A; a richer ctx-conditioned index for cross-coupled coords (the μ₂ refinement).
+## LF2I-Score (neural-likelihood score CD) + scalable eval engine — landed on main (2026-05-31)
+
+An exploration of a *scalable* CD construction (branch `feat/neural-copula-explore`,
+merged to main). Notes: `docs/superpowers/specs/2026-05-30-neural-copula-brainstorm-notes.md`;
+evidence: `docs/superpowers/evidence/2026-05-30-neural-copula-probes/`.
+
+- **Method (`cdsbi/methods/score_cd.py`, configs `score_cd_{rao,cal}`).** NLE density
+  `q(X|θ)` (MAF) read out as a frequentist CD via the **score** `∇_θ log q`: `rao` =
+  Rao stat `UᵀÎ⁻¹U ~ χ²` (asymptotic χ² threshold); `cal` = `‖U‖²` + learned `c_α(θ)`
+  (LF2I-style). Both are `CriticalValueProcedure`s. Cross-method matched-budget sweep
+  §8.1–8.4 + (μ,σ²)/(μ,Σ): **competitive-to-best at low/medium budget on regular
+  targets** but **brittle in the finite-data regime** (the score amplifies NLE
+  overfitting → coverage degrades with budget; `fresh_batch=true` removes it) where
+  CD-SBI's by-construction regularization wins; **breaks on multimodal/non-regular
+  (SLCP)** — as does the whole calibration family (incl. fixed LF2I-BFF).
+- **NAMING DECISION:** this is **NOT a CD-SBI variant** — its calibrated form *is* LF2I
+  (test statistic + Neyman-inverted critical values) with the score as the statistic.
+  Renamed **LF2I-Score**, kept a **separate (LF2I-family) contribution**. Integrated
+  into the manuscript only as a measured **§10 forward-pointer** ("A test-statistic
+  variant: LF2I-Score") — asymptotic/two-stage complement, not exact/by-construction.
+  Manuscript rebuilds cleanly. Code rename deferred + gated on a **novelty lit-check**
+  (ACORE=odds, Waldo=posterior moments, BFF=Bayes factor — is the score slot open?).
+  See [[scalable-neural-copula-strategy]].
+- **Scalable eval engine (`cdsbi/diagnostics/engine.py`).** statistic-once + chunked +
+  simulate-once; verified **bit-identical** to the legacy Coverage diagnostic. Wired
+  into `run.py` (Coverage delegates; pivot-precompute chunked; SetSize set-construction
+  grid capped+chunked — the real OOM source). **Kills the d=5 OOM (21 GiB → 75 MiB) and
+  the ~93-min eval (→ <1 s).** This is the reusable "check things at scale" primitive.
+
+**Next milestone:** the scalable neural-copula strategy discussion (deferred); a
+separate **LF2I-Score** write-up (+ lit-check + code rename); the multimodal/SLCP
+frontier. Then the v-track roadmap: v4 (SBI benchmark — Two Moons, SLCP, Gaussian
+Mixture), v5 (§3.7 alt-loss — the II-A finding feeds this), v6 (synthetic high-d),
+v7 (real-data astronomy), v8 (image/sequence). Open threads: whether a power/sharpness
+term rescues II-A; a richer ctx-conditioned index for cross-coupled coords (μ₂).

@@ -243,3 +243,37 @@ pivot r / test-stat T a single time per θ₀, derive all metrics), **chunked**
 
 **Follow-up:** wire the engine into run.py to make the whole harness scalable (the
 engine is a standalone primitive now; the §8.x diagnostic loop is still the legacy path).
+
+## DECISION (2026-05-31): rename Score-CD → LF2I-Score; integrate as a §10 pointer; close out
+
+After a deep read of the manuscript's aims/spine (§1.3 top-line goal = *exact*
+pointwise CD; §3.7 = NF-MLE is the SNL/Class-5 loss and the contribution is the
+*monotone architectural recipe* that makes it a CD *by construction*; §4–6 =
+uniqueness/UMPU theorems; §10 already identifies the exact pivot with the
+standardized **score / signed-root LR**, "asymptotically N(0,1)"):
+
+**Verdict — the method is NOT a CD-SBI variant; it is an LF2I-family method.** Its
+calibrated form IS LF2I (learned test statistic + Neyman-inverted quantile critical
+values) with the **score** as the statistic — the mode §10 defines CD-SBI *against*.
+So it is renamed **LF2I-Score** and kept a **separate contribution**, not a section of
+the exact-CD paper (adding it would dilute the crisp exact/by-construction/UMPU thesis
+and blur the §10 distinction).
+
+**Integrated into the manuscript** as a single measured paragraph in §10 ("A
+test-statistic variant: LF2I-Score") appended to the existing score/signed-root-LR
+discussion: notes the score of a learned neural likelihood, calibrated by quantile
+regression, gives a scalable confidence set in the LF2I/Neyman mode — *asymptotic, not
+exact/by-construction; two-stage* — a complement to CD-SBI, developed separately. Cites
+existing refs (LF2I, WALDO, Schweder–Hjort); manuscript rebuilt cleanly.
+
+**Code naming:** the implementation is still `cdsbi/methods/score_cd.py` +
+`score_cd_{rao,cal}` configs (calibrated variant = LF2I-Score; asymptotic-χ² variant =
+"Rao test on a neural likelihood"). A code rename is deferred to the separate LF2I-Score
+contribution — and **gated on a novelty literature check** (is neural-likelihood-score
+as the LF2I statistic new? ACORE=odds, Waldo=posterior moments, BFF=Bayes factor —
+the score slot may be open, but score-based frequentist SBI is active).
+
+**Exploration closed.** Reusable outputs landed on main: the Score-CD/LF2I-Score method,
+the scalable eval engine (wired into run.py — kills the d=5 OOM), and the §10 manuscript
+pointer. Open follow-ups: the separate LF2I-Score paper (+ lit check + code rename), the
+deferred neural-copula strategy brainstorm, the multimodal/SLCP frontier.
