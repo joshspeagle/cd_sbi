@@ -168,3 +168,39 @@ non-scalable — the trap); (b) degeneracy-aware / local critical-value calibrat
 hard); (c) accept that non-identifiable regions cannot have tight valid CDs — the honest
 output is an uninformative (huge/unbounded) set; the goal becomes validity + honesty
 about non-identifiability, not tightness. Evidence: `proto_lf2i_slcp.py`.
+
+## Score-CD productionized + matched-budget cross-method sweep (2026-05-31)
+
+`ScoreCDRunner` (src/cdsbi/methods/score_cd.py): NLE(MAF, identical to the NLE
+baseline) + score CD readout, two variants as CriticalValueProcedures —
+`rao` (UᵀÎ(θ)⁻¹U ~ χ²_{d_θ}, analytic threshold) and `cal` (‖U‖² + learned c_α(θ)).
+Wired into run.py (configs score_cd_{rao,cal}); §8.4's on-T ReducedSimulator applies
+(method≠cd_sbi). Added to the §8.1–8.4 sweeps (2 variants × 4 budgets × 5 seeds × 4
+sections = 160 runs, fresh_batch=false).
+
+**coverage_error_max (mean/5 seeds), by budget — floor ~0.025:**
+
+| sec | method | small | med | large | xlarge |
+|---|---|---|---|---|---|
+| 8.1 | cd_sbi / score_rao / nle | 0.025 / 0.029 / 0.025 | 0.025/0.030/0.025 | 0.025/0.029/0.030 | 0.025/0.030/0.028 |
+| 8.2 | cd_sbi / score_rao | 0.022/**0.043** | 0.020/0.043 | 0.026/0.075 | 0.027/**0.192** |
+| 8.3 | cd_sbi / score_rao | 0.022/**0.048** | 0.025/0.044 | 0.027/0.089 | 0.026/**0.182** |
+| 8.4 | cd_sbi / score_rao / lf2i | 0.028/**0.363**/0.090 | .../.../0.078 | .../.../0.062 | 0.034/0.363/0.057 |
+
+(score_cd_cal: §8.1 0.08, §8.2 0.08–0.12, §8.3 0.07–0.13, §8.4 0.12–0.21. Other
+baselines: NPE 0.05–0.10, NLE 0.025–0.25, NRE 0.08–0.19, LF2I 0.06–0.14.)
+
+**Findings:**
+- **Score-CD-rao beats every non-CD-SBI baseline (NPE/NLE/NRE/LF2I) at small/medium
+  budget on §8.2/§8.3** (0.043–0.048) and ties NLE/CD-SBI on §8.1 — a real win for the
+  score readout.
+- **Budget-degradation (d≥2):** rao 0.043→0.192 (§8.2), 0.048→0.182 (§8.3) small→xlarge.
+  §8.1 (d=1) flat. Hypothesis: NLE overfits the FIXED finite set (fresh_batch=false);
+  the score amplifies density overfitting. (fresh_batch=true check pending.)
+- **§8.4 failure (0.363, flat):** Score-CD gets the on-T reduction (d_x=1) + no asinh,
+  so its score on the skewed 1-D Gamma T is badly miscalibrated. Contradicts the raw-X
+  probe (0.063, battery4) — confirms data-conditioning gates Score-CD. (Follow-up:
+  raw-X / asinh for §8.4.)
+- **CD-SBI stays at the floor (0.02–0.03) across all sections/budgets** — the comparison
+  reinforces its robustness; Score-CD is a strong low/medium-budget method but brittle
+  (overfits with budget, sensitive to data conditioning / reduction).
