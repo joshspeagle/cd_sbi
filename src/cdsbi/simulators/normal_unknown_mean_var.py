@@ -44,6 +44,15 @@ class NormalUnknownMeanVar:
         return (self.log_sigma_range[0], self.mu_range[0])
 
     @property
+    def theta_range(self) -> Tuple[float, float]:
+        """Scalar bounding box (min low, max high) over the per-dim priors. Used only
+        as bisection bounds by procedures taking a scalar theta_range (e.g.
+        CriticalValueProcedure / Score-CD); pointwise coverage does not depend on it."""
+        lo = min(self.log_sigma_range[0], self.mu_range[0])
+        hi = max(self.log_sigma_range[1], self.mu_range[1])
+        return (float(lo), float(hi))
+
+    @property
     def theta_signs(self) -> Tuple[float, float]:
         """∂r_k/∂θ_k sign per coord: both increasing-in-θ (= +1)."""
         return (1.0, 1.0)

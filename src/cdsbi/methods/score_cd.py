@@ -71,7 +71,9 @@ class ScoreCDRunner(Runner):
                 th = theta_rows.detach().clone().to(dev).requires_grad_(True)
                 lp = flow.log_prob(x.to(dev), context=th).sum()
                 g, = torch.autograd.grad(lp, th)
-            return g.detach()
+            # Guard against non-finite scores from an under-trained / unstable flow
+            # (a huge/NaN gradient on an extreme X would poison the Fisher matmul).
+            return torch.nan_to_num(g.detach(), nan=0.0, posinf=0.0, neginf=0.0)
 
         if self.variant == "rao":
             fisher_n = self.fisher_n
