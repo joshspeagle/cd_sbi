@@ -40,3 +40,30 @@ def test_stage1_freezes_conditioner():
            "batch_size": 256, "fresh_batch": True}
     runner.fit(sim, cfg, seed=0)
     assert all(not p.requires_grad for p in runner.conditioner.parameters())
+
+
+import math
+from scipy.stats import chi2
+
+
+def test_full_two_stage_calibrates():
+    """End-to-end: regress→freeze→NF-MLE yields a pivot calibrated at the truth
+    (coverage ≈ α) — validity (Thm 1)."""
+    sim = NormalUnknownMeanVar()
+    cond = MomentRegressionConditioner(n_iid=sim.n_iid, d_theta=sim.d_theta, target="theta")
+    flow = SingleIndexMonotoneFlow(d=sim.d_theta, theta_signs=sim.theta_signs,
+                                   feat_signs=sim.feat_signs, hidden=32)
+    runner = TwoStageCDSBIRunner(flow=flow, conditioner=cond, device="cpu")
+    cfg = {"lr": 1e-3, "stage1_steps": 1500, "stage2_steps": 3000,
+           "batch_size": 512, "fresh_batch": True}
+    trained = runner.fit(sim, cfg, seed=0)
+    proc = trained.procedure
+    rng = np.random.default_rng(2)
+    theta0 = np.array([math.log(1.0), 0.0])
+    xv = sim.sample_x_given_theta(theta0, 20000, rng)
+    th = torch.tensor(theta0, dtype=torch.float32).expand(20000, -1)
+    r = proc.pivot_fn(th, xv)
+    sq = (r ** 2).sum(-1).detach().numpy()
+    for a in (0.8, 0.9):
+        emp = float((sq <= chi2.ppf(a, df=2)).mean())
+        assert abs(emp - a) < 0.06, f"miscovers at α={a}: {emp:.3f}"

@@ -89,7 +89,23 @@ class TwoStageCDSBIRunner:
                             n_steps=s1 + s2, wall_clock_sec=wall, arch_metadata=arch_meta)
 
     def _fit_pivot(self, simulator, config, rngs, dev, n_steps):
-        return [], 0.0   # stubbed in this task; implemented in Task 4
+        self.flow.train()
+        opt = torch.optim.Adam(self.flow.parameters(), lr=float(config["lr"]))
+        grad_clip = float(config.get("grad_clip_norm", 5.0))
+        losses = []
+        t0 = time.time()
+        for _ in range(n_steps):
+            theta, x = simulator.sample(int(config["batch_size"]), rngs.train)
+            theta, x = theta.to(dev), x.to(dev)
+            with torch.no_grad():
+                feats, _ = self.conditioner.encode(x)
+            r, log_det = self.flow.forward(theta, context=feats)
+            loss_val = self.loss(r, log_det)
+            opt.zero_grad(); loss_val.backward()
+            torch.nn.utils.clip_grad_norm_(self.flow.parameters(), max_norm=grad_clip)
+            opt.step()
+            losses.append(loss_val.item())
+        return losses, time.time() - t0
 
     def n_params(self) -> dict:
         backbone = sum(p.numel() for p in self.flow.parameters())
