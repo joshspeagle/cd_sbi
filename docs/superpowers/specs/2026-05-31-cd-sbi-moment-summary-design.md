@@ -1,6 +1,14 @@
 # CD-SBI: non-oracle confidence distributions via posterior-moment summaries
 
-**Status:** design (brainstorm 2026-05-31). **Supersedes & retires**
+> **⚖️ VERDICT (2026-06-01) — explored, P1 built, line concluded.** P1 implemented &
+> reviewed; the (μ,σ²) replication showed **central/bulk calibration near-oracle but a
+> uniform (worst-θ₀) gap ~0.18→0.10-with-warp vs oracle 0.02** — the single-index
+> ceiling (§16) + the learned summary's μ-entanglement (theory note **§17**). Outcome:
+> **division of labor — CD/pivot for the regular/oracle regime; LF2I for the general /
+> non-oracle / multimodal frontier.** P2 partially built (sign-model sim + non-monotone
+> flow); P3/P4 not built. Kept as the design-of-record + the documented finding.
+
+**Status:** explored → see §17 verdict. (Originally: design, brainstorm 2026-05-31.) **Supersedes & retires**
 `2026-05-31-cd-sbi-s4-score-capture-design.md` — the Fisher-term / joint-training
 approach is dropped: sequential regression dissolves the collapse problem (no Fisher
 term, no §13.3 score bias, no likelihood-free-scoring phase), per theory note §15–16.

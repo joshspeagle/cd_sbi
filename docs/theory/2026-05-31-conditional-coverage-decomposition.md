@@ -956,6 +956,51 @@ high-order moment-regression variance (low orders well-estimated, high orders no
 
 ---
 
+## 17. Empirical verdict on non-oracle CD (the moment-summary line) — division of labor
+
+We built the non-oracle construction (sequential regression-summary → freeze →
+NF-MLE pivot; Phase-1 plan) and stress-tested its *uniform* calibration on (μ,σ²)
+against the oracle. Result and verdict:
+
+**Result.** Central and bulk calibration reach near-oracle (center coverage 0.012;
+Fisher-recovery 0.95 — *no collapse*; most of the θ₀-grid → ~0.02–0.05 with a
+monotone feature-warp). But **uniform (worst-θ₀) calibration does not**: worst-case
+coverage error **0.18** (single-index flow) → **0.10** (with the warp), vs the
+**oracle's 0.02**. The residual concentrates at small σ + extreme μ.
+
+**Root cause (confirmed by controlled experiments), two layers:**
+1. *Single-index ceiling (§16).* The learned posterior-mean summary is a **nonlinear**
+   transform of the sufficient statistic; the affine-index `SingleIndexMonotoneFlow`
+   makes **straight** level sets that cannot match the **curved** ones it then needs.
+   Decisive evidence: the **oracle calibrates perfectly through the identical
+   runner/recipe/flow (0.017)**, and **4× flow capacity does not help** (structural,
+   not under-training). A monotone feature-warp restores affinity and fixes the bulk
+   — *necessary but not sufficient*.
+2. *Learned-summary entanglement.* The residual (small-σ corner, **μ-dependent**) is
+   the learned `E[logσ|X]` lacking the oracle's Basu-clean `s²⊥X̄` separation; since σ
+   is first in the KR order it cannot condition on the leaked μ. Untested fix:
+   reorder so σ conditions on μ (a ~10-min loose end).
+
+**Verdict — *division of labor*, not "the pivot fails."** The pivot/CD machinery is
+**validated for the regular, (near-)sufficient-summary regime** (oracle d=1→5: ~0.02;
+the manuscript's contribution). But getting a *learned, fixed-dim* summary to
+calibrate **uniformly** non-oracle is materially harder than the oracle: validity is
+φ-free *in the limit* (Thm 1), yet a *finite-capacity* pivot calibrates a *structured*
+(oracle) summary far more easily than a learned one — the non-oracle price is not just
+efficiency but uniform-calibration difficulty. For the **general / non-oracle /
+multimodal frontier, LF2I is the more robust route**: it obtains exact coverage **by
+construction** (a Neyman-calibrated threshold), sidestepping the uniform-Gaussianization
+problem entirely — consistent with §15–16 (the closed-form CD is intrinsically regular;
+the general frontier is LF2I's). So:
+
+> **CD/pivot for the regular-oracle regime; LF2I for the general regime.**
+
+The non-oracle-CD-via-learned-summary line is recorded here as **valid-in-principle but
+uniform-calibration-limited**; the autoregressive-reorder experiment is the one untied
+loose end if a definitive close is ever wanted.
+
+---
+
 ### Changelog
 - 2026-05-31: initial note. Theorems 1, 5, Lemma 3, Props 2, 6 proven; non-oracle
   construction (§7) and S2/S4/S5 flagged conjectural/open. Validators scaffolded
