@@ -101,23 +101,30 @@ def _tanh_mlp(in_dim: int, hidden: int, out_dim: int, depth: int) -> nn.Sequenti
 
 
 class MomentRegressionConditioner(nn.Module):
-    def __init__(self, n_iid: int, d_theta: int, hidden: int = 64, depth: int = 2,
-                 target: str = "theta"):
+    def __init__(self, n_iid: int, d_theta: int, p: int = 1, hidden: int = 64,
+                 depth: int = 2, target: str = "theta"):
         super().__init__()
         if target not in ("theta", "theta_sq"):
             raise ValueError(f"target must be 'theta' or 'theta_sq', got {target}")
         self.n_iid = n_iid
         self.d_theta = d_theta
+        self.p = p                                              # obs dim (1 scalar; 2 bivariate)
         self.target = target
-        self.phi = _tanh_mlp(1, hidden, hidden, depth)         # per-element ℝ→ℝ^h
-        self.rho = _tanh_mlp(hidden, hidden, d_theta, depth)   # pooled ℝ^h→ℝ^{d_θ}
+        self.phi = _tanh_mlp(p, hidden, hidden, depth)          # per-observation ℝ^p→ℝ^h
+        self.rho = _tanh_mlp(hidden, hidden, d_theta, depth)    # pooled ℝ^h→ℝ^{d_θ}
 
     def encode(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        assert x.shape[-1] == self.n_iid, (
-            f"MomentRegressionConditioner expected {self.n_iid} iid obs, got {x.shape[-1]}"
+        # X is n_iid observations each in ℝ^p, flattened to width n_iid·p (p=1 ⟹ scalar
+        # iid, the μσ/sign case; p=2 ⟹ bivariate, the d=5 mu_cov case — pooling over
+        # observations, NOT over the p coords, so cross-moment structure is preserved).
+        assert x.shape[-1] == self.n_iid * self.p, (
+            f"MomentRegressionConditioner expected n_iid·p={self.n_iid * self.p} "
+            f"features, got {x.shape[-1]}"
         )
-        n, m = x.shape
-        h = self.phi(x.reshape(n * m, 1)).reshape(n, m, -1).mean(dim=1)   # (n, hidden)
+        n = x.shape[0]
+        obs = x.reshape(n, self.n_iid, self.p)                            # (n, n_iid, p)
+        h = self.phi(obs.reshape(n * self.n_iid, self.p)).reshape(
+            n, self.n_iid, -1).mean(dim=1)                                # (n, hidden)
         feats = self.rho(h)                                              # (n, d_θ)
         log_det = torch.zeros(n, dtype=x.dtype, device=x.device)
         return feats, log_det
