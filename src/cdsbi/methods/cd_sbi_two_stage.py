@@ -110,4 +110,5 @@ class TwoStageCDSBIRunner:
     def n_params(self) -> dict:
         backbone = sum(p.numel() for p in self.flow.parameters())
         head = self.conditioner.n_params()
-        return {"backbone": backbone, "head": head, "total": backbone + head, "kind": "flow"}
+        return {"backbone": backbone, "head": head, "calibration_stage": 0,
+                "total": backbone + head, "kind": "flow"}
