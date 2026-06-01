@@ -1,0 +1,7 @@
+# Two-stage moment-summary CD-SBI. name=cd_sbi routes through the generic branch;
+# runner_class swaps in the two-stage runner. R1-on flow for Phase 1.
+name: cd_sbi
+runner_class: cdsbi.methods.cd_sbi_two_stage.TwoStageCDSBIRunner
+flow: single_index_monotone        # method.flow guard (cb1e08e): set explicitly
+loss: nfmle
+allow_ablation: false              # R1-on flow gives {R1,R2}; NFMLELoss check passes

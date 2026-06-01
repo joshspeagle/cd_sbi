@@ -290,6 +290,9 @@ def _recipe_dict(t: DictConfig) -> dict:
         "lr_gamma": float(OmegaConf.select(t, "lr_gamma", default=0.999)),
         "batching": str(OmegaConf.select(t, "batching", default="random_replacement")),
         "grad_clip_norm": float(OmegaConf.select(t, "grad_clip_norm", default=5.0)),
+        "stage1_steps": OmegaConf.select(t, "stage1_steps", default=None),
+        "stage2_steps": OmegaConf.select(t, "stage2_steps", default=None),
+        "stage1_frac": float(OmegaConf.select(t, "stage1_frac", default=0.4)),
     }
 
 
