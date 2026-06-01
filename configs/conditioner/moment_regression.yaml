@@ -1,0 +1,5 @@
+name: moment_regression
+_target_: cdsbi.conditioners.moment_regression.MomentRegressionConditioner
+n_iid: 10
+d_theta: 2
+target: theta                       # m(θ)=θ (posterior mean) for the regular case
