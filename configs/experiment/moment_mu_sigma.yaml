@@ -8,6 +8,10 @@ defaults:
 method:
   flow: single_index_monotone       # ensure the cb1e08e guard takes
 training:
+  lr: 0.001            # Task-4 finding: Stage-2 NF-MLE calibration needs ~1e-3; the
+                       # default 3e-3 overshoots the narrow basin (h≈θ ⟹ low-entropy
+                       # conditional) and miscalibrates. 4000 Stage-1 steps still
+                       # converge the regression at 1e-3.
   stage1_steps: 4000
   stage2_steps: 8000
 experiment:
