@@ -44,6 +44,8 @@ def test_stage1_freezes_conditioner():
 
 import math
 from scipy.stats import chi2
+from cdsbi.conditioners.sufficient_stat import SufficientStatConditioner
+from cdsbi.diagnostics.fisher_recovery import fisher_det_ratio
 
 
 def test_full_two_stage_calibrates():
@@ -67,3 +69,30 @@ def test_full_two_stage_calibrates():
     for a in (0.8, 0.9):
         emp = float((sq <= chi2.ppf(a, df=2)).mean())
         assert abs(emp - a) < 0.06, f"miscovers at α={a}: {emp:.3f}"
+
+
+def test_learned_summary_efficiency_approaches_oracle_and_no_collapse():
+    """The frozen learned summary recovers σ-info (no collapse) and its Fisher-info
+    ratio approaches the oracle — efficiency is MEASURED here, not assumed."""
+    sim = NormalUnknownMeanVar()
+    cond = MomentRegressionConditioner(n_iid=sim.n_iid, d_theta=sim.d_theta, target="theta")
+    flow = SingleIndexMonotoneFlow(d=sim.d_theta, theta_signs=sim.theta_signs,
+                                   feat_signs=sim.feat_signs, hidden=32)
+    runner = TwoStageCDSBIRunner(flow=flow, conditioner=cond, device="cpu")
+    runner.fit(sim, {"lr": 2e-3, "stage1_steps": 3000, "stage2_steps": 0,
+                     "batch_size": 512, "fresh_batch": True}, seed=0)
+
+    def learned_h(simulator, x):
+        with torch.no_grad():
+            h, _ = runner.conditioner.encode(x)
+        return h
+
+    learned_ratio = fisher_det_ratio(sim, (math.log(1.0), 0.0), learned_h, seed=0)
+    # head-to-head: the oracle sufficient summary under the SAME estimator (→ ~1.0
+    # with the degree-3 fit). The learned summary should be efficient AND approach it.
+    oracle_ratio = fisher_det_ratio(
+        sim, (math.log(1.0), 0.0), lambda s, x: s.oracle_summary(x), seed=0)
+    print(f"\n  learned_ratio={learned_ratio:.4f}  oracle_ratio={oracle_ratio:.4f}")
+    assert learned_ratio > 0.8, f"learned summary not efficient: {learned_ratio:.3f}"
+    assert learned_ratio > 0.85 * oracle_ratio, (
+        f"learned ({learned_ratio:.3f}) should approach oracle ({oracle_ratio:.3f})")
