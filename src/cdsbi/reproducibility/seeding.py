@@ -12,6 +12,12 @@ class SeededRNGs:
     train: np.random.Generator
     eval: np.random.Generator
     init: np.random.Generator
+    # CPF three-split firewall streams (spec 2026-06-07): train the flow /
+    # fit the calibrator + conformal scores / independent audit. Disjoint by
+    # construction (distinct _derive labels).
+    flow: np.random.Generator
+    cal: np.random.Generator
+    audit: np.random.Generator
 
 
 def _derive(master: int, label: str) -> int:
@@ -36,4 +42,7 @@ def seed_everything(seed: int) -> SeededRNGs:
         train=np.random.default_rng(_derive(seed, "train")),
         eval=np.random.default_rng(_derive(seed, "eval")),
         init=np.random.default_rng(_derive(seed, "init")),
+        flow=np.random.default_rng(_derive(seed, "flow")),
+        cal=np.random.default_rng(_derive(seed, "cal")),
+        audit=np.random.default_rng(_derive(seed, "audit")),
     )
