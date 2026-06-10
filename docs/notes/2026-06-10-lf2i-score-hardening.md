@@ -13,7 +13,7 @@ missing experiments, then the accounting/eval upgrades, then re-run.
 | 2 | NLE/NRE `ℓ_max` grid at d>1 | calib | FIX-FIRST | **DONE** | gradient-ascent refinement from top-k grid starts (derivative-free fallback); closed-form-exact in tests; real-NLE quantified |
 | 3 | Score-CD-cal `n_params` undercount | match | UPGRADE+rerun | **DONE** | head counted (mirrors LF2I-BFF); budget-width head is <15% of backbone (no retune needed — configs already interpolate `${budget.quantile_hidden}`) |
 | 4 | Arch logging (built flow ≠ `cfg.flow.name`) | match | UPGRADE+verify | **DONE** | index gains ground-truth `flow_class_built`; `_build_flow` warns LOUDLY at the exact fall-through; §8.4 verification folded into the re-run (old outputs absent here) |
-| 5 | **Cauchy loc-scale simulator (NEW)** | targets | NEW | todo | committed `Simulator` + closed-form oracle pivot `r_star`; oracle at floor |
+| 5 | **Cauchy loc-scale simulator (NEW)** | targets | NEW | **DONE** | `CauchyLocScale` committed + config; exactly-calibrated closed-form oracle pivot (PIT→normal-scores→orthonormal projections; Gram-Schmidt, any n_iid); oracle at the measured floor through the engine (<0.03 over a 3×3 box grid) |
 | 6 | Eval upgrade: oracle floor row + grid + metric | targets | UPGRADE | todo | dense interior+edge grid; n_per_theta=5000; mean/p90/max + per-θ₀ vector; measured `r_star` floor row |
 | 7 | Sim-cost accounting + relabel | match | UPGRADE | todo | `simulator_calls_total` logged (train+calib+inference Fisher/marginal); headline = "matched *parameter* budget" |
 | 8 | `fresh_batch` 2-regime sweep | match | REDO | todo | suite runs at fresh_batch ∈ {false, true}; both reported |
@@ -74,6 +74,17 @@ tables.
   ground-truth `flow_class_built` from `arch_metadata` next to the intent-only `flow` column —
   the parquet can no longer claim an override took when it didn't. §8.4 arch verification folds
   into the re-run (the original `outputs/` are not present in this workspace).
+
+**Item 5 (CauchyLocScale), 2026-06-10.** The no-sufficient-statistic stress target promoted from
+throwaway probe script to committed simulator (`simulators/cauchy_loc_scale.py` +
+`configs/target/cauchy_loc_scale.yaml`). θ=(log γ, x₀), n_iid=10, U-box proposal. Oracle pivot:
+per-replicate Cauchy-PIT → normal scores → two fixed orthonormal projections — EXACTLY N(0,I₂) at
+truth at every θ₀ (docstring states plainly: *a* calibrated pivot for the floor row, NOT an
+efficient one — none of fixed dimension can be sufficient here, by PKD). Verified: scipy log_prob
+match; per-coord/joint-χ²₂ KS < 0.02 incl. box corners; coords independent for odd n_iid
+(Gram-Schmidt); **oracle at the measured floor through `evaluate_coverage` (max|Δ| < 0.03,
+3×3 grid × 4 levels, n_per_theta=4000)** — the floor row for the POC table now exists as
+reproducible code.
 
 **Reuse (verified sound, no change):** shared training loop / optimizer / capacity matching;
 coverage-engine math (bit-validated); CD-SBI χ²-pivot construction; NPE for Gaussian-posterior

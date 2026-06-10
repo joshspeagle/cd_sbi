@@ -1,0 +1,3 @@
+name: cauchy_loc_scale
+_target_: cdsbi.simulators.cauchy_loc_scale.CauchyLocScale
+n_iid: 10
