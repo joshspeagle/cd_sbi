@@ -10,13 +10,17 @@ conditionally-valid frequentist confidence distribution, framed as recalibrating
 > Output of the multi-agent design review (4 first-principles designs × 2 red-team rounds), then two
 > review rounds on this spec. Seed for a TDD plan. **No code/tests until a plan is approved.**
 >
-> **Honest framing (see §2, §11).** The *validity layer* is **adopted wholesale** from
-> TRUST/TRUST++ + CP4SBI; the *coherence* result is textbook rearrangement. CPF's increment is a
-> learned **flow-pivot** statistic, a coherent **sampleable CD** readout, a **firewall discipline**
-> (frozen read-only sampler), and one **finding** (a conformal floor converts CD-SBI's
-> PKD-insufficiency from a validity break into a width cost). On current evidence CPF is **most
-> defensible as the worked example anchoring the three-axis "validity/sufficiency/power" map paper**,
-> graduating to a standalone method only if the M1b make-or-break clears both bars (§11 GATE 2).
+> **Honest framing (see §2, §11; corrected per the 2026-06-10 full audit).** The *validity layer*
+> is **adopted from TRUST/TRUST++** (the per-θ Neyman-construction ancestor; full-text verified) —
+> NOT from CP4SBI, which conditions on the observed x (a Bayesian local-calibration object; for our
+> purposes it is the published instantiation of our *negative control*, not an ancestor). The
+> *coherence* result is textbook rearrangement, and TRUST's estimated CDF already implies a nested
+> all-α p-value function (unexploited there). CPF's verified increment: (i) the learned **flow-pivot
+> as the statistic itself**, (ii) the **confidence distribution as a normalized, sampleable object**
+> (absent in the entire lineage), (iii) the **frozen-sampler firewall**, plus one **finding** (a
+> conformal floor converts CD-SBI's PKD-insufficiency from a validity break into a width cost).
+> Positioning (standalone / worked example / coordinated with the FreB collaboration —
+> arXiv:2508.02602, same lineage, PI co-author) is gated on §11 GATE 2 and the PI's call.
 
 ---
 
@@ -43,18 +47,22 @@ the PIT yield `U[0,1]`). Discrete/mixed simulators are out of scope for the per-
 
 | Prior work | Owns | Relation |
 |---|---|---|
-| **TRUST/TRUST++** (arXiv:2411.19368, Cabezas et al. 2024) — **co-top threat; ADOPTED** | conditional-CDF `Ĥ(·|θ)` of a statistic by partition quantile regression; finite-sample **local** + asymptotic **conditional** coverage | **is** CPF's §4.3 minus the flow. Adopted wholesale; not claimed. |
-| **CP4SBI** (arXiv:2508.17077, 2025) — **co-top threat; ADOPTED** | local/Mondrian (LoCart) split-conformal of SBI **credible sets** via conditional-CDF score | conformal floor adopted; CPF emits a *sampleable CD* with a *learned pivot* statistic. |
+| **TRUST/TRUST++** (arXiv:2411.19368, Cabezas, Soares, Ramos, Stern, Izbicki; TMLR) — **the validity ANCESTOR (full-text verified 2026-06-10)** | amortized Neyman construction: `H(t|θ)=P(τ(X,θ)≤t|θ)` conditioned on the **hypothesized θ**, estimated by a **regression tree** (TRUST) / random-forest **proximity partition** (TRUST++) with leaf-wise conformal quantiles (NOT quantile regression); finite-sample coverage **marginal over the proposal r(θ) within each leaf**; per-θ₀ coverage asymptotic **in simulation budget B**; statistic exogenous (LR/BFF/e-value/KS/Waldo); its CDF *implicitly* yields a nested all-α p-value function, unnamed and unexploited | **is** CPF's §4.3 template minus the flow. Adopted; not claimed. CPF's increment vs TRUST: the learned flow-pivot **as the statistic**, the **normalized sampleable CD** (TRUST stops at the implicit p-value function), the firewall. |
+| **CP4SBI** (arXiv:2508.17077, Cabezas et al.; Phil Trans A) — **category CONTRAST, not an ancestor (corrected 2026-06-10)** | conformal calibration of **credible** sets conditioning on the **observed x**: `F̂(s(θ;x)|x)` with θ from the posterior; x-space partitions; guarantee = local **Bayesian** coverage (joint over (θ,X), local in x) — does **not** target per-θ₀ frequentist coverage | CP4SBI is the published instantiation of CPF's **M0 negative control** (the x-conditioned calibrator). Cite as the contrast that makes the θ-vs-x conditioning distinction concrete; not as adopted machinery. |
+| **FreB** (arXiv:2508.02602, Carzon, Masserano, …, Speagle, Izbicki, Lee; MLST 2026) — **same lineage; PI co-author** | recalibrates AI/posterior distributions into locally-valid confidence regions (LF2I-family Neyman recalibration; per-α regions) | no flow pivot, no sampleable CD; positioning of CPF relative to this collaboration is a PI decision (§11). |
 | **CD-SBI** (this repo) — **the method CPF improves** | by-construction pivot `r(θ;x)~N(0,I)`; UMPU CD in the regular regime | no finite-sample floor; PKD-fragile (repo's d=5 μ₂ miscalibration; "calibration≠sufficiency"). CPF's **finding**: conformal floor → insufficiency is a width cost, not a validity break (must be *demonstrated*, §8). |
 | Cal-PIT/LADaR (Dey 2022) | reshapes a *predictive* density (Y\|X) | prediction/marginal; CPF = parameter CD, per-θ₀. |
 | LF2I/WALDO/LF2I-Score | statistic + per-α critical values; per-α *sets* | CPF = one coherent sampleable CD; learned-pivot statistic. |
 | CFV-Galichon rearrangement; MCQRNN; super-level-set non-crossing | monotone/non-crossing curves & coherence | CPF's "Coherence Proposition" is **inherited textbook**, cited not headlined. |
 
-**Genuinely-CPF claims, ranked:** (1, lead, demonstrable) conformal floor over a CD-SBI pivot turns
-PKD-insufficiency into a width cost; (2) coherent **sampleable** CD readout; (3, discipline not
-capability) the flow is **frozen read-only** across a validity boundary so the sampler can't
-contaminate coverage — a *cleanliness/auditability* claim, **not** "operator unification" (one model
-that both scores and samples is the default in flow-SBI).
+**Genuinely-CPF claims, ranked (re-verified against full texts, 2026-06-10):** (1, lead,
+demonstrable) conformal floor over a CD-SBI pivot turns PKD-insufficiency into a width cost; (2) the
+**normalized, sampleable confidence distribution** — note TRUST's CDF already *implies* a nested
+all-α p-value function (unexploited), so the increment is *exploiting, normalizing, and sampling*
+it, not the nesting itself; (3, discipline not capability) the flow is **frozen read-only** across a
+validity boundary so the sampler can't contaminate coverage — a *cleanliness/auditability* claim,
+**not** "operator unification" (one model that both scores and samples is the default in flow-SBI).
+Also genuinely absent everywhere per the deep-read: a learned flow-pivot **as the statistic**.
 
 **Strategic honesty:** TRUST + CP4SBI bracket the validity core; CPF is an incremental combination +
 one finding. Best framing = the three-axis map's worked example; standalone only if M1b clears both
@@ -76,9 +84,16 @@ bars. Decide at GATE 2, on evidence.
    (but see §6/§8: at finite n the certificate is π-marginal, which can under-cover at isolated θ₀).
 5. **Freeze-before-calibrate** — flow frozen before calibration, on disjoint data; enforced **physically**
    by the checkpoint boundary + a disjointness assertion (§4.6).
-6. **Conditional > marginal**; **finite-sample conditional coverage is impossible** (Foygel-Barber 2021).
-   CPF claims **asymptotic-conditional ⊕ finite-sample-local-marginal-under-π**, **per-α**; never
-   finite-sample-conditional, never all-α-simultaneous at finite sample.
+6. **Conditional > marginal — with the conditioning variable made precise (corrected 2026-06-10).**
+   The Barber–Candès–Ramdas–Tibshirani impossibility (with Vovk 2012 / Lei–Wasserman 2014 as the
+   basic version) applies to **X-conditional** (data-conditional) coverage. It does **NOT** bound
+   per-θ₀ coverage: in SBI the simulator yields the conditional law at any θ₀ on demand, so exact
+   per-θ₀ finite-sample coverage is achievable *pointwise* by brute Monte Carlo; the binding
+   constraint on an **amortized** procedure is **simulation budget / estimation error** (cf.
+   TRUST's per-θ₀ guarantee, asymptotic in budget B) — and the calibration proposal over θ is the
+   analyst's choice, so tail-θ₀ accuracy is purchasable with targeted budget. CPF claims:
+   finite-sample **local-marginal-under-π** (conformal layer) ⊕ **asymptotic-in-budget per-θ₀
+   conditional** (calibrator), **per-α**; never all-α-simultaneous at finite sample.
 
 ---
 
@@ -104,7 +119,7 @@ toward `r(θ₀;x)|θ₀ ~ N(0,I)`:
 
 Scalar; learned `r` gives anisotropic geometry without whitening. Frozen at §4.1.
 
-### 4.3 Calibration — conditional CDF + conformal floor (ADOPTED from TRUST/CP4SBI)  [VALIDITY — sole source]
+### 4.3 Calibration — conditional CDF + conformal floor (template ADOPTED from TRUST; CP4SBI is the x-conditional contrast, not an ancestor)  [VALIDITY — sole source]
 
 1. **Conditional CDF indexed by the HYPOTHESIZED θ.** Fit `F̂_{T|θ}(t)` = CDF of `T(θ;X)` under
    `X~p(·|θ)`, **as a function of the tested θ** (quantile regression of `T` *on θ*; conditioning
@@ -198,7 +213,9 @@ the fallback. #1 correctness risk = double-use leak; §4.5d + §4.6 `assert_disj
   (all-α simultaneity NOT finite-sample guaranteed).
 - **Coherence** for all x, all d — for the **pre-conformal** `H`, preserved by conformalizing `H`
   (global map); measured under Mondrian.
-- **NOT** finite-sample conditional (Foygel-Barber). Coverage **reported only from split C** MC.
+- **NOT** finite-sample per-θ₀ *as an amortized guarantee* — but this is a **budget limit, not a
+  theorem** (the X-conditional Barber-et-al impossibility does not apply to θ-conditioning; per-θ₀
+  exactness is MC-purchasable pointwise; see §3.6). Coverage **reported only from split C** MC.
 
 ---
 
