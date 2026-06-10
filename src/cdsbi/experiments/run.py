@@ -200,7 +200,15 @@ def _build_simulator(cfg: DictConfig) -> Any:
     sim_dict = OmegaConf.to_container(cfg.target, resolve=True)
     target = sim_dict.pop("_target_")
     sim_dict.pop("name", None)
-    return _instantiate(target, **sim_dict)
+    # Optional θ-independent data conditioning (target.asinh: true) — wraps the
+    # simulator so flows train on asinh(X) (heavy-tail stabilization); the
+    # oracle pivot and log_prob carry the inverse/Jacobian (transformed.py).
+    asinh = bool(sim_dict.pop("asinh", False))
+    sim = _instantiate(target, **sim_dict)
+    if asinh:
+        from cdsbi.simulators.transformed import AsinhTransformedSimulator
+        sim = AsinhTransformedSimulator(sim)
+    return sim
 
 
 def _eval_theta_grid(cfg: DictConfig) -> list:
