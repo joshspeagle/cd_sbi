@@ -4,8 +4,8 @@ confidence distribution via the score (Rao) pivot.
 Stage 1 trains an NLE conditional density q_φ(X|θ) (identical to NLERunner) — no
 bottleneck, information-complete, cannot collapse. Inference reads a d_θ-dimensional
 frequentist CD from the SCORE U(θ;X)=∇_θ log q_φ(X|θ), which at the true θ has mean
-zero (exactly) and covariance the Fisher information I(θ), and is ≈N(0,I(θ)) by the
-CLT over the n_iid replicates. Two readouts (both as a CriticalValueProcedure, so they
+zero and covariance the Fisher information I(θ) when q_φ = p (the surrogate inherits
+this only as q_φ → p), and is ≈N(0,I(θ)) by the CLT over the n_iid replicates. Two readouts (both as a CriticalValueProcedure, so they
 slot into the coverage/set-size diagnostics exactly like LF2I-BFF):
 
   variant="rao": stat = U(θ;X)ᵀ Î(θ)⁻¹ U(θ;X) ~ χ²_{d_θ} (asymptotic), critical value

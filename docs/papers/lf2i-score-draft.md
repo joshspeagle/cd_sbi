@@ -9,7 +9,10 @@
 > `analysis.figures.data_io.figure_data.load_sweep()` — numbers below are transcribed from the
 > internal sweep records; (3) replicate the single-seed probe results (§6.5: Cauchy, d_θ=10, SLCP)
 > at ≥5 seeds before promoting them out of "preliminary"; (4) Lee-group coordination items: pipeline
-> dedup on the score statistic; relation to FreB; whether this merges into a group paper.
+> dedup on the score statistic; relation to FreB; whether this merges into a group paper;
+> (5) run the Variant-C whitening on/off ablation on (μ,σ²) and report the (μ,σ²) numbers in §6
+> (currently listed in §5 but unreported — a reviewer will ask); (6) adversarial review round 1
+> applied 2026-06-10 (validity-precision + PKD-scope + cost-disclosure fixes; see commit history).
 
 ---
 
@@ -25,8 +28,9 @@ frequentist confidence set from its structural-parameter score
 $U(\theta;X)=\nabla_\theta \log q_\varphi(X\mid\theta)$, in two variants: an asymptotic **Rao**
 form $U^\top \hat I(\theta)^{-1} U$ with a $\chi^2_{d_\theta}$ threshold, and a **calibrated** form
 $\lVert U\rVert^2$ with critical values $c_\alpha(\theta)$ learned by quantile regression — the
-LF2I construction, which renders the procedure valid without Fisher-information estimation and
-without the statistic being pivotal. The score readout is automatically $d_\theta$-dimensional, so
+LF2I construction, which renders the procedure valid in the LF2I sense — asymptotic in the
+calibration budget (§2.1) — without Fisher-information estimation and without the statistic being
+pivotal; the calibrated variant is currently limited by its quantile head (§8). The score readout is automatically $d_\theta$-dimensional, so
 it requires no hand-crafted or learned summary statistic and thereby sidesteps the
 fixed-dimensional sufficiency bottleneck (Pitman–Koopman–Darmois) that constrains summary-based
 methods. In matched-budget comparisons on benchmark targets, LF2I-Score is competitive with or
@@ -37,9 +41,9 @@ degenerates, which afflicts the entire calibration family. We position the metho
 its ancestors: the efficient method of moments anticipates "score of an estimated model, calibrated
 by simulation" with auxiliary-model scores and asymptotic $\chi^2$ calibration; score-based
 summaries (SALLY, optimal observables) use the score as a compression, never as the inverted
-statistic. To our knowledge, LF2I-Score is the first method to use the structural-parameter score
-of an amortized neural likelihood as the Neyman-inverted test statistic with learned, finite-sample
-critical values.
+statistic. To our knowledge, LF2I-Score is the first method to use the structural-parameter score of an amortized neural
+likelihood as the Neyman-inverted test statistic with learned, $\theta$-indexed critical values
+targeting the finite-sample null distribution.
 
 ---
 
@@ -65,8 +69,9 @@ so far are the odds / integrated odds (ACORE [Dalmasso et al. 2020]), the Bayes 
 thus two-thirds instantiated: WALDO occupies the Wald slot and ACORE/BFF are ratio-type. The
 **score slot is open**, and it is a natural one to fill: the score test is the locally optimal
 test (in the classical one-parameter, one-sided sense it is locally most powerful [Rao 1948; Cox &
-Hinkley 1974]; in higher dimensions the Rao statistic retains local optimality properties under
-contiguous alternatives), and — decisively for SBI — the score is *computable by automatic
+Hinkley 1974]; in higher dimensions the Rao statistic is asymptotically equivalent to the
+likelihood-ratio and Wald statistics under contiguous local alternatives), and — decisively for
+SBI — the score is *computable by automatic
 differentiation from any neural likelihood, at no additional training cost*.
 
 **Contributions.**
@@ -113,6 +118,10 @@ critical-value estimator converges (asymptotic in *simulation budget*, not data 
 finite-sample guarantees of the marginal/local kind under the calibration proposal. We adopt this
 guarantee structure verbatim and claim nothing stronger.
 
+*Convention.* Sets and critical values are subscripted by the test level: a level-$\alpha$ test
+yields $C_\alpha$ with nominal coverage $1-\alpha$. The *implementation's* `alpha` argument is the
+coverage $1-\alpha$ (e.g. `chi2.ppf(alpha, df)` with `alpha=0.95` for the 95% set).
+
 ### 2.2 The score test
 
 For a regular model with log-likelihood $\ell(\theta;X)$, the score $U(\theta;X)=\nabla_\theta\ell$
@@ -120,7 +129,9 @@ satisfies $\mathbb{E}_{\theta}[U(\theta;X)]=0$ with covariance the Fisher inform
 and the Rao statistic $U^\top I(\theta)^{-1}U$ is asymptotically $\chi^2_{d_\theta}$ at the truth.
 Its appeal in SBI is threefold: it needs the likelihood only *locally* at the tested $\theta$ (no
 maximization, unlike Wald/LR); it is the locally optimal direction; and for a neural likelihood it
-is a single autograd call. Its liabilities are exactly the classical ones: the $\chi^2$ calibration
+is a single autograd call. (These optimality statements concern the *true* score; the surrogate
+score inherits them only insofar as $q_\varphi \approx p$ — the quasi-/generalized-score-test
+setting [Boos 1992].) Its liabilities are exactly the classical ones: the $\chi^2$ calibration
 and the local optimality both require non-degenerate Fisher information and local identifiability
 [Davies 1977, 1987; Drton 2009], failing under multimodality and parameter-boundary degeneracies —
 we test, rather than hide, these (§6.5).
@@ -140,36 +151,46 @@ emit unstable gradients; see §6.2.)
 ### 3.2 Variant R (Rao, asymptotic)
 
 $$\tau_R(X,\theta) = U(\theta;X)^\top\, \hat I(\theta)^{-1}\, U(\theta;X), \qquad
-C_\alpha = \{\theta:\ \tau_R \le \chi^2_{d_\theta,\alpha}\}.$$
+C_\alpha = \{\theta:\ \tau_R \le \chi^2_{d_\theta,\,1-\alpha}\},$$
+
+the $1-\alpha$ quantile of $\chi^2_{d_\theta}$ (see the §2.1 convention note on the code's `alpha`).
 
 $\hat I(\theta)$ is the Monte-Carlo score covariance at the *queried* $\theta$: draw
 $n_F$ (default 4000) fresh $X\sim p(\cdot\mid\theta)$, form $\hat I = \frac1{n_F}\sum U U^\top$
-(ridge-regularized), invert, and cache per $\theta$. Validity is asymptotic on two counts — the
+(ridge-regularized), invert, and cache per $\theta$. *Cost note:* this is **inference-time
+simulation** — $n_F$ fresh simulator calls per distinct queried $\theta$ (cached), i.e.
+$n_F\cdot|G|$ over a $|G|$-point inversion grid, which can rival a training budget; the §6 budget
+figures count *training* simulations, and Variant C avoids this cost entirely (one amortized
+calibration set). Validity is asymptotic on two counts — the
 $\chi^2$ approximation (here aided by CLT over i.i.d. replicates within an observation, when
 present) and $q_\varphi \approx p$. Variant R is the fast, diagnostic-grade readout.
 
 ### 3.3 Variant C (calibrated, Fisher-free)
 
 $$\tau_C(X,\theta) = \lVert U(\theta;X)\rVert^2, \qquad
-C_\alpha = \{\theta:\ \tau_C \le \hat c_\alpha(\theta)\},$$
+C_\alpha = \{\theta:\ \tau_C \le \hat c_{1-\alpha}(\theta)\},$$
 
-with $\hat c_\alpha(\theta)$ a multi-quantile network trained on calibration pairs
+with $\hat c_{1-\alpha}(\theta)$ — the estimated $1-\alpha$ conditional quantile of $\tau_C$'s null
+law — a multi-quantile network trained on calibration pairs
 $(\theta_b, \tau_C(X_b,\theta_b))$, $\theta_b$ drawn from the proposal and $X_b\sim
 p(\cdot\mid\theta_b)$ — drawn from a *separate stream* from the flow's training data
 (freeze-before-calibrate). Two deliberate choices:
 
-- **No Fisher whitening.** Because $\hat c_\alpha(\theta)$ is learned *per hypothesized $\theta$*,
-  the calibration is invariant to any $\theta$-pointwise monotone reparametrization of the
-  statistic: whatever $I(\theta)$-shaped distortion $\lVert U\rVert^2$ carries is absorbed into the
-  learned critical-value surface. Whitening can affect the *shape* (power) of the set, never its
-  validity; dropping it removes the single most fragile estimation step (a $d\times d$ inverse
-  that degenerates near non-identifiability). [Internal note: an independent design audit reached
-  the same conclusion from first principles; the (μ,σ²) target, where $I(\theta)$ is strongly
-  $\theta$-dependent, is the empirical check.]
-- **The LF2I guarantee, inherited verbatim:** validity depends on the calibration stage only.
-  Variant C remains valid (up to critical-value estimation error) even where the $\chi^2$
-  asymptotics of Variant R are poor — at small per-observation information, skewed score
-  distributions, or moderate non-Gaussianity.
+- **No Fisher whitening.** Because the critical value is learned *per hypothesized $\theta$*,
+  validity holds for **any** frozen statistic, whitened or not — this is the LF2I decomposition
+  itself, not a reparametrization argument. At $d_\theta=1$ the calibrated $\lVert U\rVert^2$ and
+  Rao sets coincide exactly (there $u^2 \mapsto u^2/I(\theta)$ is a $\theta$-pointwise monotone
+  map, which per-$\theta$ calibration absorbs); at $d_\theta>1$ whitening is a *vector* transform —
+  $\tau_R$ is **not** a monotone function of $\lVert U\rVert^2$ — so it changes the set's *shape*
+  (power), never its validity. Dropping it removes the single most fragile estimation step (a
+  $d\times d$ inverse that degenerates near non-identifiability). A whitening on/off ablation on
+  the $(\mu,\sigma^2)$ target (where $I(\theta)$ is strongly $\theta$-dependent), quantifying the
+  power cost, is queued as a pre-submission item (draft-status block).
+- **The LF2I guarantee, inherited:** validity depends on the calibration stage only. Variant C
+  remains valid *up to critical-value estimation error* even where the $\chi^2$ asymptotics of
+  Variant R are poor — at small per-observation information, skewed score distributions, or
+  moderate non-Gaussianity. The qualifier is not vacuous: §6.5 exhibits a regime (SLCP) where that
+  estimation error dominates at any realistic calibration budget.
 
 ### 3.4 What LF2I-Score is not
 
@@ -189,10 +210,12 @@ exist (second moments resist; flexibility can worsen it). The score readout take
 deal: it reduces $X$ to the $d_\theta$ numbers $U(\theta;X)$ — *per hypothesized $\theta$*, i.e. a
 local reduction rather than a global summary — making no sufficiency claim, with validity supplied
 by calibration and efficiency claimed only locally. The clean test of this positioning is a target
-with **no finite-dimensional sufficient statistic at all**, where every summary-based pipeline is
-wrong by theorem: the Cauchy location-scale model. There the score readout attains near-nominal
-coverage (preliminary, §6.5). The price of the deal appears at the other boundary: where the score
-itself degenerates (§6.5, SLCP).
+where, by Pitman–Koopman–Darmois (which applies: smooth densities, $\theta$-independent support),
+**no statistic of dimension bounded below the sample size is sufficient**: the Cauchy
+location-scale model. There every fixed-dimensional summary necessarily discards information —
+summary pipelines remain *valid* under calibration but are necessarily lossy — while the score
+readout needs no summary at all and attains near-nominal coverage (preliminary, §6.5). The price
+of the deal appears at the other boundary: where the score itself degenerates (§6.5, SLCP).
 
 ## 5. Experimental setup
 
@@ -202,8 +225,8 @@ statistic $T=\sum X_i$ (§8.4); Gaussian with unknown $(\mu,\sigma^2)$, $n_{\rm 
 normal with unknown $(\mu,\Sigma)$ in log-Cholesky coordinates ($d_\theta=5$). Matched simulation
 budgets (small→xlarge), 5 seeds (3 for $d_\theta=5$), fixed training set (`fresh_batch=false`) as
 the research-realistic default. Primary metric: `coverage_error_max` — the maximum over a
-$\theta_0$ grid and $\alpha\in\{0.5,0.68,0.9,0.95\}$ of $|$empirical $-$ nominal$|$ coverage, MC
-noise floor $\approx 0.02$–$0.03$. Baselines: NPE, NLE (HPD readouts), NRE, LF2I-BFF (with the
+$\theta_0$ grid and nominal coverage levels $1-\alpha\in\{0.5,0.68,0.9,0.95\}$ of
+$|$empirical $-$ nominal$|$ coverage, MC noise floor $\approx 0.02$–$0.03$. Baselines: NPE, NLE (HPD readouts), NRE, LF2I-BFF (with the
 corrected MC marginal), and the exact-pivot CD-SBI as the by-construction reference.
 
 ## 6. Results
@@ -252,15 +275,20 @@ an NLE model and autograd.
 
 ### 6.5 Preliminary probes (single seed — flagged, not yet replicated)
 
-- **Cauchy location-scale** ($d_\theta=2$; **no finite sufficient statistic exists**): Variant R at
-  0.022 — the noise floor; the summary-based route is impossible here by theorem.
+- **Cauchy location-scale** ($d_\theta=2$; no sufficient statistic of dimension bounded in the
+  sample size exists): Variant R at 0.022 — the noise floor; fixed-dimensional summaries are
+  necessarily insufficient here by theorem (valid-but-lossy at best).
 - **$d_\theta=10$** (five Gaussian $(\mu_i,\log\sigma_i)$ pairs): 0.058 — no dimensional blow-up.
 - **SLCP** (multimodal benchmark; parameters enter squared → sign-symmetry multimodality + Fisher
   degeneracy near 0): Variant R 0.115, Variant C 0.426 — **failure**, as the score test's
   regularity conditions are violated by design. Decisively: replacing the MAF with a much more
-  expressive NSF improves the likelihood fit dramatically (−log q 10.99→3.06) and leaves coverage
-  unchanged (0.111) while calibration worsens (0.648) — the boundary is **architecture-independent**,
-  intrinsic to the statistic. Nor is it specific to the score: LF2I-BFF scores 0.500 over the full
+  expressive NSF improves the likelihood fit dramatically (−log q 10.99→3.06), leaves Variant R
+  unchanged (0.111), and makes Variant C *worse* (0.648) — the boundary is
+  **architecture-independent**, intrinsic to the statistic. Variant C's failure here reconciles
+  with §3.3: it is a failure of critical-value *estimation*, not of the Neyman logic — near the
+  degeneracy the null law of $\lVert U\rVert^2$ varies so sharply in $\theta$ that the quantile
+  head's error dominates at any realistic calibration budget; the guarantee is asymptotic in that
+  budget, and SLCP shows the asymptote can be practically unreachable. Nor is it specific to the score: LF2I-BFF scores 0.500 over the full
   parameter box. Near non-identifiability no statistic in the family yields tight valid sets
   [Dufour 1997]; the honest output there is valid-but-wide, and the failure of *tightness* should
   not be misread as repairable by a better statistic.
@@ -271,7 +299,8 @@ an NLE model and autograd.
 guarantee structure [Dalmasso et al. 2024], WALDO (posterior moments → Wald slot) [Masserano et
 al. 2023]; conformal-tree calibration (TRUST/TRUST++) [Cabezas et al. 2024]; posterior
 recalibration into locally-valid regions (FreB) [Carzon et al. 2026]. None instantiate a score
-statistic; the framework's own texts do not mention one.
+statistic; we find no mention of one in the framework's texts (re-checked at submission per the
+draft-status block).
 
 **Conceptual ancestry — ceded explicitly.** The **efficient method of moments** [Gallant & Tauchen
 1996] and the indirect-inference LM tests [Gourieroux, Monfort & Renault 1993] are "score of an
@@ -315,9 +344,10 @@ member of that comparison — a complement, not a variant (see §6.4).
    statistic family, not of our implementation, and near non-identifiability only valid-but-wide
    sets exist [Dufour 1997].
 3. **Variant C's quantile head** currently under-performs Variant R on regular targets — the
-   per-α multi-quantile MLP is the bottleneck (no monotonicity across α; estimation error at
-   extreme quantiles). Conformal-tree calibration (TRUST-style) and monotone-in-α heads are the
-   obvious upgrades and are left to coordinated future work.
+   per-level multi-quantile MLP is the bottleneck (no monotonicity across levels; estimation error
+   at extreme quantiles) — and on non-regular targets its estimation error dominates outright
+   (§6.5). Conformal-tree calibration (TRUST-style) and monotone-in-level heads are the obvious
+   upgrades and are left to coordinated future work.
 4. **Tail-$\theta$ accuracy is proposal-dependent**: critical-value estimation error concentrates
    where the calibration proposal puts little mass. This is a budget-allocation lever (one can
    oversample tails), not a guarantee; we do not claim per-$\theta_0$ finite-sample validity.
@@ -345,6 +375,7 @@ all entries below were existence-and-content verified on 2026-06-10.)*
 - ATLAS Collaboration 2024, "An implementation of neural simulation-based inference for parameter
   estimation in ATLAS," arXiv:2412.01600.
 - Atwood & Soni 1992, Phys. Rev. D 45, 2405 (optimal observables).
+- Boos 1992, "On generalized score tests," The American Statistician 46(4).
 - Brehmer, Cranmer, Louppe & Pavez 2018, "A guide to constraining effective field theories with
   machine learning," arXiv:1805.00020; Brehmer, Louppe, Pavez & Cranmer 2020, "Mining gold from
   implicit models...," PNAS 117, arXiv:1805.12244; MadMiner: arXiv:1907.10621.
@@ -353,6 +384,8 @@ all entries below were existence-and-content verified on 2026-06-10.)*
 - Carzon, Masserano, et al. 2026, "Trustworthy scientific inference with generative models" (FreB),
   arXiv:2508.02602, MLST.
 - Cox & Hinkley 1974, *Theoretical Statistics*.
+- Cranmer, Brehmer & Louppe 2020, "The frontier of simulation-based inference," PNAS 117(48),
+  arXiv:1911.01429.
 - Dalmasso, Izbicki & Lee 2020, "Confidence sets and hypothesis testing in a likelihood-free
   inference setting" (ACORE), ICML, arXiv:2002.10399.
 - Dalmasso, Masserano, Zhao, Izbicki & Lee 2024, "Likelihood-free frequentist inference" (LF2I/BFF),
