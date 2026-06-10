@@ -11,8 +11,8 @@ missing experiments, then the accounting/eval upgrades, then re-run.
 |---|---|---|---|---|---|
 | 1 | **Score-CD `nan_to_num` bias** | calib | FIX-FIRST (blocking) | **DONE** | non-finite score → REJECT (+inf, conservative); Fisher rows dropped; counted in `procedure.nonfinite_diagnostics`; unit-tested + quantified on real runs |
 | 2 | NLE/NRE `ℓ_max` grid at d>1 | calib | FIX-FIRST | **DONE** | gradient-ascent refinement from top-k grid starts (derivative-free fallback); closed-form-exact in tests; real-NLE quantified |
-| 3 | Score-CD-cal `n_params` undercount | match | UPGRADE+rerun | todo | quantile head counted in `total`; budget re-validated (retune width if needed) |
-| 4 | Arch logging (built flow ≠ `cfg.flow.name`) | match | UPGRADE+verify | todo | index logs the *built* `arch_metadata.flow_class`; §8.4 cd_sbi flow verified |
+| 3 | Score-CD-cal `n_params` undercount | match | UPGRADE+rerun | **DONE** | head counted (mirrors LF2I-BFF); budget-width head is <15% of backbone (no retune needed — configs already interpolate `${budget.quantile_hidden}`) |
+| 4 | Arch logging (built flow ≠ `cfg.flow.name`) | match | UPGRADE+verify | **DONE** | index gains ground-truth `flow_class_built`; `_build_flow` warns LOUDLY at the exact fall-through; §8.4 verification folded into the re-run (old outputs absent here) |
 | 5 | **Cauchy loc-scale simulator (NEW)** | targets | NEW | todo | committed `Simulator` + closed-form oracle pivot `r_star`; oracle at floor |
 | 6 | Eval upgrade: oracle floor row + grid + metric | targets | UPGRADE | todo | dense interior+edge grid; n_per_theta=5000; mean/p90/max + per-θ₀ vector; measured `r_star` floor row |
 | 7 | Sim-cost accounting + relabel | match | UPGRADE | todo | `simulator_calls_total` logged (train+calib+inference Fisher/marginal); headline = "matched *parameter* budget" |
@@ -61,6 +61,19 @@ tables.
   likely unaffected (the legacy Coverage path kept one tensor alive across its α-loop), but any
   engine-chunked NPE/NLE/NRE eval — i.e. exactly our upcoming re-runs — would have been corrupted.
   Regression test reproduces the crash scenario end-to-end through the engine.
+
+**Items 3+4, 2026-06-10.**
+- #3: `ScoreCDRunner.n_params` now counts the cal variant's MultiQuantileMLP head
+  (`calibration_stage`, kind `two_stage_score`), with the run.py dispatch passing
+  `d_theta`/`alpha_grid_len` — identical accounting to LF2I-BFF. Softening of the audit's
+  worst-case: the method yamls already interpolate `quantile_hidden: ${budget.quantile_hidden}`,
+  so swept runs used the budget-tuned 16-wide head (~388 params at d=2, <9% of a medium
+  backbone) — the defect was the *reporting*, not an oversized head. No width retune needed.
+- #4: `_build_flow` now WARNS at the exact dispatch-trap fall-through (method.flow wins over an
+  experiment `/flow:` override; "maf" methods exempt by design), and the index records the
+  ground-truth `flow_class_built` from `arch_metadata` next to the intent-only `flow` column —
+  the parquet can no longer claim an override took when it didn't. §8.4 arch verification folds
+  into the re-run (the original `outputs/` are not present in this workspace).
 
 **Reuse (verified sound, no change):** shared training loop / optimizer / capacity matching;
 coverage-engine math (bit-validated); CD-SBI χ²-pivot construction; NPE for Gaussian-posterior

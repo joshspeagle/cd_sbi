@@ -45,6 +45,20 @@ def _build_flow(cfg: DictConfig, simulator) -> Any:
     method_flow_label = OmegaConf.select(cfg, "method.flow", default=None)
     hydra_flow_name = cfg.flow.name
 
+    # Dispatch-trap loudness (hardening item 4, 2026-06-10; the cb1e08e guard).
+    # When method.flow and the Hydra /flow group disagree, the METHOD label wins
+    # below — an experiment-level `/flow:` override is silently ignored unless
+    # `method.flow=<name>` is ALSO passed. This produced wrong-architecture runs
+    # (§8.4) while the index logged the override as if it took. Methods whose
+    # method.flow is "maf" (NPE/NLE/NRE/Score-CD) ignore the group by design.
+    if method_flow_label not in (None, "maf") and method_flow_label != hydra_flow_name:
+        log.warning(
+            f"FLOW DISPATCH TRAP: method.flow='{method_flow_label}' != /flow group "
+            f"'{hydra_flow_name}'. Building '{method_flow_label}' — the experiment-level "
+            f"flow override is IGNORED. If '{hydra_flow_name}' was intended, also pass "
+            f"method.flow={hydra_flow_name}. Verify the index's flow_class_built column."
+        )
+
     # v3 flows (doubly_monotone, joint_umnn, joint_umnn_1d) need the same
     # fast-path treatment as v0/v1/v2 flows: instantiate from cfg.flow's
     # _target_ ONLY when the method also requests this flow (e.g. CDSBI
@@ -491,10 +505,13 @@ def _write_index_row(cfg: DictConfig, rd: RunDir, trained, diag_results, config_
         "config_hash": config_hash,
         "experiment": cfg.experiment.name,
         "method": cfg.method.name,
-        # Report the actual instantiated flow group (cfg.flow.name) — this
-        # reflects experiment-level /flow overrides (e.g. 8_3's triangular_additive,
-        # 8_4's doubly_monotone) rather than the method's default flow label.
+        # cfg.flow.name is the Hydra group label (the *intent*); it does NOT
+        # always reflect what _build_flow constructed (the dispatch trap, item 4).
         "flow": cfg.flow.name,
+        # Ground truth: the class actually built, snapshotted by the runner at
+        # fit time. "n/a" for runners that don't record it.
+        "flow_class_built": str(trained.arch_metadata.get("flow_class", "n/a"))
+        if isinstance(trained.arch_metadata, dict) else "n/a",
         "target": cfg.target.name,
         "budget_name": cfg.budget.name,
         "target_params": int(cfg.budget.target_params),
@@ -604,6 +621,13 @@ def main(cfg: DictConfig) -> None:
             )
         elif cfg.method.name == "nre":
             n_params = runner.n_params(d_theta=simulator.d_theta, d_x=simulator.d_x)
+        elif cfg.method.name == "score_cd_cal":
+            # The cal variant's quantile head counts against the budget
+            # (hardening item 3) — same accounting as LF2I-BFF's head.
+            n_params = runner.n_params(
+                d_theta=simulator.d_theta,
+                alpha_grid_len=len(list(cfg.experiment.alpha_grid)),
+            )
         else:
             n_params = runner.n_params()
 

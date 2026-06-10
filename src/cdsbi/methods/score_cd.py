@@ -210,7 +210,25 @@ class ScoreCDRunner(Runner):
                             final_loss=float(losses[-1]), n_steps=int(config["n_steps"]),
                             wall_clock_sec=wall, arch_metadata=arch)
 
-    def n_params(self) -> dict:
+    def n_params(self, d_theta: int = 1, alpha_grid_len: int = 4) -> dict:
+        """Parameter accounting (hardening item 3, 2026-06-10).
+
+        The "cal" variant trains a MultiQuantileMLP critical-value head; it is
+        counted against the budget exactly as LF2I-BFF's identical head is
+        (lf2i_bff.py::n_params). The "rao" variant has no learned calibration
+        stage (its Fisher estimate is Monte-Carlo, not parametric).
+        """
         backbone = sum(p.numel() for p in self.flow.parameters())
+        if self.variant == "cal":
+            head = MultiQuantileMLP(
+                input_dim=d_theta,
+                hidden=self.quantile_hidden,
+                depth=self.quantile_depth,
+                n_quantiles=alpha_grid_len,
+            )
+            calibration_stage = sum(p.numel() for p in head.parameters())
+            return {"backbone": backbone, "head": 0,
+                    "calibration_stage": calibration_stage,
+                    "total": backbone + calibration_stage, "kind": "two_stage_score"}
         return {"backbone": backbone, "head": 0, "calibration_stage": 0,
                 "total": backbone, "kind": "flow"}
