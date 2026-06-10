@@ -107,3 +107,55 @@ reproducible code.
 **Reuse (verified sound, no change):** shared training loop / optimizer / capacity matching;
 coverage-engine math (bit-validated); CD-SBI χ²-pivot construction; NPE for Gaussian-posterior
 targets; regular simulators' closed-form `r_star`.
+
+## Pilot execution (item 8 EXECUTE), 2026-06-10
+
+**Pilot A — `poc_loc_normal_1d`** (5 methods × {fixed, fresh} × seed 0; ~45 s/run; index
+columns label fresh by `sim_calls_total_method` ≈ 2.05M vs 10–46k fixed — the 200× sim cost
+of `fresh_batch=true` is now a visible per-row number, not a footnote):
+
+| method | max (fixed) | max (fresh) | mean (both) | note |
+|---|---|---|---|---|
+| oracle floor | 0.011–0.017 | — | 0.003–0.005 | measured, grid-matched |
+| cd_sbi | 0.018–0.024 | 0.013–0.014 | 0.004–0.007 | at floor |
+| score_cd_rao | 0.076–0.113 | **0.019–0.030** | 0.006–0.020 | fresh ≈ floor |
+| score_cd_cal | 0.073–0.136 | 0.049–0.064 | 0.012–0.032 | |
+| lf2i_bff | 0.071–0.073 | 0.083–0.100 | 0.017–0.020 | |
+| nle | **0.240–0.264** | 0.243–0.259 | 0.026–0.028 | regime-independent |
+
+Two findings the old 5-pt interior grid could not see:
+1. **NLE collapses at the prior boundary** (θ₀ = ±7 live-edge points: ~0.22–0.26 error,
+   max-α), in BOTH regimes — a constrained-MLE artifact of the Wilks statistic near the
+   support edge, not overfitting. Interior NLE stays at 0.006–0.023. `coverage_error_mean`
+   (0.026) vs `_max` (0.26) quantifies how much the max-order-statistic vs the field differ.
+2. **Score-CD-rao is robust exactly where NLE breaks** (no constrained MLE in the statistic;
+   the score at the edge is still well-defined) but pays interior overfitting wiggles in the
+   fixed regime (0.076–0.113 → 0.019–0.030 with fresh batches) — the draft's
+   finite-data-brittleness story, now measured on the upgraded grid.
+
+**Perf pathologies found during execution — one shared class: x-invariant quantities
+recomputed inside per-θ statistic closures.**
+- Score-CD-rao recomputed the Fisher MC (`fisher_n×n_iid` sims) at every distinct θ probe of
+  set construction (26 misses/x = 104k sims): fixed by `_FisherGrid` — fit-time Î(θ) on a
+  per-dim grid + multilinear interp (`fisher_grid_per_dim=9` default, 0 = exact fallback,
+  auto-fallback d>3). §-replication: 69 min → 4.6 min.
+- LF2I-BFF recomputed the x-only marginal `log m(x)` at every θ probe: fixed by an
+  anchor-validated `_BatchCache` on `_log_marginal` + a one-X-many-θ early branch.
+  confidence_set: 25-min-class → 0.046 s/x. Counter `procedure.bff_marginal_evals`.
+
+**Pilot B — `poc_cauchy` raw-vs-asinh (8 runs).** Take-1 killed (pre-fix slowness). Take-2
+(22:06) postmortem — three independent failures, all now fixed + committed:
+1. **Run-dir collision**: the hydra sweep `subdir` had no `target=` token, so raw and asinh
+   runs of the same method silently overwrote each other's directory (two runs interleaved in
+   one `run.log`). `target=${target.name}` now leads the subdir pattern.
+2. **Chunk misalignment crash** (NLE asinh, SetSize): `_confidence_set_batch_d_gt_1` inferred
+   the ll_max broadcast from `theta_flat.shape[0] // B`, but `_chunked_inside` slices at
+   arbitrary 4096-row boundaries (B=50 × 200 rays → 4096-row chunk → 50·⌊4096/50⌋ = 4050 ≠
+   4096). Crash when non-divisible; SILENT ll_max misalignment when divisible — same bug class
+   as the `_BatchCache` id-recycling. Fix: ll_max rides as an extra x-column (aligned by
+   construction); the path also gained chunked mesh eval + the `refine_ll_max` polish for
+   consistency with the coverage path. Regression: `tests/unit/test_set_batch_chunk_alignment.py`.
+3. The background job died silently (~22:21, container-level; not OOM — no kernel kill, 15G
+   free), leaving a stale `STATUS=RUNNING`. Lesson: judge progress by run-dir artifacts, not
+   STATUS files.
+Take-3 relaunched 23:30 post-fix; asinh A/B verdict to be appended.
