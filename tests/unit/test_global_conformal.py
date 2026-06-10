@@ -16,9 +16,10 @@ from cdsbi.methods.cpf.conformal import GlobalConformal, conformal_quantile
 # --- pure math (worked examples; atol exact) ---------------------------------
 
 def test_worked_example_n9_cov09():
-    # n=9, coverage=0.9 -> ceil(0.9*10)=9 -> the 9th smallest (= max).
+    # n=9, coverage=0.9 -> ceil(0.9*10)=9 -> the 9th smallest (= the max element).
     scores = torch.linspace(0.1, 0.9, 9)
-    assert conformal_quantile(scores, 0.9) == pytest.approx(0.9, abs=0)
+    assert conformal_quantile(scores, 0.9) == scores.max().item()
+    assert conformal_quantile(scores, 0.9) == pytest.approx(0.9, abs=1e-6)
 
 
 def test_worked_example_n9_cov05():
