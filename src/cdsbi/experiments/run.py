@@ -348,6 +348,7 @@ def _build_method(cfg: DictConfig, simulator) -> Any:
             flow=flow,
             variant=str(m.variant),
             fisher_n=int(OmegaConf.select(m, "fisher_n", default=4000)),
+            fisher_grid_per_dim=int(OmegaConf.select(m, "fisher_grid_per_dim", default=9)),
             quantile_hidden=int(OmegaConf.select(m, "quantile_hidden", default=64)),
             quantile_depth=int(OmegaConf.select(m, "quantile_depth", default=2)),
             device=cfg.device,

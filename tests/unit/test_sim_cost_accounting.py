@@ -65,13 +65,14 @@ def test_inference_counter_picked_up():
     assert out["sim_calls_total_method"] == 10 + 12000
 
 
-def test_score_cd_rao_fisher_counter_live():
-    """End-to-end: a real (tiny) rao fit; querying the statistic at two distinct
-    θ draws 2×fisher_n; re-querying a cached θ adds nothing."""
+def test_score_cd_rao_fisher_counter_exact_mode():
+    """Exact per-θ MC mode (fisher_grid_per_dim=0): querying the statistic at
+    two distinct θ draws 2×fisher_n; a cached θ adds nothing."""
     torch.manual_seed(0)
     sim = LocationGaussian2D_iid()
     flow = MAFAdapter(features=2, context_features=2, hidden=8, num_layers=2)
-    runner = ScoreCDRunner(flow, variant="rao", fisher_n=64, device="cpu")
+    runner = ScoreCDRunner(flow, variant="rao", fisher_n=64,
+                           fisher_grid_per_dim=0, device="cpu")
     cfg = dict(optimizer="adam", lr=3e-3, batch_size=64, n_steps=20, n_train=256,
                fresh_batch=False, grad_clip_norm=5.0, alpha_grid=[0.9])
     tm = runner.fit(sim, cfg, seed=0)
@@ -83,3 +84,22 @@ def test_score_cd_rao_fisher_counter_live():
     assert proc.inference_sim_calls["fisher"] == 128
     proc.test_statistic(torch.zeros(8, 2), x)  # cache hit — no new draws
     assert proc.inference_sim_calls["fisher"] == 128
+
+
+def test_score_cd_rao_fisher_counter_grid_mode_default():
+    """Grid mode (the default): the full Fisher cost is paid at FIT
+    (n_per_dim^d × fisher_n) and queries draw nothing."""
+    torch.manual_seed(0)
+    sim = LocationGaussian2D_iid()
+    flow = MAFAdapter(features=2, context_features=2, hidden=8, num_layers=2)
+    runner = ScoreCDRunner(flow, variant="rao", fisher_n=64,
+                           fisher_grid_per_dim=3, device="cpu")
+    cfg = dict(optimizer="adam", lr=3e-3, batch_size=64, n_steps=20, n_train=256,
+               fresh_batch=False, grad_clip_norm=5.0, alpha_grid=[0.9])
+    tm = runner.fit(sim, cfg, seed=0)
+    proc = tm.procedure
+    assert proc.inference_sim_calls["fisher"] == 3 * 3 * 64
+    x = torch.randn(8, 2)
+    proc.test_statistic(torch.zeros(8, 2), x)
+    proc.test_statistic(torch.full((8, 2), 0.123), x)
+    assert proc.inference_sim_calls["fisher"] == 3 * 3 * 64  # zero at query

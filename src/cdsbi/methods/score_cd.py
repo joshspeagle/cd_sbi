@@ -65,14 +65,87 @@ def _reject_nonfinite(T: torch.Tensor) -> tuple:
     return T, n
 
 
+class _FisherGrid:
+    """Fit-time amortized Fisher information Î(θ) on a regular per-dim grid,
+    multilinearly interpolated at query (hardening perf fix, 2026-06-10).
+
+    The exact-θ MC Fisher (fisher_n sims + a fisher_n-row backward per DISTINCT
+    queried θ, cached by value) is the right thing for coverage (a handful of
+    θ₀) and pathological for set construction, which probes a continuum of θ
+    (measured: ONE confidence_set call = 26 cache misses = 104k sims; a SetSize
+    pass ≈ 69 min/run). The grid is built once at fit time (n_per_dim^d points;
+    counted in the sim-call ledger), Î entries are multilinearly interpolated
+    (exact for any θ-linear Fisher — the test property), and the d×d inverse is
+    taken per query. This makes the Rao statistic ONE deterministic function of
+    θ across all diagnostics, with zero per-query simulation.
+    """
+
+    def __init__(self, axes: list, table: torch.Tensor):
+        self.axes = axes              # list of 1-D tensors (per-dim nodes)
+        self.table = table            # (n1, ..., nd, d, d) Î at the nodes
+        self.d = len(axes)
+
+    @classmethod
+    def build(cls, simulator, score_fn, fisher_n: int, n_per_dim: int,
+              rng, sim_call_counter: dict) -> "_FisherGrid":
+        d = int(simulator.d_theta)
+        lo = getattr(simulator, "theta_lower", None)
+        hi = getattr(simulator, "theta_upper", None)
+        if lo is None or hi is None:
+            a, b = simulator.theta_range
+            lo, hi = [a] * d, [b] * d
+        axes = [torch.linspace(float(lo[k]), float(hi[k]), n_per_dim) for k in range(d)]
+        mesh = torch.stack(torch.meshgrid(*axes, indexing="ij"), dim=-1).reshape(-1, d)
+        ents = []
+        for row in mesh:
+            sim_call_counter["fisher"] += fisher_n
+            xf = simulator.sample_x_given_theta(tuple(row.tolist()), fisher_n, rng)
+            thr = row.view(1, d).to(xf.dtype).expand(fisher_n, d)
+            Uf, _ = _finite_rows(score_fn(thr, xf))
+            m = max(int(Uf.shape[0]), d + 1)
+            U = Uf.cpu().double()
+            ents.append((U.T @ U / m + 1e-6 * torch.eye(d, dtype=torch.float64)))
+        table = torch.stack(ents).reshape(*([n_per_dim] * d), d, d)
+        return cls(axes, table)
+
+    def fisher_inv(self, theta_row: torch.Tensor) -> torch.Tensor:
+        """Multilinear interpolation of Î at θ (clamped to the grid box), then
+        the d×d inverse. Microseconds; no simulation."""
+        th = theta_row.detach().cpu().double().reshape(-1)
+        idx, w = [], []
+        for k, ax in enumerate(self.axes):
+            v = float(min(max(th[k], ax[0]), ax[-1]))
+            i = int(torch.searchsorted(ax, torch.tensor(v), right=True)) - 1
+            i = min(max(i, 0), len(ax) - 2)
+            t = (v - float(ax[i])) / (float(ax[i + 1]) - float(ax[i]))
+            idx.append(i)
+            w.append(t)
+        out = torch.zeros(self.d, self.d, dtype=torch.float64)
+        for corner in range(2 ** self.d):
+            weight, sel = 1.0, []
+            for k in range(self.d):
+                bit = (corner >> k) & 1
+                weight *= w[k] if bit else (1.0 - w[k])
+                sel.append(idx[k] + bit)
+            if weight > 0.0:
+                out += weight * self.table[tuple(sel)]
+        return torch.linalg.inv(out).to(torch.float32)
+
+
 class ScoreCDRunner(Runner):
     def __init__(self, flow, variant: str = "rao", fisher_n: int = 4000,
+                 fisher_grid_per_dim: int = 9,
                  quantile_hidden: int = 64, quantile_depth: int = 2, device: str = "auto"):
+        # fisher_grid_per_dim > 0 (and d_theta <= 3): amortized grid Fisher
+        # (one consistent statistic, zero per-query sims). 0: exact per-θ MC
+        # with value-keyed caching (also the automatic fallback for d > 3,
+        # where a regular grid explodes).
         if variant not in ("rao", "cal"):
             raise ValueError(f"variant must be 'rao' or 'cal', got {variant!r}")
         self.flow = flow
         self.variant = variant
         self.fisher_n = fisher_n
+        self.fisher_grid_per_dim = fisher_grid_per_dim
         self.quantile_hidden = quantile_hidden
         self.quantile_depth = quantile_depth
         self.device = get_device(device)
@@ -123,7 +196,21 @@ class ScoreCDRunner(Runner):
             # procedure so the index can account for it.
             sim_calls = {"fisher": 0}
 
+            fisher_grid = None
+            if self.fisher_grid_per_dim > 0 and d <= 3:
+                fisher_grid = _FisherGrid.build(
+                    simulator, score, self.fisher_n, self.fisher_grid_per_dim,
+                    fisher_rng, sim_calls,
+                )
+
             def fisher_inv_sqrtdet(theta_row):
+                if fisher_grid is not None:
+                    key = tuple(round(float(v), 6) for v in theta_row)
+                    if key not in fisher_cache:
+                        fisher_cache[key] = fisher_grid.fisher_inv(
+                            torch.as_tensor(theta_row, dtype=torch.float64)
+                        ).to(dev)
+                    return fisher_cache[key]
                 key = tuple(round(float(v), 6) for v in theta_row)
                 if key not in fisher_cache:
                     sim_calls["fisher"] += fisher_n
