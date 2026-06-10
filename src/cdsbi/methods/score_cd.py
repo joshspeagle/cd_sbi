@@ -117,10 +117,16 @@ class ScoreCDRunner(Runner):
             fisher_n = self.fisher_n
             fisher_cache: dict = {}
             fisher_rng = np.random.default_rng(seed + 777)
+            # Inference-time simulator-call counter (hardening item 7): the
+            # Fisher estimate draws fisher_n fresh sims per DISTINCT queried θ —
+            # a cost the parameter-matched budget does not see. Exposed on the
+            # procedure so the index can account for it.
+            sim_calls = {"fisher": 0}
 
             def fisher_inv_sqrtdet(theta_row):
                 key = tuple(round(float(v), 6) for v in theta_row)
                 if key not in fisher_cache:
+                    sim_calls["fisher"] += fisher_n
                     xf = simulator.sample_x_given_theta(tuple(theta_row), fisher_n, fisher_rng)
                     thr = torch.tensor([list(theta_row)], dtype=xf.dtype).expand(fisher_n, d)
                     Uf, dropped = _finite_rows(score(thr, xf))
@@ -158,6 +164,7 @@ class ScoreCDRunner(Runner):
 
             arch = {"method": "ScoreCD", "variant": "rao", "fisher_n": fisher_n,
                     "flow_class": type(flow).__name__}
+            inference_sim_calls = sim_calls
 
         else:  # variant == "cal"
             theta_cal, x_cal = simulator.sample(int(config["n_train_quantile"]), rngs.eval)
@@ -194,6 +201,7 @@ class ScoreCDRunner(Runner):
 
             arch = {"method": "ScoreCD", "variant": "cal", "alpha_grid": alpha_grid,
                     "flow_class": type(flow).__name__}
+            inference_sim_calls = {"fisher": 0}  # cal has no inference-time draws
 
         procedure = CriticalValueProcedure(
             test_stat_fn=test_stat_fn, critical_value_fn=critical_value_fn,
@@ -204,6 +212,7 @@ class ScoreCDRunner(Runner):
         # post-eval. A nonzero `stat_nonfinite` means the reported coverage involved
         # rejected (pathological-score) points — the runs to scrutinise.
         procedure.nonfinite_diagnostics = nf
+        procedure.inference_sim_calls = inference_sim_calls
         arch["loss_history_tail"] = losses[-min(100, len(losses)):]
         arch["nonfinite_at_fit"] = dict(nf)
         return TrainedModel(procedure=procedure, state_dict={"flow": flow.state_dict()},

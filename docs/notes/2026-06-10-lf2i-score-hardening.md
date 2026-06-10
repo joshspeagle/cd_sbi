@@ -14,9 +14,9 @@ missing experiments, then the accounting/eval upgrades, then re-run.
 | 3 | Score-CD-cal `n_params` undercount | match | UPGRADE+rerun | **DONE** | head counted (mirrors LF2I-BFF); budget-width head is <15% of backbone (no retune needed — configs already interpolate `${budget.quantile_hidden}`) |
 | 4 | Arch logging (built flow ≠ `cfg.flow.name`) | match | UPGRADE+verify | **DONE** | index gains ground-truth `flow_class_built`; `_build_flow` warns LOUDLY at the exact fall-through; §8.4 verification folded into the re-run (old outputs absent here) |
 | 5 | **Cauchy loc-scale simulator (NEW)** | targets | NEW | **DONE** | `CauchyLocScale` committed + config; exactly-calibrated closed-form oracle pivot (PIT→normal-scores→orthonormal projections; Gram-Schmidt, any n_iid); oracle at the measured floor through the engine (<0.03 over a 3×3 box grid) |
-| 6 | Eval upgrade: oracle floor row + grid + metric | targets | UPGRADE | todo | dense interior+edge grid; n_per_theta=5000; mean/p90/max + per-θ₀ vector; measured `r_star` floor row |
-| 7 | Sim-cost accounting + relabel | match | UPGRADE | todo | `simulator_calls_total` logged (train+calib+inference Fisher/marginal); headline = "matched *parameter* budget" |
-| 8 | `fresh_batch` 2-regime sweep | match | REDO | todo | suite runs at fresh_batch ∈ {false, true}; both reported |
+| 6 | Eval upgrade: oracle floor row + grid + metric | targets | UPGRADE | **DONE** | `eval_thetas_edge` made LIVE (fused grid, all diagnostics); engine + index report mean/p90/max; measured `r_star` oracle floor row on the identical grid/n, saved as `oracle_coverage.parquet` + index columns |
+| 7 | Sim-cost accounting + relabel | match | UPGRADE | **DONE** | per-run `sim_calls_{train,calibration,inference,total_method}` in the index (live Fisher counter on Score-CD-rao; d-aware BFF marginal mirrored); budget log relabeled "Parameter budget … matched quantity is parameters" |
+| 8 | `fresh_batch` 2-regime sweep | match | REDO | **DONE (configs)** | POC experiment configs sweep `training.fresh_batch: false,true`; execution = the re-run step |
 | 9 | (optional) SLCP simulator | targets | NEW | deferred | only if the named benchmark is wanted beyond `SignNormal1D` |
 
 **Then:** re-run the clean POC suite (regular ladder {1D-loc, exp-rate, 2D-corr} + no-suff-stat
@@ -85,6 +85,24 @@ match; per-coord/joint-χ²₂ KS < 0.02 incl. box corners; coords independent f
 (Gram-Schmidt); **oracle at the measured floor through `evaluate_coverage` (max|Δ| < 0.03,
 3×3 grid × 4 levels, n_per_theta=4000)** — the floor row for the POC table now exists as
 reproducible code.
+
+**Items 6+7+8, 2026-06-10.**
+- #6: `eval_thetas_edge` was dead config — now fused into the grid every diagnostic consumes
+  (`_eval_theta_grid`); engine + index report `coverage_error_{max,mean,p90}` (max is a
+  max-order-statistic — inflates with grid size; mean/p90 + the per-(θ₀,α) table are the honest
+  companions); and every run with a closed-form `r_star` now writes a MEASURED oracle floor row
+  (`oracle_coverage.parquet` + `oracle_coverage_error_*` index columns) on the identical grid/n/α —
+  "at the floor" is a verified, grid-matched claim.
+- #7: per-run simulator-call accounting in the index: train (fixed-set n_train vs fresh
+  steps×batch), calibration (quantile sets; d-aware BFF marginal), inference (live counter on
+  Score-CD-rao's per-θ Fisher draws — e.g. 11 grid pts × 4000 = 44k uncounted calls now visible).
+  Budget messages relabeled: parameters are the matched quantity, sims are logged.
+- #8: POC experiment configs landed (`poc_loc_normal_1d`, `poc_gauss_2d_corr`, `poc_cauchy`,
+  `poc_sign_normal` + `configs/target/sign_normal_1d.yaml`): upgraded grids (dense interior + live
+  edges; 5×5 product + box corners at d=2), n_per_theta=5000, both `fresh_batch` regimes in the
+  sweeper. All four compose-validated; every target exposes `r_star` so the oracle row is automatic.
+  Remaining: EXECUTE the POC sweep and rewrite the draft's §6 from the regenerated tables.
+  (poc_exp_rate deferred to the run step — it needs the §8.4 on-T reduction wiring decision.)
 
 **Reuse (verified sound, no change):** shared training loop / optimizer / capacity matching;
 coverage-engine math (bit-validated); CD-SBI χ²-pivot construction; NPE for Gaussian-posterior

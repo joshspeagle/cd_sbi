@@ -1,0 +1,28 @@
+# @package _global_
+# LF2I-Score POC, regular arm 2: 2D correlated Gaussian (Fisher off-diagonal).
+# 5x5 product interior grid (corners covered — the old 5-pt partial diagonal
+# missed them) + the 4 prior-box corners as live edges.
+defaults:
+  - override /target: loc_gauss_2d_corr
+
+experiment:
+  name: poc_gauss_2d_corr
+  n_eval: 5000
+  eval_thetas_interior: [
+    [-5.0,-5.0],[-5.0,-2.5],[-5.0,0.0],[-5.0,2.5],[-5.0,5.0],
+    [-2.5,-5.0],[-2.5,-2.5],[-2.5,0.0],[-2.5,2.5],[-2.5,5.0],
+    [ 0.0,-5.0],[ 0.0,-2.5],[ 0.0,0.0],[ 0.0,2.5],[ 0.0,5.0],
+    [ 2.5,-5.0],[ 2.5,-2.5],[ 2.5,0.0],[ 2.5,2.5],[ 2.5,5.0],
+    [ 5.0,-5.0],[ 5.0,-2.5],[ 5.0,0.0],[ 5.0,2.5],[ 5.0,5.0]]
+  eval_thetas_edge: [[-7.0,-7.0],[-7.0,7.0],[7.0,-7.0],[7.0,7.0]]
+  alpha_grid: [0.5, 0.68, 0.9, 0.95]
+  n_eval_per_theta: 5000
+
+hydra:
+  mode: MULTIRUN
+  sweeper:
+    params:
+      method: cd_sbi,nle,score_cd_rao,score_cd_cal,lf2i_bff
+      budget: small,medium,large,xlarge
+      seed: 0,1,2,3,4
+      training.fresh_batch: false,true

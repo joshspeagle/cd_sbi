@@ -1,0 +1,27 @@
+# @package _global_
+# LF2I-Score POC, no-sufficient-statistic arm: Cauchy location-scale
+# (hardening item 5). theta = (log gamma, x0) on [-1,1]x[-3,3]; 3x3 interior
+# product + the 4 box corners as live edges. By PKD no fixed-dimensional
+# summary is sufficient here — the score readout needs none.
+defaults:
+  - override /target: cauchy_loc_scale
+
+experiment:
+  name: poc_cauchy
+  n_eval: 5000
+  eval_thetas_interior: [
+    [-0.5,-1.5],[-0.5,0.0],[-0.5,1.5],
+    [ 0.0,-1.5],[ 0.0,0.0],[ 0.0,1.5],
+    [ 0.5,-1.5],[ 0.5,0.0],[ 0.5,1.5]]
+  eval_thetas_edge: [[-1.0,-3.0],[-1.0,3.0],[1.0,-3.0],[1.0,3.0]]
+  alpha_grid: [0.5, 0.68, 0.9, 0.95]
+  n_eval_per_theta: 5000
+
+hydra:
+  mode: MULTIRUN
+  sweeper:
+    params:
+      method: nle,score_cd_rao,score_cd_cal,lf2i_bff
+      budget: small,medium,large,xlarge
+      seed: 0,1,2,3,4
+      training.fresh_batch: false,true
