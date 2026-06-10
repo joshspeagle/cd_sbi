@@ -200,6 +200,17 @@ the prototype-hardening experiment list (§6.4); the LF2I-Score write-up (§5).
 
 ## 6. Decisions that need the PI (not drift)
 
+> **RESOLVED (PI, 2026-06-10).** FreB co-authorship confirmed; the PI is in normal coordination
+> with the Lee group and **leads this work independently**. Consequences: the "novelty threat"
+> framing is fully retired (coordination is routine, not a strategic fork); LF2I-Score is PI-led
+> with group interest (draft v0.1 at `docs/papers/lf2i-score-draft.md`); TRUST++ baselines will be
+> implemented **independently** (reference code exists but is not used — M1b/M2 effort estimates
+> stand as budgeted); the tail-budget study is a research option judged on merit, not a
+> coordination item; the cd_sbi_v7 §10 "developed separately" phrasing is a one-line edit at
+> publication time. Net: all five items below dissolve into ordinary execution. **Process note:**
+> the audit itself over-weighted these — converting work into coordination questions is a form of
+> the very drift §1/Q1 criticizes. The original list is retained below for the record.
+
 1. **FreB.** Is the co-authorship real, and how does that collaboration's roadmap relate to CPF
    and to the rebuilt paper? This single answer re-prices every novelty/positioning judgment in
    this audit.
