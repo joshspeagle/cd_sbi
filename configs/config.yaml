@@ -11,13 +11,15 @@ defaults:
 device: auto
 seed: 0
 
-# subdir includes training-config axes (n_train, fresh_batch, training name) and
-# the budget/method/seed axes so multiruns sweeping any of them don't collide.
-run_dir: outputs/${experiment.name}/${now:%Y-%m-%d_%H-%M-%S}/method=${method.name},budget=${budget.name},train=${training.name},ntrain=${training.n_train},fresh=${training.fresh_batch},seed=${seed}
+# subdir includes the target plus training-config axes (n_train, fresh_batch,
+# training name) and the budget/method/seed axes so multiruns sweeping any of
+# them don't collide. (Pilot B 2026-06-10: a raw-vs-asinh target sweep silently
+# clobbered same-method runs into one dir before target= was added.)
+run_dir: outputs/${experiment.name}/${now:%Y-%m-%d_%H-%M-%S}/target=${target.name},method=${method.name},budget=${budget.name},train=${training.name},ntrain=${training.n_train},fresh=${training.fresh_batch},seed=${seed}
 
 hydra:
   run:
     dir: ${run_dir}
   sweep:
     dir: outputs/${experiment.name}/${now:%Y-%m-%d_%H-%M-%S}
-    subdir: method=${method.name},budget=${budget.name},train=${training.name},ntrain=${training.n_train},fresh=${training.fresh_batch},seed=${seed}
+    subdir: target=${target.name},method=${method.name},budget=${budget.name},train=${training.name},ntrain=${training.n_train},fresh=${training.fresh_batch},seed=${seed}

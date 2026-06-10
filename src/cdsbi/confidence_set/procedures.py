@@ -1438,7 +1438,8 @@ class LikelihoodBasedProcedure:
         lo, hi = self.theta_range
 
         # ll_max per X_obs via coarse mesh (matches the per-X_obs slow-path
-        # resolution at n_grid=25-per-dim).
+        # resolution at n_grid=25-per-dim), chunked so the flow eval stays
+        # O(chunk) in memory.
         n_grid = 25
         axes = [torch.linspace(lo, hi, n_grid, device=device, dtype=x_obs_batch.dtype)
                 for _ in range(self.d_theta)]
@@ -1448,29 +1449,42 @@ class LikelihoodBasedProcedure:
         x_obs_exp = x_obs_batch.unsqueeze(1).expand(-1, G, -1).reshape(
             -1, x_obs_batch.shape[-1]
         )
-        with torch.no_grad():
-            ll_grid = self.log_likelihood_fn(theta_mesh_exp, x_obs_exp).view(B, G)
-            ll_max_per_row = ll_grid.max(dim=1).values  # (B,)
 
-        def inside_fn(theta_flat, x_flat):
-            # Helper calls inside_fn(centers, x_obs_batch) with shape (B, d)
-            # during center search, and (B*K, d) during ray bisection.
-            # Derive K from theta_flat.shape[0] // B to broadcast ll_max_per_row.
-            n = theta_flat.shape[0]
-            if n == B:
-                ll_max_expanded = ll_max_per_row
-            else:
-                k_eff = n // B
-                ll_max_expanded = (
-                    ll_max_per_row.unsqueeze(1).expand(-1, k_eff).reshape(-1)
-                )
+        def _ll_rows(theta_flat, x_flat):
             ll = self.log_likelihood_fn(theta_flat, x_flat)
             if ll.ndim > 1:
                 ll = ll.squeeze(-1)
-            return 2.0 * (ll_max_expanded - ll) - thresh
+            return ll
+
+        with torch.no_grad():
+            ll_grid = _chunked_inside(_ll_rows, theta_mesh_exp, x_obs_exp).view(B, G)
+            ll_max_per_row = ll_grid.max(dim=1).values  # (B,)
+        if self.refine_ll_max:
+            # Same gradient-ascent polish the coverage path (contains_batch)
+            # applies — keeps the LR statistic consistent between accept()
+            # and set construction.
+            k = min(self.refine_topk, G)
+            top = ll_grid.topk(k, dim=1).indices  # (B, k)
+            for j in range(k):
+                starts = mesh[top[:, j]]  # (B, d)
+                ll_max_per_row = self._refine_ll_max_ascent(
+                    starts, x_obs_batch, ll_max_per_row,
+                )
+
+        # Row alignment through the ray helper: _chunked_inside slices inputs
+        # at arbitrary 4096-row boundaries that do NOT align to multiples of B,
+        # so inferring the broadcast layout from theta_flat.shape silently
+        # misaligns ll_max (and crashes outright on non-divisible chunks).
+        # Append ll_max as an extra x-column so it rides through every
+        # expansion and slice aligned by construction.
+        x_aug = torch.cat([x_obs_batch, ll_max_per_row.unsqueeze(1)], dim=1)
+
+        def inside_fn(theta_flat, x_flat):
+            ll = _ll_rows(theta_flat, x_flat[:, :-1])
+            return 2.0 * (x_flat[:, -1] - ll) - thresh
 
         centers, boundaries, _empty_mask = _ray_sample_set_boundary_batched(
-            x_obs_batch, inside_fn, self.theta_range, self.d_theta, n_rays=200,
+            x_aug, inside_fn, self.theta_range, self.d_theta, n_rays=200,
         )
         return centers, boundaries
 
