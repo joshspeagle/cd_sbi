@@ -624,6 +624,11 @@ def _write_index_row(cfg: DictConfig, rd: RunDir, trained, diag_results, config_
         "coverage_error_p90": float(cov_err.quantile(0.9)),
         **(oracle_metrics or {}),
         **(sim_costs or {}),
+        # Post-eval non-finite-score counters (Score-CD; zeros elsewhere) —
+        # nonzero stat_nonfinite flags coverage numbers that involved
+        # rejected (pathological-score) points.
+        **{f"nonfinite_{k}": int(v) for k, v in
+           (getattr(trained.procedure, "nonfinite_diagnostics", None) or {}).items()},
         "marginal_ks": (
             float(marg.value) if marg and isinstance(marg.value, float)
             else float(marg.value["ks"].mean()) if marg and hasattr(marg.value, "columns") and "ks" in marg.value.columns
