@@ -36,6 +36,35 @@ from cdsbi.methods.training_utils import train_with_recipe
 from cdsbi.reproducibility.seeding import seed_everything
 
 
+def _finite_rows(U: torch.Tensor) -> tuple:
+    """Rows of U (n,d) whose entries are all finite. Returns (U_finite, n_dropped).
+
+    Used for Fisher-information estimation: a single non-finite score row would
+    otherwise poison the whole covariance (and thus every test statistic at that θ).
+    Dropping (rather than zeroing) keeps the covariance an unbiased estimate over
+    the surviving samples.
+    """
+    mask = torch.isfinite(U).all(dim=-1)
+    return U[mask], int((~mask).sum().item())
+
+
+def _reject_nonfinite(T: torch.Tensor) -> tuple:
+    """Map non-finite test-statistic values to +inf — the CONSERVATIVE direction.
+
+    The confidence set is {θ : T(θ;X) ≤ c}; sending a non-finite T to +inf EXCLUDES
+    the point, i.e. a pathological score counts against the method (as not-covered).
+    This replaces the previous ``nan_to_num(score, 0.0)`` which set T→0 and silently
+    swept such points INSIDE the set — inflating coverage precisely on the unstable
+    (overfit-flow) runs where Score-CD is weakest. Returns (T_clean, n_nonfinite).
+    """
+    bad = ~torch.isfinite(T)
+    n = int(bad.sum().item())
+    if n:
+        T = T.clone()
+        T[bad] = float("inf")
+    return T, n
+
+
 class ScoreCDRunner(Runner):
     def __init__(self, flow, variant: str = "rao", fisher_n: int = 4000,
                  quantile_hidden: int = 64, quantile_depth: int = 2, device: str = "auto"):
@@ -64,16 +93,25 @@ class ScoreCDRunner(Runner):
         self.flow.eval()
         flow = self.flow
 
+        # Live non-finite-score counters (shared by all closures). `stat_nonfinite`
+        # and `fisher_dropped` accrue during inference (coverage eval); `calib_nonfinite`
+        # is known at fit time. Exposed on the procedure + snapshotted in arch_metadata.
+        nf = {"fisher_dropped": 0, "stat_nonfinite": 0, "calib_nonfinite": 0}
+
         def score(theta_rows: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
             """U(θ;X) = ∇_θ log q_φ(X|θ), shape (n, d). Enables grad internally so it
-            works under the diagnostics' no_grad; returns a detached tensor."""
+            works under the diagnostics' no_grad; returns a detached tensor.
+
+            Returns the RAW score (possibly non-finite). Non-finite values are handled
+            explicitly and conservatively at the point of use — dropped from Fisher
+            estimation (`_finite_rows`) and rejected from the statistic
+            (`_reject_nonfinite`) — never silently zeroed.
+            """
             with torch.enable_grad():
                 th = theta_rows.detach().clone().to(dev).requires_grad_(True)
                 lp = flow.log_prob(x.to(dev), context=th).sum()
                 g, = torch.autograd.grad(lp, th)
-            # Guard against non-finite scores from an under-trained / unstable flow
-            # (a huge/NaN gradient on an extreme X would poison the Fisher matmul).
-            return torch.nan_to_num(g.detach(), nan=0.0, posinf=0.0, neginf=0.0)
+            return g.detach()
 
         if self.variant == "rao":
             fisher_n = self.fisher_n
@@ -85,9 +123,20 @@ class ScoreCDRunner(Runner):
                 if key not in fisher_cache:
                     xf = simulator.sample_x_given_theta(tuple(theta_row), fisher_n, fisher_rng)
                     thr = torch.tensor([list(theta_row)], dtype=xf.dtype).expand(fisher_n, d)
-                    U = score(thr, xf).cpu().numpy()
-                    Iinv = np.linalg.inv(U.T @ U / fisher_n + 1e-6 * np.eye(d))
-                    fisher_cache[key] = torch.tensor(Iinv, dtype=torch.float32, device=dev)
+                    Uf, dropped = _finite_rows(score(thr, xf))
+                    nf["fisher_dropped"] += dropped
+                    m = int(Uf.shape[0])
+                    if m < d + 1:
+                        # Too few finite samples to estimate the covariance (extremely
+                        # rare; needs nearly all fisher_n non-finite). Fall back to a
+                        # large-ridge identity so the Rao stat degrades to a scaled
+                        # ‖U‖² (large → rejected) rather than crashing.
+                        Iinv_t = torch.eye(d, dtype=torch.float32, device=dev) / 1e-6
+                    else:
+                        Un = Uf.cpu().numpy()
+                        Iinv = np.linalg.inv(Un.T @ Un / m + 1e-6 * np.eye(d))
+                        Iinv_t = torch.tensor(Iinv, dtype=torch.float32, device=dev)
+                    fisher_cache[key] = Iinv_t
                 return fisher_cache[key]
 
             def test_stat_fn(theta: torch.Tensor, x_obs: torch.Tensor) -> torch.Tensor:
@@ -99,7 +148,10 @@ class ScoreCDRunner(Runner):
                         theta = theta.expand(x_obs.shape[0], -1)
                 Iinv = fisher_inv_sqrtdet(theta[0].detach().cpu().numpy())  # θ fixed across batch
                 U = score(theta, x_obs)                                    # (n,d)
-                return torch.einsum('ni,ij,nj->n', U, Iinv, U)             # Rao stat
+                T = torch.einsum('ni,ij,nj->n', U, Iinv, U)                # Rao stat
+                T, n = _reject_nonfinite(T)
+                nf["stat_nonfinite"] += n
+                return T
 
             def critical_value_fn(theta: torch.Tensor, alpha: float) -> torch.Tensor:
                 return torch.tensor(float(chi2.ppf(alpha, df=d)), device=dev)
@@ -110,6 +162,12 @@ class ScoreCDRunner(Runner):
         else:  # variant == "cal"
             theta_cal, x_cal = simulator.sample(int(config["n_train_quantile"]), rngs.eval)
             stat_cal = (score(theta_cal, x_cal) ** 2).sum(-1)              # ‖U‖²
+            # Drop non-finite calibration statistics (and their θ) before training the
+            # quantile head — a non-finite ‖U‖² would otherwise poison the pinball loss.
+            finite = torch.isfinite(stat_cal)
+            nf["calib_nonfinite"] += int((~finite).sum().item())
+            theta_cal = theta_cal.to(dev)[finite]
+            stat_cal = stat_cal[finite]
             alpha_grid: List[float] = list(config["alpha_grid"])
             qnet = MultiQuantileMLP(input_dim=d, hidden=self.quantile_hidden,
                                     depth=self.quantile_depth, n_quantiles=len(alpha_grid)).to(dev)
@@ -125,7 +183,10 @@ class ScoreCDRunner(Runner):
                         x_obs = x_obs.expand(theta.shape[0], -1)
                     elif theta.shape[0] == 1:
                         theta = theta.expand(x_obs.shape[0], -1)
-                return (score(theta, x_obs) ** 2).sum(-1)
+                T = (score(theta, x_obs) ** 2).sum(-1)
+                T, n = _reject_nonfinite(T)
+                nf["stat_nonfinite"] += n
+                return T
 
             def critical_value_fn(theta: torch.Tensor, alpha: float) -> torch.Tensor:
                 with torch.no_grad():
@@ -138,7 +199,13 @@ class ScoreCDRunner(Runner):
             test_stat_fn=test_stat_fn, critical_value_fn=critical_value_fn,
             d_theta=d, theta_range=simulator.theta_range,
         )
+        # Live counters: `stat_nonfinite`/`fisher_dropped` accrue during the coverage
+        # eval that runs AFTER fit returns, so inspect `procedure.nonfinite_diagnostics`
+        # post-eval. A nonzero `stat_nonfinite` means the reported coverage involved
+        # rejected (pathological-score) points — the runs to scrutinise.
+        procedure.nonfinite_diagnostics = nf
         arch["loss_history_tail"] = losses[-min(100, len(losses)):]
+        arch["nonfinite_at_fit"] = dict(nf)
         return TrainedModel(procedure=procedure, state_dict={"flow": flow.state_dict()},
                             final_loss=float(losses[-1]), n_steps=int(config["n_steps"]),
                             wall_clock_sec=wall, arch_metadata=arch)
