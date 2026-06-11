@@ -22,10 +22,13 @@ References:
 """
 from __future__ import annotations
 
+import hashlib
 import math
 import time
+from collections import OrderedDict
 from typing import List
 
+import numpy as np
 import torch
 
 from cdsbi.confidence_set.procedures import CriticalValueProcedure, _BatchCache
@@ -105,16 +108,40 @@ class LF2IBFFRunner(Runner):
         # evaluations so the cost stays observable.
         marginal_cache = _BatchCache()
         marginal_evals = {"n": 0}
+        # Content-keyed inner layer: the d>1 ray-bisection path slices its
+        # (fixed) expanded x into FRESH tensor objects on every one of the 40
+        # bisection iterations, so id-keying alone misses on all of them —
+        # and within each slice every x is repeated across ~200 rays. The
+        # contents are bit-identical across iterations (only θ moves), so a
+        # hash of the bytes + per-row dedup removes both redundancies
+        # (~8000× on the Cauchy d=2 SetSize, the take-3 lf2i_bff hang).
+        content_cache: OrderedDict[bytes, torch.Tensor] = OrderedDict()
+        _CONTENT_CAP = 64
+
+        def _marginal_unique_rows(xb: torch.Tensor) -> torch.Tensor:
+            uniq, inv = torch.unique(xb, dim=0, return_inverse=True)
+            marginal_evals["n"] += 1
+            B = uniq.shape[0]
+            tg = theta_grid.unsqueeze(0).expand(B, -1, -1).reshape(-1, theta_grid.shape[-1])
+            xe = uniq.unsqueeze(1).expand(-1, N_grid, -1).reshape(-1, uniq.shape[-1])
+            lr = classifier(torch.cat([tg, xe], dim=-1)).squeeze(-1).view(B, N_grid)
+            return (torch.logsumexp(lr, dim=1) - log_N)[inv]
 
         def _log_marginal(x_in: torch.Tensor) -> torch.Tensor:
             def _compute():
-                marginal_evals["n"] += 1
                 xb = x_in.to(device)
-                B = xb.shape[0]
-                tg = theta_grid.unsqueeze(0).expand(B, -1, -1).reshape(-1, theta_grid.shape[-1])
-                xe = xb.unsqueeze(1).expand(-1, N_grid, -1).reshape(-1, xb.shape[-1])
-                lr = classifier(torch.cat([tg, xe], dim=-1)).squeeze(-1).view(B, N_grid)
-                return torch.logsumexp(lr, dim=1) - log_N
+                key = hashlib.sha1(
+                    np.ascontiguousarray(xb.detach().cpu().numpy()).tobytes()
+                ).digest()
+                hit = content_cache.get(key)
+                if hit is not None:
+                    content_cache.move_to_end(key)
+                    return hit
+                out = _marginal_unique_rows(xb)
+                content_cache[key] = out
+                if len(content_cache) > _CONTENT_CAP:
+                    content_cache.popitem(last=False)
+                return out
 
             return marginal_cache.get_or_compute(
                 ("bff_marginal", id(x_in), int(x_in.shape[0])), _compute, anchor=x_in,
