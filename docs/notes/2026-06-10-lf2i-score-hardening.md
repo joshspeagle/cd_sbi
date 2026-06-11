@@ -159,3 +159,36 @@ recomputed inside per-θ statistic closures.**
    free), leaving a stale `STATUS=RUNNING`. Lesson: judge progress by run-dir artifacts, not
    STATUS files.
 Take-3 relaunched 23:30 post-fix; asinh A/B verdict to be appended.
+
+### Pilot B verdict — Cauchy raw-vs-asinh A/B (take-3 + take-4, 2026-06-11)
+
+8/8 clean runs (medium, seed 0, fixed-set regime; measured oracle floor
+max 0.019 / mean 0.005 on the same grid). Two more perf/correctness fixes
+were forced en route (chunk-misalignment, marginal dedup — above); post-fix
+walls: score_cd ~45 s, lf2i_bff ~60 s, nle ~4.8 min (eval-dominated).
+
+| method | raw max / mean | asinh max / mean | failure shape |
+|---|---|---|---|
+| nle | 0.458 / 0.291 | 0.307 / 0.175 | broad UNDER-coverage (−0.2…−0.3) at all α interior |
+| score_cd_rao | 0.499 / 0.237 | 0.418 / 0.129 | α-structured: +0.35 over-coverage at α=0.5 EVERYWHERE (incl. θ-center); ≤0.07 at α=0.9/0.95 |
+| score_cd_cal | 0.074 / 0.026 | 0.145 / 0.022 | at floor interior BOTH arms; residual +0.10–0.15 only at the two log γ=−1 corners, low α |
+| lf2i_bff | 0.096 / 0.019 | 0.333 / 0.049 | raw fine; asinh fails ONLY at (−1, ±3) corners, low α (−0.33) |
+
+Findings (paper-grade):
+1. **Conditioning gates density-based statistics, not classifier-based ones.**
+   NLE and the score (both read a MAF density) break on raw Cauchy; LF2I-BFF's
+   classifier never estimates a density and is at-floor from raw X.
+2. **asinh helps the density methods but cannot rescue an asymptotic readout.**
+   rao/asinh's failure is α-structured: the χ²₂ null is wrong in the BULK at
+   n_iid=10 heavy tails (over-coverage +0.35 at the median) while the 0.9/0.95
+   tails are nearly right. The original probe's 0.022 evaluated α=0.9 only —
+   not wrong, incomplete; the 4-level α-grid was built to catch exactly this.
+3. **Validity-from-calibration survives where validity-from-asymptotics dies:**
+   cal (identical score core, learned c_α(θ)) is at the floor in the interior
+   on BOTH raw and asinh. On non-regular targets the cal variant is not
+   optional. Its residual (and BFF/asinh's) lives at the proposal-box corners
+   at low α — quantile-head extrapolation, the same edge family Pilot A
+   exposed for NLE.
+4. NLE/asinh still under-covers broadly interior (Wilks at n=10 heavy tails)
+   — strongest evidence yet that the Wilks statistic, not the flow fit, is
+   NLE's binding constraint off-Gaussian.
