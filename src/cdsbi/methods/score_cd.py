@@ -4,8 +4,8 @@ confidence distribution via the score (Rao) pivot.
 Stage 1 trains an NLE conditional density q_φ(X|θ) (identical to NLERunner) — no
 bottleneck, information-complete, cannot collapse. Inference reads a d_θ-dimensional
 frequentist CD from the SCORE U(θ;X)=∇_θ log q_φ(X|θ), which at the true θ has mean
-zero (exactly) and covariance the Fisher information I(θ), and is ≈N(0,I(θ)) by the
-CLT over the n_iid replicates. Two readouts (both as a CriticalValueProcedure, so they
+zero and covariance the Fisher information I(θ) when q_φ = p (the surrogate inherits
+this only as q_φ → p), and is ≈N(0,I(θ)) by the CLT over the n_iid replicates. Two readouts (both as a CriticalValueProcedure, so they
 slot into the coverage/set-size diagnostics exactly like LF2I-BFF):
 
   variant="rao": stat = U(θ;X)ᵀ Î(θ)⁻¹ U(θ;X) ~ χ²_{d_θ} (asymptotic), critical value
@@ -36,14 +36,116 @@ from cdsbi.methods.training_utils import train_with_recipe
 from cdsbi.reproducibility.seeding import seed_everything
 
 
+def _finite_rows(U: torch.Tensor) -> tuple:
+    """Rows of U (n,d) whose entries are all finite. Returns (U_finite, n_dropped).
+
+    Used for Fisher-information estimation: a single non-finite score row would
+    otherwise poison the whole covariance (and thus every test statistic at that θ).
+    Dropping (rather than zeroing) keeps the covariance an unbiased estimate over
+    the surviving samples.
+    """
+    mask = torch.isfinite(U).all(dim=-1)
+    return U[mask], int((~mask).sum().item())
+
+
+def _reject_nonfinite(T: torch.Tensor) -> tuple:
+    """Map non-finite test-statistic values to +inf — the CONSERVATIVE direction.
+
+    The confidence set is {θ : T(θ;X) ≤ c}; sending a non-finite T to +inf EXCLUDES
+    the point, i.e. a pathological score counts against the method (as not-covered).
+    This replaces the previous ``nan_to_num(score, 0.0)`` which set T→0 and silently
+    swept such points INSIDE the set — inflating coverage precisely on the unstable
+    (overfit-flow) runs where Score-CD is weakest. Returns (T_clean, n_nonfinite).
+    """
+    bad = ~torch.isfinite(T)
+    n = int(bad.sum().item())
+    if n:
+        T = T.clone()
+        T[bad] = float("inf")
+    return T, n
+
+
+class _FisherGrid:
+    """Fit-time amortized Fisher information Î(θ) on a regular per-dim grid,
+    multilinearly interpolated at query (hardening perf fix, 2026-06-10).
+
+    The exact-θ MC Fisher (fisher_n sims + a fisher_n-row backward per DISTINCT
+    queried θ, cached by value) is the right thing for coverage (a handful of
+    θ₀) and pathological for set construction, which probes a continuum of θ
+    (measured: ONE confidence_set call = 26 cache misses = 104k sims; a SetSize
+    pass ≈ 69 min/run). The grid is built once at fit time (n_per_dim^d points;
+    counted in the sim-call ledger), Î entries are multilinearly interpolated
+    (exact for any θ-linear Fisher — the test property), and the d×d inverse is
+    taken per query. This makes the Rao statistic ONE deterministic function of
+    θ across all diagnostics, with zero per-query simulation.
+    """
+
+    def __init__(self, axes: list, table: torch.Tensor):
+        self.axes = axes              # list of 1-D tensors (per-dim nodes)
+        self.table = table            # (n1, ..., nd, d, d) Î at the nodes
+        self.d = len(axes)
+
+    @classmethod
+    def build(cls, simulator, score_fn, fisher_n: int, n_per_dim: int,
+              rng, sim_call_counter: dict) -> "_FisherGrid":
+        d = int(simulator.d_theta)
+        lo = getattr(simulator, "theta_lower", None)
+        hi = getattr(simulator, "theta_upper", None)
+        if lo is None or hi is None:
+            a, b = simulator.theta_range
+            lo, hi = [a] * d, [b] * d
+        axes = [torch.linspace(float(lo[k]), float(hi[k]), n_per_dim) for k in range(d)]
+        mesh = torch.stack(torch.meshgrid(*axes, indexing="ij"), dim=-1).reshape(-1, d)
+        ents = []
+        for row in mesh:
+            sim_call_counter["fisher"] += fisher_n
+            xf = simulator.sample_x_given_theta(tuple(row.tolist()), fisher_n, rng)
+            thr = row.view(1, d).to(xf.dtype).expand(fisher_n, d)
+            Uf, _ = _finite_rows(score_fn(thr, xf))
+            m = max(int(Uf.shape[0]), d + 1)
+            U = Uf.cpu().double()
+            ents.append((U.T @ U / m + 1e-6 * torch.eye(d, dtype=torch.float64)))
+        table = torch.stack(ents).reshape(*([n_per_dim] * d), d, d)
+        return cls(axes, table)
+
+    def fisher_inv(self, theta_row: torch.Tensor) -> torch.Tensor:
+        """Multilinear interpolation of Î at θ (clamped to the grid box), then
+        the d×d inverse. Microseconds; no simulation."""
+        th = theta_row.detach().cpu().double().reshape(-1)
+        idx, w = [], []
+        for k, ax in enumerate(self.axes):
+            v = float(min(max(th[k], ax[0]), ax[-1]))
+            i = int(torch.searchsorted(ax, torch.tensor(v), right=True)) - 1
+            i = min(max(i, 0), len(ax) - 2)
+            t = (v - float(ax[i])) / (float(ax[i + 1]) - float(ax[i]))
+            idx.append(i)
+            w.append(t)
+        out = torch.zeros(self.d, self.d, dtype=torch.float64)
+        for corner in range(2 ** self.d):
+            weight, sel = 1.0, []
+            for k in range(self.d):
+                bit = (corner >> k) & 1
+                weight *= w[k] if bit else (1.0 - w[k])
+                sel.append(idx[k] + bit)
+            if weight > 0.0:
+                out += weight * self.table[tuple(sel)]
+        return torch.linalg.inv(out).to(torch.float32)
+
+
 class ScoreCDRunner(Runner):
     def __init__(self, flow, variant: str = "rao", fisher_n: int = 4000,
+                 fisher_grid_per_dim: int = 9,
                  quantile_hidden: int = 64, quantile_depth: int = 2, device: str = "auto"):
+        # fisher_grid_per_dim > 0 (and d_theta <= 3): amortized grid Fisher
+        # (one consistent statistic, zero per-query sims). 0: exact per-θ MC
+        # with value-keyed caching (also the automatic fallback for d > 3,
+        # where a regular grid explodes).
         if variant not in ("rao", "cal"):
             raise ValueError(f"variant must be 'rao' or 'cal', got {variant!r}")
         self.flow = flow
         self.variant = variant
         self.fisher_n = fisher_n
+        self.fisher_grid_per_dim = fisher_grid_per_dim
         self.quantile_hidden = quantile_hidden
         self.quantile_depth = quantile_depth
         self.device = get_device(device)
@@ -64,30 +166,70 @@ class ScoreCDRunner(Runner):
         self.flow.eval()
         flow = self.flow
 
+        # Live non-finite-score counters (shared by all closures). `stat_nonfinite`
+        # and `fisher_dropped` accrue during inference (coverage eval); `calib_nonfinite`
+        # is known at fit time. Exposed on the procedure + snapshotted in arch_metadata.
+        nf = {"fisher_dropped": 0, "stat_nonfinite": 0, "calib_nonfinite": 0}
+
         def score(theta_rows: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
             """U(θ;X) = ∇_θ log q_φ(X|θ), shape (n, d). Enables grad internally so it
-            works under the diagnostics' no_grad; returns a detached tensor."""
+            works under the diagnostics' no_grad; returns a detached tensor.
+
+            Returns the RAW score (possibly non-finite). Non-finite values are handled
+            explicitly and conservatively at the point of use — dropped from Fisher
+            estimation (`_finite_rows`) and rejected from the statistic
+            (`_reject_nonfinite`) — never silently zeroed.
+            """
             with torch.enable_grad():
                 th = theta_rows.detach().clone().to(dev).requires_grad_(True)
                 lp = flow.log_prob(x.to(dev), context=th).sum()
                 g, = torch.autograd.grad(lp, th)
-            # Guard against non-finite scores from an under-trained / unstable flow
-            # (a huge/NaN gradient on an extreme X would poison the Fisher matmul).
-            return torch.nan_to_num(g.detach(), nan=0.0, posinf=0.0, neginf=0.0)
+            return g.detach()
 
         if self.variant == "rao":
             fisher_n = self.fisher_n
             fisher_cache: dict = {}
             fisher_rng = np.random.default_rng(seed + 777)
+            # Inference-time simulator-call counter (hardening item 7): the
+            # Fisher estimate draws fisher_n fresh sims per DISTINCT queried θ —
+            # a cost the parameter-matched budget does not see. Exposed on the
+            # procedure so the index can account for it.
+            sim_calls = {"fisher": 0}
+
+            fisher_grid = None
+            if self.fisher_grid_per_dim > 0 and d <= 3:
+                fisher_grid = _FisherGrid.build(
+                    simulator, score, self.fisher_n, self.fisher_grid_per_dim,
+                    fisher_rng, sim_calls,
+                )
 
             def fisher_inv_sqrtdet(theta_row):
+                if fisher_grid is not None:
+                    key = tuple(round(float(v), 6) for v in theta_row)
+                    if key not in fisher_cache:
+                        fisher_cache[key] = fisher_grid.fisher_inv(
+                            torch.as_tensor(theta_row, dtype=torch.float64)
+                        ).to(dev)
+                    return fisher_cache[key]
                 key = tuple(round(float(v), 6) for v in theta_row)
                 if key not in fisher_cache:
+                    sim_calls["fisher"] += fisher_n
                     xf = simulator.sample_x_given_theta(tuple(theta_row), fisher_n, fisher_rng)
                     thr = torch.tensor([list(theta_row)], dtype=xf.dtype).expand(fisher_n, d)
-                    U = score(thr, xf).cpu().numpy()
-                    Iinv = np.linalg.inv(U.T @ U / fisher_n + 1e-6 * np.eye(d))
-                    fisher_cache[key] = torch.tensor(Iinv, dtype=torch.float32, device=dev)
+                    Uf, dropped = _finite_rows(score(thr, xf))
+                    nf["fisher_dropped"] += dropped
+                    m = int(Uf.shape[0])
+                    if m < d + 1:
+                        # Too few finite samples to estimate the covariance (extremely
+                        # rare; needs nearly all fisher_n non-finite). Fall back to a
+                        # large-ridge identity so the Rao stat degrades to a scaled
+                        # ‖U‖² (large → rejected) rather than crashing.
+                        Iinv_t = torch.eye(d, dtype=torch.float32, device=dev) / 1e-6
+                    else:
+                        Un = Uf.cpu().numpy()
+                        Iinv = np.linalg.inv(Un.T @ Un / m + 1e-6 * np.eye(d))
+                        Iinv_t = torch.tensor(Iinv, dtype=torch.float32, device=dev)
+                    fisher_cache[key] = Iinv_t
                 return fisher_cache[key]
 
             def test_stat_fn(theta: torch.Tensor, x_obs: torch.Tensor) -> torch.Tensor:
@@ -99,17 +241,27 @@ class ScoreCDRunner(Runner):
                         theta = theta.expand(x_obs.shape[0], -1)
                 Iinv = fisher_inv_sqrtdet(theta[0].detach().cpu().numpy())  # θ fixed across batch
                 U = score(theta, x_obs)                                    # (n,d)
-                return torch.einsum('ni,ij,nj->n', U, Iinv, U)             # Rao stat
+                T = torch.einsum('ni,ij,nj->n', U, Iinv, U)                # Rao stat
+                T, n = _reject_nonfinite(T)
+                nf["stat_nonfinite"] += n
+                return T
 
             def critical_value_fn(theta: torch.Tensor, alpha: float) -> torch.Tensor:
                 return torch.tensor(float(chi2.ppf(alpha, df=d)), device=dev)
 
             arch = {"method": "ScoreCD", "variant": "rao", "fisher_n": fisher_n,
                     "flow_class": type(flow).__name__}
+            inference_sim_calls = sim_calls
 
         else:  # variant == "cal"
             theta_cal, x_cal = simulator.sample(int(config["n_train_quantile"]), rngs.eval)
             stat_cal = (score(theta_cal, x_cal) ** 2).sum(-1)              # ‖U‖²
+            # Drop non-finite calibration statistics (and their θ) before training the
+            # quantile head — a non-finite ‖U‖² would otherwise poison the pinball loss.
+            finite = torch.isfinite(stat_cal)
+            nf["calib_nonfinite"] += int((~finite).sum().item())
+            theta_cal = theta_cal.to(dev)[finite]
+            stat_cal = stat_cal[finite]
             alpha_grid: List[float] = list(config["alpha_grid"])
             qnet = MultiQuantileMLP(input_dim=d, hidden=self.quantile_hidden,
                                     depth=self.quantile_depth, n_quantiles=len(alpha_grid)).to(dev)
@@ -125,7 +277,10 @@ class ScoreCDRunner(Runner):
                         x_obs = x_obs.expand(theta.shape[0], -1)
                     elif theta.shape[0] == 1:
                         theta = theta.expand(x_obs.shape[0], -1)
-                return (score(theta, x_obs) ** 2).sum(-1)
+                T = (score(theta, x_obs) ** 2).sum(-1)
+                T, n = _reject_nonfinite(T)
+                nf["stat_nonfinite"] += n
+                return T
 
             def critical_value_fn(theta: torch.Tensor, alpha: float) -> torch.Tensor:
                 with torch.no_grad():
@@ -133,17 +288,43 @@ class ScoreCDRunner(Runner):
 
             arch = {"method": "ScoreCD", "variant": "cal", "alpha_grid": alpha_grid,
                     "flow_class": type(flow).__name__}
+            inference_sim_calls = {"fisher": 0}  # cal has no inference-time draws
 
         procedure = CriticalValueProcedure(
             test_stat_fn=test_stat_fn, critical_value_fn=critical_value_fn,
             d_theta=d, theta_range=simulator.theta_range,
         )
+        # Live counters: `stat_nonfinite`/`fisher_dropped` accrue during the coverage
+        # eval that runs AFTER fit returns, so inspect `procedure.nonfinite_diagnostics`
+        # post-eval. A nonzero `stat_nonfinite` means the reported coverage involved
+        # rejected (pathological-score) points — the runs to scrutinise.
+        procedure.nonfinite_diagnostics = nf
+        procedure.inference_sim_calls = inference_sim_calls
         arch["loss_history_tail"] = losses[-min(100, len(losses)):]
+        arch["nonfinite_at_fit"] = dict(nf)
         return TrainedModel(procedure=procedure, state_dict={"flow": flow.state_dict()},
                             final_loss=float(losses[-1]), n_steps=int(config["n_steps"]),
                             wall_clock_sec=wall, arch_metadata=arch)
 
-    def n_params(self) -> dict:
+    def n_params(self, d_theta: int = 1, alpha_grid_len: int = 4) -> dict:
+        """Parameter accounting (hardening item 3, 2026-06-10).
+
+        The "cal" variant trains a MultiQuantileMLP critical-value head; it is
+        counted against the budget exactly as LF2I-BFF's identical head is
+        (lf2i_bff.py::n_params). The "rao" variant has no learned calibration
+        stage (its Fisher estimate is Monte-Carlo, not parametric).
+        """
         backbone = sum(p.numel() for p in self.flow.parameters())
+        if self.variant == "cal":
+            head = MultiQuantileMLP(
+                input_dim=d_theta,
+                hidden=self.quantile_hidden,
+                depth=self.quantile_depth,
+                n_quantiles=alpha_grid_len,
+            )
+            calibration_stage = sum(p.numel() for p in head.parameters())
+            return {"backbone": backbone, "head": 0,
+                    "calibration_stage": calibration_stage,
+                    "total": backbone + calibration_stage, "kind": "two_stage_score"}
         return {"backbone": backbone, "head": 0, "calibration_stage": 0,
                 "total": backbone, "kind": "flow"}

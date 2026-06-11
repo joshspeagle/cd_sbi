@@ -9,6 +9,7 @@ Each subtype produces a ConfidenceSet via its own mechanism:
 """
 from __future__ import annotations
 
+import weakref
 from typing import Callable, Protocol, Tuple, runtime_checkable
 
 import numpy as np
@@ -81,18 +82,36 @@ class _BatchCache:
     Cache invalidation: on key mismatch, the new value replaces the old. No
     LRU, no manual flush — caller passes a fresh `key` each time and the
     cache automatically tracks the most recent (θ_0, x_obs_batch).
+
+    Identity safety (hardening item 2 follow-up, 2026-06-10): keys embed
+    ``id(x_obs_batch)``, but CPython recycles ids the moment an object dies —
+    and the chunked eval engine frees each x-slice before creating the next, so
+    a recycled id made later chunks silently receive an earlier chunk's cached
+    values (or crash on a shape mismatch, which is how this surfaced). A hit
+    therefore additionally requires the ``anchor`` object (the keyed batch) to
+    be the *same live object* via a weakref check; if the original died, the
+    entry is invalid and is recomputed.
     """
 
     def __init__(self):
         self._key = None
         self._value = None
+        self._anchor_ref = None
 
-    def get_or_compute(self, key, compute_fn):
+    def get_or_compute(self, key, compute_fn, anchor=None):
         if self._key == key:
-            return self._value
+            if anchor is None and self._anchor_ref is None:
+                return self._value
+            if (
+                anchor is not None
+                and self._anchor_ref is not None
+                and self._anchor_ref() is anchor
+            ):
+                return self._value
         v = compute_fn()
         self._key = key
         self._value = v
+        self._anchor_ref = weakref.ref(anchor) if anchor is not None else None
         return v
 
     def reset(self):
@@ -677,7 +696,7 @@ class CriticalValueProcedure:
                 t = t.squeeze(-1)
             return t
 
-        t_obs = self._t_obs_cache.get_or_compute(cache_key, _compute_t_obs)
+        t_obs = self._t_obs_cache.get_or_compute(cache_key, _compute_t_obs, anchor=x_obs_batch)
         # Critical value at the (single) θ_0 — scalar across the batch.
         c_val = self.critical_value_fn(theta_t[:1], alpha)
         if c_val.ndim == 0:
@@ -777,7 +796,7 @@ class CriticalValueProcedure:
 
         cache_key = ("t_grid", id(x_obs_batch), int(n_grid))
         theta_grid, t_grid = self._t_grid_cache.get_or_compute(
-            cache_key, _compute_t_grid,
+            cache_key, _compute_t_grid, anchor=x_obs_batch,
         )
         # c_α(θ) only depends on θ → evaluate once, broadcast.
         c_grid = self.critical_value_fn(theta_grid, alpha)
@@ -943,6 +962,7 @@ class PosteriorBasedProcedure:
         samples = self._sample_cache.get_or_compute(
             cache_key,
             lambda: self.sample_batched_fn(x_obs_batch, n_samples),
+            anchor=x_obs_batch,
         )
         if samples.ndim == 2:
             samples = samples.unsqueeze(-1)
@@ -970,7 +990,7 @@ class PosteriorBasedProcedure:
                 ], dim=1)  # (n, B, d)
             return self.sample_batched_fn(x_obs_batch, n_samples)
 
-        samples = self._sample_cache.get_or_compute(cache_key, _draw)  # (n, B, d)
+        samples = self._sample_cache.get_or_compute(cache_key, _draw, anchor=x_obs_batch)  # (n, B, d)
         # Per-X_obs (μ, Σ) — batched.
         mu = samples.mean(dim=0)  # (B, d)
         centered = samples - mu.unsqueeze(0)  # (n, B, d)
@@ -1027,6 +1047,7 @@ class PosteriorBasedProcedure:
         samples = self._sample_cache.get_or_compute(
             cache_key,
             lambda: self.sample_batched_fn(x_obs_batch, n_samples),
+            anchor=x_obs_batch,
         )  # (n, B, d_theta)
         if samples.ndim == 2:
             samples = samples.unsqueeze(-1)
@@ -1060,7 +1081,7 @@ class PosteriorBasedProcedure:
                 ], dim=1)  # (n, B, d)
             return self.sample_batched_fn(x_obs_batch, n_samples)  # (n, B, d)
 
-        samples = self._sample_cache.get_or_compute(cache_key, _draw)  # (n, B, d)
+        samples = self._sample_cache.get_or_compute(cache_key, _draw, anchor=x_obs_batch)  # (n, B, d)
         n = samples.shape[0]
         device = samples.device
         dtype = samples.dtype
@@ -1093,16 +1114,104 @@ class PosteriorBasedProcedure:
 
 
 class LikelihoodBasedProcedure:
-    """NLE: Wilks-style likelihood-ratio confidence set."""
+    """NLE: Wilks-style likelihood-ratio confidence set.
 
-    def __init__(self, log_likelihood_fn: Callable, d_theta: int, theta_range: tuple = (-20.0, 20.0)):
+    ll_max refinement (hardening item 2, 2026-06-10): the d>1 coarse θ-grid
+    under-estimates ll_max(X) by the nearest-neighbor gap, which shrinks the
+    Wilks statistic 2(ll_max − ll(θ0)) and over-includes candidate θ0 (an
+    X-dependent coverage bias). With ``refine_ll_max=True`` (default) the grid
+    argmax points are refined by Adam gradient ascent — the log-likelihood is
+    differentiable in θ for NLE flows and NRE classifiers — and the estimate is
+    elementwise-maxed with the grid value, so it can only improve.
+    """
+
+    def __init__(self, log_likelihood_fn: Callable, d_theta: int, theta_range: tuple = (-20.0, 20.0),
+                 refine_ll_max: bool = True, refine_steps: int = 50,
+                 refine_topk: int = 3, refine_lr: float = 0.05):
         self.log_likelihood_fn = log_likelihood_fn
+        self.refine_ll_max = refine_ll_max
+        self.refine_steps = refine_steps
+        self.refine_topk = refine_topk
+        self.refine_lr = refine_lr
         self.d_theta = d_theta
         self.theta_range = theta_range
         self._ll_grid_cache = _BatchCache()
 
     def log_likelihood(self, theta: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
         return self.log_likelihood_fn(theta, x)
+
+    def _refine_ll_max_ascent(self, theta_init: torch.Tensor, x_obs_batch: torch.Tensor,
+                              ll_init: torch.Tensor) -> torch.Tensor:
+        """Per-row gradient-ascent refinement of ll_max from grid argmax starts.
+
+        Tracks the best ll seen at each visited θ (pre-step values + one final
+        post-step eval) and returns the elementwise max with ``ll_init`` — the
+        refined estimate is guaranteed ≥ the grid estimate. θ is clamped to
+        ``theta_range`` between steps; non-finite evals are ignored (treated as
+        −inf). Runs under ``enable_grad`` so it works inside the diagnostics'
+        ``no_grad`` evaluation loops.
+        """
+        lo, hi = self.theta_range
+        x = x_obs_batch.detach()
+        best = ll_init.detach().clone()
+
+        def _eval(th: torch.Tensor) -> torch.Tensor:
+            ll = self.log_likelihood_fn(th, x)
+            if ll.ndim > 1:
+                ll = ll.squeeze(-1)
+            return ll
+
+        def _clean(ll: torch.Tensor) -> torch.Tensor:
+            return torch.nan_to_num(
+                ll.detach(), nan=float("-inf"),
+                posinf=float("-inf"), neginf=float("-inf"),
+            )
+
+        with torch.enable_grad():
+            th = theta_init.detach().clone().requires_grad_(True)
+            ll = _eval(th)
+            if ll.grad_fn is None:
+                # Non-differentiable log_likelihood_fn (e.g. wrapped in no_grad
+                # or numpy-backed): fall back to a deterministic shrinking
+                # local search with the same step budget rather than crashing.
+                return self._refine_ll_max_local_search(
+                    theta_init.detach(), ll_init.detach(), _eval, _clean,
+                )
+            opt = torch.optim.Adam([th], lr=self.refine_lr)
+            for step in range(self.refine_steps):
+                with torch.no_grad():
+                    best = torch.maximum(best, _clean(ll))
+                opt.zero_grad()
+                (-ll.sum()).backward()
+                opt.step()
+                with torch.no_grad():
+                    th.data.clamp_(lo, hi)
+                if step < self.refine_steps - 1:
+                    ll = _eval(th)
+        with torch.no_grad():
+            best = torch.maximum(best, _clean(_eval(th.detach())))
+        return best
+
+    def _refine_ll_max_local_search(self, theta_init: torch.Tensor,
+                                    ll_init: torch.Tensor, eval_fn, clean_fn) -> torch.Tensor:
+        """Derivative-free fallback: per-row shrinking Gaussian perturbation
+        search from the grid argmax. Deterministic (fixed generator); a proposal
+        is kept only where it improves; the result is elementwise ≥ ``ll_init``."""
+        lo, hi = self.theta_range
+        g = torch.Generator().manual_seed(0)
+        th = theta_init.clone()
+        best = ll_init.clone()
+        scale = 0.5 * (hi - lo) / 25.0  # ~ the coarse-mesh spacing
+        with torch.no_grad():
+            for _ in range(self.refine_steps):
+                eps = torch.randn(th.shape, generator=g, dtype=torch.float32).to(th)
+                cand = (th + scale * eps).clamp(lo, hi)
+                ll_c = clean_fn(eval_fn(cand))
+                better = ll_c > best
+                th[better] = cand[better]
+                best = torch.maximum(best, ll_c)
+                scale *= 0.93  # ~50 steps shrinks to ~3% of the initial scale
+        return best
 
     def contains_batch(
         self, theta_0_value, x_obs_batch: torch.Tensor, alpha: float,
@@ -1146,11 +1255,18 @@ class LikelihoodBasedProcedure:
                 x_obs_batch.unsqueeze(1).expand(-1, n_grid, -1).reshape(-1, x_obs_batch.shape[-1])
             )
             ll_g = self.log_likelihood_fn(theta_grid_exp, x_obs_exp).view(B, n_grid)
-            return theta_grid, ll_g, ll_g.max(dim=1).values
+            ll_max = ll_g.max(dim=1).values
+            if self.refine_ll_max:
+                k = min(self.refine_topk, n_grid)
+                top = ll_g.topk(k, dim=1).indices  # (B, k)
+                for j in range(k):
+                    starts = theta_grid[top[:, j]]  # (B, d)
+                    ll_max = self._refine_ll_max_ascent(starts, x_obs_batch, ll_max)
+            return theta_grid, ll_g, ll_max
 
         cache_key = ("ll_grid", id(x_obs_batch), int(n_grid))
         theta_grid, ll_grid, ll_max = self._ll_grid_cache.get_or_compute(
-            cache_key, _compute_ll_grid_and_max,
+            cache_key, _compute_ll_grid_and_max, anchor=x_obs_batch,
         )
         # ll at the candidate θ_0, batched over X_obs:
         theta_0_t = _theta_to_row_tensor(
@@ -1173,6 +1289,11 @@ class LikelihoodBasedProcedure:
         grid = torch.linspace(lo, hi, 200).view(-1, 1).to(x_obs.device)
         lls = torch.stack([self.log_likelihood_fn(g.view(1, 1), x_obs).squeeze() for g in grid])
         ll_max = lls.max().item()
+        if self.refine_ll_max:
+            start = grid[int(lls.argmax())].view(1, 1)
+            ll_max = float(self._refine_ll_max_ascent(
+                start, x_obs, torch.tensor([ll_max], dtype=x_obs.dtype, device=x_obs.device),
+            ).item())
 
         def f(theta_val: float) -> float:
             theta = torch.tensor([[theta_val]], dtype=x_obs.dtype, device=x_obs.device)
@@ -1216,7 +1337,14 @@ class LikelihoodBasedProcedure:
         with torch.no_grad():
             x_batch_for_ll_max = x_obs.expand(mesh.shape[0], -1)
             ll_grid = self.log_likelihood_fn(mesh, x_batch_for_ll_max)
+            if ll_grid.ndim > 1:
+                ll_grid = ll_grid.squeeze(-1)
             ll_max = float(ll_grid.max().item())
+        if self.refine_ll_max:
+            start = mesh[int(ll_grid.argmax())].view(1, self.d_theta)
+            ll_max = float(self._refine_ll_max_ascent(
+                start, x_obs, torch.tensor([ll_max], dtype=dtype, device=device),
+            ).item())
 
         def inside_fn(theta, x):
             ll = self.log_likelihood_fn(theta, x)
@@ -1268,7 +1396,7 @@ class LikelihoodBasedProcedure:
 
         cache_key = ("ll_grid", id(x_obs_batch), int(n_grid))
         theta_grid, ll_grid, ll_max_per_row = self._ll_grid_cache.get_or_compute(
-            cache_key, _compute_ll_grid_and_max,
+            cache_key, _compute_ll_grid_and_max, anchor=x_obs_batch,
         )
         center_idx = ll_grid.argmax(dim=1)  # (B,)
         center_theta = theta_grid.squeeze(-1)[center_idx]  # (B,)
@@ -1310,7 +1438,8 @@ class LikelihoodBasedProcedure:
         lo, hi = self.theta_range
 
         # ll_max per X_obs via coarse mesh (matches the per-X_obs slow-path
-        # resolution at n_grid=25-per-dim).
+        # resolution at n_grid=25-per-dim), chunked so the flow eval stays
+        # O(chunk) in memory.
         n_grid = 25
         axes = [torch.linspace(lo, hi, n_grid, device=device, dtype=x_obs_batch.dtype)
                 for _ in range(self.d_theta)]
@@ -1320,29 +1449,42 @@ class LikelihoodBasedProcedure:
         x_obs_exp = x_obs_batch.unsqueeze(1).expand(-1, G, -1).reshape(
             -1, x_obs_batch.shape[-1]
         )
-        with torch.no_grad():
-            ll_grid = self.log_likelihood_fn(theta_mesh_exp, x_obs_exp).view(B, G)
-            ll_max_per_row = ll_grid.max(dim=1).values  # (B,)
 
-        def inside_fn(theta_flat, x_flat):
-            # Helper calls inside_fn(centers, x_obs_batch) with shape (B, d)
-            # during center search, and (B*K, d) during ray bisection.
-            # Derive K from theta_flat.shape[0] // B to broadcast ll_max_per_row.
-            n = theta_flat.shape[0]
-            if n == B:
-                ll_max_expanded = ll_max_per_row
-            else:
-                k_eff = n // B
-                ll_max_expanded = (
-                    ll_max_per_row.unsqueeze(1).expand(-1, k_eff).reshape(-1)
-                )
+        def _ll_rows(theta_flat, x_flat):
             ll = self.log_likelihood_fn(theta_flat, x_flat)
             if ll.ndim > 1:
                 ll = ll.squeeze(-1)
-            return 2.0 * (ll_max_expanded - ll) - thresh
+            return ll
+
+        with torch.no_grad():
+            ll_grid = _chunked_inside(_ll_rows, theta_mesh_exp, x_obs_exp).view(B, G)
+            ll_max_per_row = ll_grid.max(dim=1).values  # (B,)
+        if self.refine_ll_max:
+            # Same gradient-ascent polish the coverage path (contains_batch)
+            # applies — keeps the LR statistic consistent between accept()
+            # and set construction.
+            k = min(self.refine_topk, G)
+            top = ll_grid.topk(k, dim=1).indices  # (B, k)
+            for j in range(k):
+                starts = mesh[top[:, j]]  # (B, d)
+                ll_max_per_row = self._refine_ll_max_ascent(
+                    starts, x_obs_batch, ll_max_per_row,
+                )
+
+        # Row alignment through the ray helper: _chunked_inside slices inputs
+        # at arbitrary 4096-row boundaries that do NOT align to multiples of B,
+        # so inferring the broadcast layout from theta_flat.shape silently
+        # misaligns ll_max (and crashes outright on non-divisible chunks).
+        # Append ll_max as an extra x-column so it rides through every
+        # expansion and slice aligned by construction.
+        x_aug = torch.cat([x_obs_batch, ll_max_per_row.unsqueeze(1)], dim=1)
+
+        def inside_fn(theta_flat, x_flat):
+            ll = _ll_rows(theta_flat, x_flat[:, :-1])
+            return 2.0 * (x_flat[:, -1] - ll) - thresh
 
         centers, boundaries, _empty_mask = _ray_sample_set_boundary_batched(
-            x_obs_batch, inside_fn, self.theta_range, self.d_theta, n_rays=200,
+            x_aug, inside_fn, self.theta_range, self.d_theta, n_rays=200,
         )
         return centers, boundaries
 
@@ -1350,16 +1492,24 @@ class LikelihoodBasedProcedure:
 class RatioBasedProcedure:
     """NRE: ratio thresholding — same shape as Likelihood but using log-ratio."""
 
-    def __init__(self, log_ratio_fn: Callable, d_theta: int, theta_range: tuple = (-20.0, 20.0)):
+    def __init__(self, log_ratio_fn: Callable, d_theta: int, theta_range: tuple = (-20.0, 20.0),
+                 refine_ll_max: bool = True, refine_steps: int = 50,
+                 refine_topk: int = 3, refine_lr: float = 0.05):
         self.log_ratio_fn = log_ratio_fn
         self.d_theta = d_theta
         self.theta_range = theta_range
+        self.refine_ll_max = refine_ll_max
+        self.refine_steps = refine_steps
+        self.refine_topk = refine_topk
+        self.refine_lr = refine_lr
         self._likelihood_wrapper = None
 
     def _wrapper(self) -> "LikelihoodBasedProcedure":
         if self._likelihood_wrapper is None:
             self._likelihood_wrapper = LikelihoodBasedProcedure(
                 self.log_ratio_fn, self.d_theta, self.theta_range,
+                refine_ll_max=self.refine_ll_max, refine_steps=self.refine_steps,
+                refine_topk=self.refine_topk, refine_lr=self.refine_lr,
             )
         return self._likelihood_wrapper
 

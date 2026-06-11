@@ -1,0 +1,3 @@
+name: sign_normal_1d
+_target_: cdsbi.simulators.sign_normal_1d.SignNormal1D
+n_iid: 10

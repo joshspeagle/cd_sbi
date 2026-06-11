@@ -1,0 +1,4 @@
+name: cauchy_loc_scale_asinh
+_target_: cdsbi.simulators.cauchy_loc_scale.CauchyLocScale
+n_iid: 10
+asinh: true   # train flows on asinh(X); oracle pivot/log_prob carry the inverse

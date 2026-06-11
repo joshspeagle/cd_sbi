@@ -22,13 +22,16 @@ References:
 """
 from __future__ import annotations
 
+import hashlib
 import math
 import time
+from collections import OrderedDict
 from typing import List
 
+import numpy as np
 import torch
 
-from cdsbi.confidence_set.procedures import CriticalValueProcedure
+from cdsbi.confidence_set.procedures import CriticalValueProcedure, _BatchCache
 from cdsbi.device import get_device
 from cdsbi.methods.base import Runner, TrainedModel
 from cdsbi.methods.lf2i import MultiQuantileMLP, train_multi_quantile_head
@@ -96,30 +99,78 @@ class LF2IBFFRunner(Runner):
         log_N = math.log(N_grid)
         device = self.device
 
+        # The BFF marginal depends ONLY on x — never on the tested θ. Pilot
+        # profiling (2026-06-10) showed set construction probing hundreds of θ
+        # per fixed x_obs and recomputing the N_grid-row marginal on EVERY
+        # probe: ~99.6% of the statistic's cost was x-only recomputation
+        # (~25 min/run in SetSize). Cache it per live x tensor (anchor-
+        # validated _BatchCache — the id-recycling-safe pattern) and count
+        # evaluations so the cost stays observable.
+        marginal_cache = _BatchCache()
+        marginal_evals = {"n": 0}
+        # Content-keyed inner layer: the d>1 ray-bisection path slices its
+        # (fixed) expanded x into FRESH tensor objects on every one of the 40
+        # bisection iterations, so id-keying alone misses on all of them —
+        # and within each slice every x is repeated across ~200 rays. The
+        # contents are bit-identical across iterations (only θ moves), so a
+        # hash of the bytes + per-row dedup removes both redundancies
+        # (~8000× on the Cauchy d=2 SetSize, the take-3 lf2i_bff hang).
+        content_cache: OrderedDict[bytes, torch.Tensor] = OrderedDict()
+        _CONTENT_CAP = 64
+
+        def _marginal_unique_rows(xb: torch.Tensor) -> torch.Tensor:
+            uniq, inv = torch.unique(xb, dim=0, return_inverse=True)
+            marginal_evals["n"] += 1
+            B = uniq.shape[0]
+            tg = theta_grid.unsqueeze(0).expand(B, -1, -1).reshape(-1, theta_grid.shape[-1])
+            xe = uniq.unsqueeze(1).expand(-1, N_grid, -1).reshape(-1, uniq.shape[-1])
+            lr = classifier(torch.cat([tg, xe], dim=-1)).squeeze(-1).view(B, N_grid)
+            return (torch.logsumexp(lr, dim=1) - log_N)[inv]
+
+        def _log_marginal(x_in: torch.Tensor) -> torch.Tensor:
+            def _compute():
+                xb = x_in.to(device)
+                key = hashlib.sha1(
+                    np.ascontiguousarray(xb.detach().cpu().numpy()).tobytes()
+                ).digest()
+                hit = content_cache.get(key)
+                if hit is not None:
+                    content_cache.move_to_end(key)
+                    return hit
+                out = _marginal_unique_rows(xb)
+                content_cache[key] = out
+                if len(content_cache) > _CONTENT_CAP:
+                    content_cache.popitem(last=False)
+                return out
+
+            return marginal_cache.get_or_compute(
+                ("bff_marginal", id(x_in), int(x_in.shape[0])), _compute, anchor=x_in,
+            )
+
         def test_stat_fn(theta: torch.Tensor, x_obs: torch.Tensor) -> torch.Tensor:
+            x_in = x_obs  # cache anchor: the caller's stable tensor object
             theta = theta.to(device)
             x_obs = x_obs.to(device)
             # Support either {one θ, many X} (contains_batch) or {many θ, one X}
             # (grid search) by broadcasting the singleton dimension.
             if theta.shape[0] != x_obs.shape[0]:
                 if x_obs.shape[0] == 1:
-                    x_obs = x_obs.expand(theta.shape[0], -1)
+                    # one X, many θ: the marginal is a single scalar for this x —
+                    # computed once (cached), reused across every θ probe.
+                    log_marginal = _log_marginal(x_in)            # (1,)
+                    log_r_at = classifier(
+                        torch.cat([theta, x_obs.expand(theta.shape[0], -1)], dim=-1)
+                    ).squeeze(-1)
+                    return log_marginal.expand_as(log_r_at) - log_r_at
                 elif theta.shape[0] == 1:
                     theta = theta.expand(x_obs.shape[0], -1)
                 else:
                     raise ValueError(
                         f"test_stat_fn: shape mismatch theta {theta.shape}, x_obs {x_obs.shape}"
                     )
-            B = theta.shape[0]
             # log O(X_i; θ_i) — the numerator (size B).
             log_r_at = classifier(torch.cat([theta, x_obs], dim=-1)).squeeze(-1)
-            # logsumexp_b log O(X_i; θ_b) − log N — the marginal denominator.
-            theta_grid_exp = theta_grid.unsqueeze(0).expand(B, -1, -1).reshape(-1, theta.shape[-1])
-            x_obs_exp = x_obs.unsqueeze(1).expand(-1, N_grid, -1).reshape(-1, x_obs.shape[-1])
-            log_r_grid = classifier(
-                torch.cat([theta_grid_exp, x_obs_exp], dim=-1)
-            ).squeeze(-1).view(B, N_grid)
-            log_marginal = torch.logsumexp(log_r_grid, dim=1) - log_N
+            log_marginal = _log_marginal(x_in)
             return log_marginal - log_r_at  # Wilks direction: large = bad fit at θ
 
         # === Stage 3: shared-trunk multi-quantile head ===
@@ -157,6 +208,7 @@ class LF2IBFFRunner(Runner):
         )
 
         n_class = sum(p.numel() for p in classifier.parameters())
+        procedure.bff_marginal_evals = marginal_evals
         return TrainedModel(
             procedure=procedure,
             state_dict={

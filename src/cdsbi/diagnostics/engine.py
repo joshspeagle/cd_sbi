@@ -101,8 +101,15 @@ def evaluate_coverage(procedure, simulator, theta_grid: Sequence, alpha_grid: Li
                              "empirical": float(inside.float().mean().item())})
 
     cov = pd.DataFrame(rows)
+    # Summary metrics (hardening item 6): `coverage_error_max` over a (θ₀, α)
+    # grid is a max-order-statistic — it inflates with grid size and is
+    # noise-dominated at small n_per_theta. Report mean and p90 alongside it,
+    # and keep the full per-(θ₀, α) table (`coverage`) as the spread record.
+    err = (cov["empirical"] - cov["nominal"]).abs()
     out = {"coverage": cov,
-           "coverage_error_max": float((cov["empirical"] - cov["nominal"]).abs().max())}
+           "coverage_error_max": float(err.max()),
+           "coverage_error_mean": float(err.mean()),
+           "coverage_error_p90": float(err.quantile(0.9))}
     if has_pivot:
         out["joint_chi2_ks_max"] = float(np.max(chi2_ks))
         out["per_coord_pit_ks"] = np.asarray(pit_ks)

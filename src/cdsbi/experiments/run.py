@@ -45,6 +45,20 @@ def _build_flow(cfg: DictConfig, simulator) -> Any:
     method_flow_label = OmegaConf.select(cfg, "method.flow", default=None)
     hydra_flow_name = cfg.flow.name
 
+    # Dispatch-trap loudness (hardening item 4, 2026-06-10; the cb1e08e guard).
+    # When method.flow and the Hydra /flow group disagree, the METHOD label wins
+    # below — an experiment-level `/flow:` override is silently ignored unless
+    # `method.flow=<name>` is ALSO passed. This produced wrong-architecture runs
+    # (§8.4) while the index logged the override as if it took. Methods whose
+    # method.flow is "maf" (NPE/NLE/NRE/Score-CD) ignore the group by design.
+    if method_flow_label not in (None, "maf") and method_flow_label != hydra_flow_name:
+        log.warning(
+            f"FLOW DISPATCH TRAP: method.flow='{method_flow_label}' != /flow group "
+            f"'{hydra_flow_name}'. Building '{method_flow_label}' — the experiment-level "
+            f"flow override is IGNORED. If '{hydra_flow_name}' was intended, also pass "
+            f"method.flow={hydra_flow_name}. Verify the index's flow_class_built column."
+        )
+
     # v3 flows (doubly_monotone, joint_umnn, joint_umnn_1d) need the same
     # fast-path treatment as v0/v1/v2 flows: instantiate from cfg.flow's
     # _target_ ONLY when the method also requests this flow (e.g. CDSBI
@@ -186,7 +200,107 @@ def _build_simulator(cfg: DictConfig) -> Any:
     sim_dict = OmegaConf.to_container(cfg.target, resolve=True)
     target = sim_dict.pop("_target_")
     sim_dict.pop("name", None)
-    return _instantiate(target, **sim_dict)
+    # Optional θ-independent data conditioning (target.asinh: true) — wraps the
+    # simulator so flows train on asinh(X) (heavy-tail stabilization); the
+    # oracle pivot and log_prob carry the inverse/Jacobian (transformed.py).
+    asinh = bool(sim_dict.pop("asinh", False))
+    sim = _instantiate(target, **sim_dict)
+    if asinh:
+        from cdsbi.simulators.transformed import AsinhTransformedSimulator
+        sim = AsinhTransformedSimulator(sim)
+    return sim
+
+
+def _eval_theta_grid(cfg: DictConfig) -> list:
+    """Interior + edge θ₀ evaluation points (hardening item 6).
+
+    `eval_thetas_edge` was DEAD config — defined in experiment yamls but never
+    consumed, so coverage at the prior boundary (where every method in the
+    family is weakest) went unmeasured. Folded in here, deduplicated, with the
+    interior order preserved; every diagnostic consumes the same fused grid.
+    """
+    grid = [list(t) if isinstance(t, (list, tuple)) else t
+            for t in cfg.experiment.eval_thetas_interior]
+    edge = OmegaConf.select(cfg, "experiment.eval_thetas_edge", default=None)
+    for t in (edge or []):
+        t = list(t) if isinstance(t, (list, tuple)) else t
+        if t not in grid:
+            grid.append(t)
+    return grid
+
+
+class _OraclePivotProcedure:
+    """The simulator's closed-form pivot `r_star`, wrapped for the engine —
+    the measured coverage FLOOR row (hardening item 6): same grid, same
+    n_per_theta, same α-levels as the method under test, so "at the floor"
+    is a verified, grid-matched claim instead of an assumed constant."""
+
+    def __init__(self, simulator):
+        self._sim = simulator
+        self.d_theta = int(simulator.d_theta)
+
+    def pivot(self, theta_rows, x):
+        return self._sim.r_star(theta_rows, x)
+
+
+def _oracle_floor_metrics(simulator, theta_grid: list, alpha_grid: list,
+                          n_per_theta: int, seed: int):
+    """Run the oracle pivot through `evaluate_coverage`. Returns
+    (coverage_df, {oracle_coverage_error_max/mean/p90}) or (None, {}) when the
+    simulator exposes no `r_star`."""
+    if not hasattr(simulator, "r_star"):
+        return None, {}
+    from cdsbi.diagnostics.engine import evaluate_coverage
+
+    out = evaluate_coverage(
+        _OraclePivotProcedure(simulator), simulator, theta_grid, alpha_grid,
+        n_per_theta=n_per_theta, seed=seed,
+    )
+    metrics = {
+        "oracle_coverage_error_max": out["coverage_error_max"],
+        "oracle_coverage_error_mean": out["coverage_error_mean"],
+        "oracle_coverage_error_p90": out["coverage_error_p90"],
+    }
+    return out["coverage"], metrics
+
+
+def _sim_cost_accounting(cfg: DictConfig, method_name: str, fit_cfg: dict,
+                         trained, d_theta: int) -> dict:
+    """Simulator-call accounting (hardening item 7).
+
+    The budget matches PARAMETERS, not simulations: two-stage methods consume
+    extra calibration draws (LF2I-BFF: quantile set + BFF marginal; Score-CD-cal:
+    quantile set), and Score-CD-rao draws `fisher_n` fresh sims per distinct
+    queried θ at INFERENCE (counted live by the runner). Logged per run so the
+    "matched parameter budget" label is honest and the sim-cost asymmetry is
+    visible in every table. Evaluation draws (coverage MC) are an eval cost
+    common to all methods and are excluded.
+    """
+    fresh = bool(fit_cfg.get("fresh_batch", True))
+    if fresh:
+        train = int(fit_cfg["n_steps"]) * int(fit_cfg["batch_size"])
+    else:
+        train = int(fit_cfg.get("n_train", 0))
+    calib = 0
+    if method_name in ("lf2i_bff", "score_cd_cal", "lf2i"):
+        calib += int(fit_cfg.get("n_train_quantile", 0))
+    if method_name == "lf2i_bff":
+        # Mirrors lf2i_bff.py's d-aware floor on the BFF marginal MC budget.
+        configured = int(OmegaConf.select(
+            cfg, "method.marginal_n",
+            default=int(OmegaConf.select(cfg, "method.marginal_grid_n", default=64)),
+        ))
+        calib += max(configured, 128 * int(d_theta))
+    inference = 0
+    counter = getattr(trained.procedure, "inference_sim_calls", None)
+    if counter:
+        inference = int(sum(counter.values()))
+    return {
+        "sim_calls_train": train,
+        "sim_calls_calibration": calib,
+        "sim_calls_inference": inference,
+        "sim_calls_total_method": train + calib + inference,
+    }
 
 
 def _build_method(cfg: DictConfig, simulator) -> Any:
@@ -242,6 +356,7 @@ def _build_method(cfg: DictConfig, simulator) -> Any:
             flow=flow,
             variant=str(m.variant),
             fisher_n=int(OmegaConf.select(m, "fisher_n", default=4000)),
+            fisher_grid_per_dim=int(OmegaConf.select(m, "fisher_grid_per_dim", default=9)),
             quantile_hidden=int(OmegaConf.select(m, "quantile_hidden", default=64)),
             quantile_depth=int(OmegaConf.select(m, "quantile_depth", default=2)),
             device=cfg.device,
@@ -368,7 +483,7 @@ def _run_diagnostics(cfg: DictConfig, trained, simulator, eval_data, rd: RunDir)
     from cdsbi.diagnostics.set_size import SetSize
     from cdsbi.diagnostics.sufficiency_recovery import SufficiencyRecovery
 
-    n_bins = max(2, len(list(cfg.experiment.eval_thetas_interior)))
+    n_bins = max(2, len(_eval_theta_grid(cfg)))
     # SetSize is intentionally cheaper (~1/5 the X_obs of Coverage) — width
     # distribution converges much faster than coverage rate. Override via
     # cfg.experiment.set_size_n_per_theta if needed.
@@ -381,17 +496,17 @@ def _run_diagnostics(cfg: DictConfig, trained, simulator, eval_data, rd: RunDir)
         ("marginal_pit", MarginalPIT()),
         ("conditional_pit", ConditionalPIT(n_bins=n_bins)),
         ("coverage", Coverage(
-            theta_0_grid=list(cfg.experiment.eval_thetas_interior),
+            theta_0_grid=_eval_theta_grid(cfg),
             alpha_grid=list(cfg.experiment.alpha_grid),
             n_per_theta=int(cfg.experiment.n_eval_per_theta),
         )),
         ("set_size", SetSize(
-            theta_0_grid=list(cfg.experiment.eval_thetas_interior),
+            theta_0_grid=_eval_theta_grid(cfg),
             alpha_grid=list(cfg.experiment.alpha_grid),
             n_per_theta=set_size_n,
         )),
         ("joint_mahalanobis", JointMahalanobis(
-            theta_0_grid=list(cfg.experiment.eval_thetas_interior),
+            theta_0_grid=_eval_theta_grid(cfg),
             n_per_theta=int(OmegaConf.select(
                 cfg, "experiment.joint_mahalanobis_n_per_theta", default=2000,
             )),
@@ -405,13 +520,13 @@ def _run_diagnostics(cfg: DictConfig, trained, simulator, eval_data, rd: RunDir)
             )),
         )),
         ("marginal_cd_recovery", MarginalCDRecovery(
-            theta_0_grid=list(cfg.experiment.eval_thetas_interior),
+            theta_0_grid=_eval_theta_grid(cfg),
             n_per_theta=int(cfg.experiment.n_eval_per_theta),
         )),
         ("sufficiency_recovery", SufficiencyRecovery(
             n_eval=int(OmegaConf.select(cfg, "experiment.n_eval", default=4000)))),
         ("multivariate_marginal_cd", MultivariateMarginalCDRecovery(
-            theta_0_grid=list(cfg.experiment.eval_thetas_interior),
+            theta_0_grid=_eval_theta_grid(cfg),
             n_per_theta=int(cfg.experiment.n_eval_per_theta))),
         ("floor_integrity", FloorIntegrity()),
     ]
@@ -440,7 +555,7 @@ def _run_diagnostics(cfg: DictConfig, trained, simulator, eval_data, rd: RunDir)
     n_max = max(int(cfg.experiment.n_eval_per_theta), set_size_n, jm_n)
     shared_rng = np.random.default_rng(0)
     shared_x_per_theta = {}
-    for theta_0 in list(cfg.experiment.eval_thetas_interior):
+    for theta_0 in _eval_theta_grid(cfg):
         theta_repr = str(list(map(
             float,
             list(theta_0) if hasattr(theta_0, "__iter__") else [theta_0],
@@ -482,19 +597,24 @@ def _run_diagnostics(cfg: DictConfig, trained, simulator, eval_data, rd: RunDir)
 
 
 def _write_index_row(cfg: DictConfig, rd: RunDir, trained, diag_results, config_hash, env, n_params,
-                     budget_status: str, budget_rel_err: float):
+                     budget_status: str, budget_rel_err: float, oracle_metrics: dict | None = None,
+                     sim_costs: dict | None = None):
     cov_df = pd.read_parquet(rd.path / "diagnostics" / "coverage.parquet")
-    coverage_error_max = float((cov_df["empirical"] - cov_df["nominal"]).abs().max())
+    cov_err = (cov_df["empirical"] - cov_df["nominal"]).abs()
+    coverage_error_max = float(cov_err.max())
     marg = diag_results.get("marginal_pit")
     pivot = diag_results.get("pivot_rmse")
     row = {
         "config_hash": config_hash,
         "experiment": cfg.experiment.name,
         "method": cfg.method.name,
-        # Report the actual instantiated flow group (cfg.flow.name) — this
-        # reflects experiment-level /flow overrides (e.g. 8_3's triangular_additive,
-        # 8_4's doubly_monotone) rather than the method's default flow label.
+        # cfg.flow.name is the Hydra group label (the *intent*); it does NOT
+        # always reflect what _build_flow constructed (the dispatch trap, item 4).
         "flow": cfg.flow.name,
+        # Ground truth: the class actually built, snapshotted by the runner at
+        # fit time. "n/a" for runners that don't record it.
+        "flow_class_built": str(trained.arch_metadata.get("flow_class", "n/a"))
+        if isinstance(trained.arch_metadata, dict) else "n/a",
         "target": cfg.target.name,
         "budget_name": cfg.budget.name,
         "target_params": int(cfg.budget.target_params),
@@ -509,6 +629,15 @@ def _write_index_row(cfg: DictConfig, rd: RunDir, trained, diag_results, config_
         "final_loss": float(trained.final_loss),
         "wall_clock_sec": float(trained.wall_clock_sec),
         "coverage_error_max": coverage_error_max,
+        "coverage_error_mean": float(cov_err.mean()),
+        "coverage_error_p90": float(cov_err.quantile(0.9)),
+        **(oracle_metrics or {}),
+        **(sim_costs or {}),
+        # Post-eval non-finite-score counters (Score-CD; zeros elsewhere) —
+        # nonzero stat_nonfinite flags coverage numbers that involved
+        # rejected (pathological-score) points.
+        **{f"nonfinite_{k}": int(v) for k, v in
+           (getattr(trained.procedure, "nonfinite_diagnostics", None) or {}).items()},
         "marginal_ks": (
             float(marg.value) if marg and isinstance(marg.value, float)
             else float(marg.value["ks"].mean()) if marg and hasattr(marg.value, "columns") and "ks" in marg.value.columns
@@ -604,13 +733,22 @@ def main(cfg: DictConfig) -> None:
             )
         elif cfg.method.name == "nre":
             n_params = runner.n_params(d_theta=simulator.d_theta, d_x=simulator.d_x)
+        elif cfg.method.name == "score_cd_cal":
+            # The cal variant's quantile head counts against the budget
+            # (hardening item 3) — same accounting as LF2I-BFF's head.
+            n_params = runner.n_params(
+                d_theta=simulator.d_theta,
+                alpha_grid_len=len(list(cfg.experiment.alpha_grid)),
+            )
         else:
             n_params = runner.n_params()
 
         status, rel_err = validate_budget(n_params["total"], int(cfg.budget.target_params))
         budget_msg = (
-            f"Budget '{cfg.budget.name}' (target {cfg.budget.target_params}): "
-            f"actual {n_params['total']} (rel_err {rel_err:.1%}, status {status})"
+            f"Parameter budget '{cfg.budget.name}' (target {cfg.budget.target_params}): "
+            f"actual {n_params['total']} (rel_err {rel_err:.1%}, status {status}) "
+            "[NOTE: the matched quantity is parameters; simulator-call costs are "
+            "logged separately per run]"
         )
         if status == "unreachable":
             log.warning(
@@ -629,8 +767,29 @@ def main(cfg: DictConfig) -> None:
         theta_eval, x_eval = simulator.sample(n_eval, rngs.eval)
 
         diag_results = _run_diagnostics(cfg, trained, simulator, (theta_eval, x_eval), rd)
+
+        # Measured oracle floor (hardening item 6): the closed-form pivot on the
+        # SAME grid / n / α-levels. Distinct seed so the floor row is an
+        # independent MC measurement, not correlated with the method's eval.
+        oracle_df, oracle_metrics = _oracle_floor_metrics(
+            simulator, _eval_theta_grid(cfg), list(cfg.experiment.alpha_grid),
+            int(cfg.experiment.n_eval_per_theta), seed=int(cfg.seed) + 9999,
+        )
+        if oracle_df is not None:
+            oracle_df.to_parquet(rd.path / "diagnostics" / "oracle_coverage.parquet")
+
+        sim_costs = _sim_cost_accounting(
+            cfg, cfg.method.name, fit_cfg, trained, int(simulator.d_theta),
+        )
+        log.info(
+            "Sim-call accounting (parameter budget is the matched quantity, NOT sims): "
+            f"train={sim_costs['sim_calls_train']} "
+            f"calibration={sim_costs['sim_calls_calibration']} "
+            f"inference={sim_costs['sim_calls_inference']}"
+        )
         _write_index_row(cfg, rd, trained, diag_results, config_hash, env, n_params,
-                         budget_status=status, budget_rel_err=rel_err)
+                         budget_status=status, budget_rel_err=rel_err,
+                         oracle_metrics=oracle_metrics, sim_costs=sim_costs)
 
         torch.save(
             {"arch_metadata": trained.arch_metadata, "final_loss": trained.final_loss},

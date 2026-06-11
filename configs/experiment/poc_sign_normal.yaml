@@ -1,0 +1,27 @@
+# @package _global_
+# LF2I-Score POC, non-regular arm: SignNormal1D (theta enters squared —
+# Fisher degenerate at theta=0, bimodal). The honest-failure demonstration:
+# expect valid-but-wide / breakdown NEAR ZERO, fine away from it; the grid
+# deliberately concentrates around the degeneracy.
+defaults:
+  - override /target: sign_normal_1d
+
+experiment:
+  name: poc_sign_normal
+  n_eval: 5000
+  eval_thetas_interior: [-2.5, -1.5, -0.75, -0.25, 0.0, 0.25, 0.75, 1.5, 2.5]
+  eval_thetas_edge: [-3.0, 3.0]
+  alpha_grid: [0.5, 0.68, 0.9, 0.95]
+  n_eval_per_theta: 5000
+  # Width converges ~5x faster than coverage; 200/theta keeps SetSize
+  # from dominating wall time (the profiled bottleneck).
+  set_size_n_per_theta: 200
+
+hydra:
+  mode: MULTIRUN
+  sweeper:
+    params:
+      method: nle,score_cd_rao,score_cd_cal,lf2i_bff
+      budget: small,medium,large,xlarge
+      seed: 0,1,2,3,4
+      training.fresh_batch: false,true
